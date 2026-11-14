@@ -51,9 +51,11 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
@@ -71,7 +73,8 @@ import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
 import type { ChatFileAttachment } from "~/types";
-import { isHostPath } from "@t3tools/shared/path";
+import { isHostPath, workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { type FilesViewMode, useRightPanelStore } from "~/rightPanelStore";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -92,10 +95,20 @@ import { AudioPreview } from "./AudioPreview";
 import { BrowserDocumentFrame, isPdfPreviewFile } from "./BrowserDocumentFrame";
 import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import { PreviewImage } from "./PreviewImage";
-import FileBrowserPanel from "./FileBrowserPanel";
+import FileBrowserPanel, { type FileBrowserView } from "./FileBrowserPanel";
+import { MissingFolderRecovery } from "./MissingFolderRecovery";
 import { FileExplorerPane } from "./FileExplorerPane";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
-import { breadcrumbPathOf, retainedBreadcrumbTrail, trailChildOf } from "./filePath";
+import { gridReturnPath } from "./fileGrid.logic";
+import {
+  breadcrumbPathOf,
+  fileBreadcrumbs,
+  folderParentOf,
+  hostParentOf,
+  joinHostPath,
+  retainedBreadcrumbTrail,
+  trailChildOf,
+} from "./filePath";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import {
   type FileCommentAnnotationEntry,
@@ -129,6 +142,8 @@ import {
 } from "./filePreviewMode";
 import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskList";
 import { changeFileSaveSession, useFileSaveSession } from "./fileSaveSessions";
+import { type FilePathMove, isSameOrInside } from "./fileOperations.logic";
+import { type FileTreeChange, subscribeFileTreeChanges } from "./fileOperationsState";
 import { revisionedQuery } from "~/state/revisionedQuery";
 import {
   getOptimisticProjectFileQueryData,
@@ -158,6 +173,13 @@ interface FilePreviewPanelProps {
   onNavigateFolder: (relativePath: string, folderTrail: string, keepSource: boolean) => void;
   /** Retained descendant breadcrumb path after navigating up; see navigateFolder. */
   folderTrail: string | undefined;
+  /** A Files tab's path is always a folder, so it skips the file-read guess. */
+  knownFolder?: boolean;
+  /** Gives a Files tab its own saved tree expansion. */
+  expansionKeySuffix?: string | undefined;
+  onOpenFolderInNewTab?: (folderPath: string, folderTrail: string) => void;
+  /** A folder tab's list or icon view, offered once the path reads as a folder. */
+  filesView?: { mode: FilesViewMode; onModeChange: (mode: FilesViewMode) => void } | undefined;
   onPendingChange: (relativePath: string, pending: boolean) => void;
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
@@ -1129,6 +1151,10 @@ export default function FilePreviewPanel({
   onOpenFile,
   onNavigateFolder,
   folderTrail,
+  knownFolder = false,
+  expansionKeySuffix,
+  onOpenFolderInNewTab,
+  filesView,
   onPendingChange,
   selectedFilePending,
   workspaceMutationId,
@@ -1174,6 +1200,7 @@ export default function FilePreviewPanel({
     cwd,
     relativePath,
     attachment === undefined && relativePath !== null,
+    knownFolder,
   );
   const [fileRefreshRevision, setFileRefreshRevision] = useState(0);
   const attemptedPath = file.readError?.resolvedPath ?? file.readError?.operationPath;
@@ -1184,24 +1211,57 @@ export default function FilePreviewPanel({
   // Reset crumbs when a host trail reaches the workspace root and no longer passes through the current path.
   const breadcrumbTrail =
     breadcrumbPath === null ? null : retainedBreadcrumbTrail(folderTrail, breadcrumbPath);
-  // A trail implies a folder before reads settle, preventing file-preview flashes while navigating up.
+  // A trail or icon view implies a folder before its read settles, so navigating never flashes a file.
   const isFolder =
     attachment === undefined &&
-    (file.isNotFile || (folderTrail !== undefined && file.data === null && file.error === null));
-  const hostFolderPath = isFolder && isHostFile ? relativePath : null;
+    (knownFolder ||
+      file.isNotFile ||
+      ((folderTrail !== undefined || filesView?.mode === "grid") &&
+        file.data === null &&
+        file.error === null));
+  const browsesHostPath = attachment === undefined && isHostFile;
+  const fileReadSettled = file.data !== null || file.error !== null;
+  // Waiting for the read keeps a folder link from first rooting the tree at its parent.
+  const settledHostFolderPath =
+    !browsesHostPath || relativePath === null
+      ? null
+      : isFolder
+        ? relativePath
+        : fileReadSettled
+          ? hostParentOf(relativePath)
+          : null;
+  const [lastHostFolderPath, setLastHostFolderPath] = useState<string | null>(null);
+  const nextLastHostFolderPath = browsesHostPath
+    ? (settledHostFolderPath ?? lastHostFolderPath)
+    : null;
+  if (nextLastHostFolderPath !== lastHostFolderPath) setLastHostFolderPath(nextLastHostFolderPath);
+  // Only a sibling keeps the mounted tree while its read is pending; elsewhere the
+  // basename would select a same-named file in the old folder.
+  const hostFolderPath =
+    fileReadSettled ||
+    settledHostFolderPath !== null ||
+    relativePath === null ||
+    hostParentOf(relativePath) !== nextLastHostFolderPath
+      ? settledHostFolderPath
+      : nextLastHostFolderPath;
   // A chat-linked folder reads as a file until its read settles, and revealing a
   // folder selects it in its parent instead of opening it, so reveal waits.
   const revealsInFileManager =
-    !isFolder &&
-    (file.data !== null || file.error !== null) &&
-    serverConfig?.shellRevealInFileManager === true;
+    !isFolder && fileReadSettled && serverConfig?.shellRevealInFileManager === true;
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isFolder ? null : relativePath;
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
+  // A host file has no other context, so each open shows its folder until hidden for that open.
+  const hostFileRevealKey =
+    browsesHostPath && previewPath !== null ? `${previewPath}\n${revealRequestId}` : null;
+  const [hostExplorerHiddenFor, setHostExplorerHiddenFor] = useState<string | null>(null);
+  const explorerVisible =
+    hostFileRevealKey === null ? explorerOpen : hostExplorerHiddenFor !== hostFileRevealKey;
   const showExplorer = shouldShowFileExplorer({
     relativePath: previewPath,
-    explorerOpen,
+    explorerOpen: explorerVisible,
     attachmentOpen: attachment !== undefined,
+    explorerRoot: browsesHostPath ? hostFolderPath : cwd,
   });
   const [renderMarkdownPreferred, setRenderMarkdownPreferred] = useLocalStorage(
     RENDER_MARKDOWN_STORAGE_KEY,
@@ -1329,19 +1389,86 @@ export default function FilePreviewPanel({
     previewAvailable &&
     isBrowserPreviewFile(previewPath);
   // Navigating up preserves the file tab; retain the trail's path spelling to find its folder tab.
-  const navigateToFolder = (crumbPath: string) => {
+  const navigateToFolder = (crumbPath: string, newTab = false) => {
     const path =
       breadcrumbTrail !== null && breadcrumbPathOf(breadcrumbTrail) === crumbPath
         ? breadcrumbTrail
         : crumbPath;
-    onNavigateFolder(path, retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path), !isFolder);
+    const trail = retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path);
+    if (newTab && onOpenFolderInNewTab) onOpenFolderInNewTab(path, trail);
+    else onNavigateFolder(path, trail, !isFolder);
   };
+  const folderMissing = knownFolder && relativePath !== null && file.isMissing;
+  const treeFolderPath = (path: string) =>
+    hostFolderPath === null ? path : joinHostPath(hostFolderPath, path);
+  const openTreeFolderInNewTab = (event: ReactMouseEvent) => {
+    if (!onOpenFolderInNewTab) return;
+    const newTab = event.type === "auxclick" ? event.button === 1 : event.metaKey || event.ctrlKey;
+    if (!newTab) return;
+    const row = event.nativeEvent
+      .composedPath()
+      .find(
+        (node): node is Element =>
+          node instanceof Element &&
+          node.matches('[data-item-path$="/"]:is([role="treeitem"], [data-grid-tile])'),
+      );
+    const path = row?.getAttribute("data-item-path")?.replace(/\/$/, "");
+    if (!path) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const folderPath = treeFolderPath(path);
+    onOpenFolderInNewTab(folderPath, folderPath);
+  };
+  const gridFolder = hostFolderPath === null ? (relativePath ?? "") : "";
+  const gridParent = relativePath === null ? null : folderParentOf(relativePath);
+  const navigateFilesTab = (path: string) =>
+    onNavigateFolder(path, retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path), false);
+  const fileBrowserView: FileBrowserView | undefined =
+    filesView && isFolder
+      ? {
+          mode: filesView.mode,
+          onModeChange: filesView.onModeChange,
+          folder: gridFolder,
+          returnPath:
+            hostFolderPath === null
+              ? gridReturnPath(gridFolder, breadcrumbTrail)
+              : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath),
+          onEnterFolder: (path) => navigateFilesTab(treeFolderPath(path)),
+          onUp: gridParent === null ? null : () => navigateFilesTab(gridParent),
+          thumbnailResource: (path) =>
+            workspaceAssetResource({
+              kind: "media-file",
+              threadRef,
+              draft,
+              workspaceRoot: cwd,
+              absolutePath: path,
+            }),
+          budgetKey: `${environmentId}:${threadRef.threadId}:${expansionKeySuffix ?? "files"}`,
+        }
+      : undefined;
   const absolutePath =
     breadcrumbPath === ""
       ? cwd
       : relativePath && attachment === undefined
         ? resolvePathLinkTarget(relativePath, cwd)
         : null;
+  // Tabs may hold a path relative to the project or absolute, so both spellings retarget.
+  const retargetMovedPaths = (moves: readonly FilePathMove[]) => {
+    const relativeMoves = moves.flatMap(({ from, to }) => {
+      const relativeFrom = workspaceRelativeFilePath(from, cwd);
+      const relativeTo = workspaceRelativeFilePath(to, cwd);
+      return relativeFrom === null || relativeTo === null || relativeFrom === "."
+        ? []
+        : [{ from: relativeFrom, to: relativeTo }];
+    });
+    useRightPanelStore.getState().retargetFileSurfaces(threadRef, [...moves, ...relativeMoves]);
+  };
+  const onFileTreeChange = useEffectEvent((change: FileTreeChange) => {
+    if (change.environmentId !== environmentId || absolutePath === null) return;
+    if (change.removed.some((path) => isSameOrInside(absolutePath, path))) file.refresh();
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rereads this file when a file operation in this window moves or trashes it
+  useEffect(() => subscribeFileTreeChanges(onFileTreeChange), []);
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
   // Mounting the file read under the workspace mutation id refetches it after each mutation.
   useAtomMount(
@@ -1352,7 +1479,7 @@ export default function FilePreviewPanel({
       (isFolder || (!isMedia && !isPdf && !isDocument)) &&
       !selectedFilePending
       ? revisionedQuery(
-          getProjectFileQueryAtom(environmentId, cwd, relativePath),
+          getProjectFileQueryAtom(environmentId, cwd, relativePath, knownFolder),
           workspaceMutationId,
         )
       : NO_FILE_REVISION_ATOM,
@@ -1370,6 +1497,10 @@ export default function FilePreviewPanel({
   }, [breadcrumbPath, breadcrumbTrail]);
 
   const toggleExplorer = () => {
+    if (hostFileRevealKey !== null) {
+      setHostExplorerHiddenFor(explorerVisible ? hostFileRevealKey : null);
+      return;
+    }
     setExplorerOpen((current) => {
       const next = !current;
       try {
@@ -1499,16 +1630,25 @@ export default function FilePreviewPanel({
               <Globe2 className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
-          {!isHostFile && previewPath !== null ? (
+          {!attachment && previewPath !== null ? (
             <FileSurfaceAction
-              label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
-              pressed={explorerOpen}
+              label={explorerVisible ? "Hide file explorer" : "Show file explorer"}
+              pressed={explorerVisible}
               onPress={toggleExplorer}
             >
               <FolderTree className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
         </div>
+      ) : null}
+      {folderMissing && relativePath !== null ? (
+        <MissingFolderRecovery
+          environmentId={environmentId}
+          cwd={cwd}
+          path={relativePath}
+          projectName={projectName}
+          onNavigate={(path) => onNavigateFolder(path, path, false)}
+        />
       ) : null}
       {relativePath && !attachment && !isHostFile && !canWriteFiles && !fileAccess.isPending ? (
         <div className="shrink-0 border-b px-3 py-1.5 text-2xs text-muted-foreground">
@@ -1721,6 +1861,8 @@ export default function FilePreviewPanel({
           <FileExplorerPane resizable={Boolean(previewPath)}>
             <div
               className="contents"
+              onClickCapture={openTreeFolderInNewTab}
+              onAuxClick={openTreeFolderInNewTab}
               onClick={focusEditorOnTreeRowClickOrEnter}
               onKeyDown={(event) => {
                 if (event.key === "Enter") focusEditorOnTreeRowClickOrEnter(event);
@@ -1735,10 +1877,25 @@ export default function FilePreviewPanel({
                 selectedPath={
                   hostFolderPath === null
                     ? relativePath
-                    : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
+                    : previewPath !== null
+                      ? (fileBreadcrumbs("", previewPath).at(-1)?.label ?? null)
+                      : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
                 }
                 selectedPathRevealId={revealRequestId}
                 onOpenFile={onOpenFile}
+                onPathsMoved={retargetMovedPaths}
+                {...(expansionKeySuffix === undefined
+                  ? {}
+                  : {
+                      expansionKey: `${environmentId}:${hostFolderPath ?? cwd}#${expansionKeySuffix}`,
+                    })}
+                {...(onOpenFolderInNewTab
+                  ? {
+                      onOpenFolderInNewTab: (folderPath: string) =>
+                        onOpenFolderInNewTab(folderPath, folderPath),
+                    }
+                  : {})}
+                {...(fileBrowserView ? { view: fileBrowserView } : {})}
                 answersPanelFind={!previewPath}
                 workspaceMutationId={workspaceMutationId}
                 {...(previewPath && !isMedia && !isPdf

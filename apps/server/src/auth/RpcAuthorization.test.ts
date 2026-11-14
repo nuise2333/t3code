@@ -2,6 +2,7 @@ import {
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
+  AuthFilesystemWriteScope,
   AuthProvidersManageScope,
   AuthSettingsWriteScope,
   AuthAccessWriteScope,
@@ -77,6 +78,22 @@ describe("RPC authorization scopes", () => {
 
   it("still lets readers load settings the way installed Swift clients ask", () => {
     expect(requiredScopeForRpcMethod("server.getSettings")).toBe(AuthOrchestrationReadScope);
+  });
+
+  it("lets file readers browse and search the whole host", () => {
+    for (const method of [
+      WS_METHODS.filesystemBrowse,
+      WS_METHODS.filesystemGetMetadata,
+      WS_METHODS.filesystemSearchHost,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthFilesystemReadScope);
+    }
+  });
+
+  it("requires file write permission to change files", () => {
+    for (const method of [WS_METHODS.projectsWriteFile, WS_METHODS.filesystemFileOperation]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthFilesystemWriteScope);
+    }
   });
 
   it("rejects unknown RPC method names", () => {

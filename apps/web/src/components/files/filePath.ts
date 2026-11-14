@@ -58,6 +58,59 @@ export function trailChildOf(folder: string, trail: string): string | null {
   return index < 0 ? null : (fileBreadcrumbs("", trail)[index + 1]?.label ?? null);
 }
 
+/** The listable folder that contains a host path, or null at a filesystem root. */
+export function hostParentOf(path: string): string | null {
+  const crumbs = fileBreadcrumbs("", path);
+  return crumbs.at(-2)?.path ?? (crumbs.length === 1 && path.startsWith("/") ? "/" : null);
+}
+
+/** The folder above a Files tab folder: "" is the workspace root, null means none is listable. */
+export function folderParentOf(path: string): string | null {
+  if (isHostPath(path)) return hostParentOf(path);
+  const index = path.lastIndexOf("/");
+  return index < 0 ? "" : path.slice(0, index);
+}
+
+export type FolderReadOutcome = "pending" | "folder" | "missing" | "file" | "unreadable";
+
+export function folderReadOutcome(read: {
+  readonly data: unknown;
+  readonly error: string | null;
+  readonly isNotFile: boolean;
+  readonly isMissing: boolean;
+}): FolderReadOutcome {
+  if (read.isNotFile) return "folder";
+  if (read.isMissing) return "missing";
+  if (read.data !== null) return "file";
+  return read.error === null ? "pending" : "unreadable";
+}
+
+export type MissingFolderProbeStep =
+  | { readonly kind: "target"; readonly path: string }
+  | { readonly kind: "walk"; readonly next: string | null }
+  | { readonly kind: "wait" }
+  | { readonly kind: "stop" };
+
+/** Walks up only past ancestors that are gone; an unreadable one is not evidence of deletion. */
+export function missingFolderProbeStep(
+  candidate: string | null,
+  outcome: FolderReadOutcome,
+): MissingFolderProbeStep {
+  if (candidate === "") return { kind: "target", path: "" };
+  if (candidate === null) return { kind: "stop" };
+  switch (outcome) {
+    case "folder":
+      return { kind: "target", path: candidate };
+    case "missing":
+    case "file":
+      return { kind: "walk", next: folderParentOf(candidate) };
+    case "pending":
+      return { kind: "wait" };
+    case "unreadable":
+      return { kind: "stop" };
+  }
+}
+
 export function joinHostPath(folder: string, relativePath: string): string {
   const separator = isWindowsAbsolutePath(folder) ? "\\" : "/";
   const base = folder.endsWith(separator) ? folder : `${folder}${separator}`;

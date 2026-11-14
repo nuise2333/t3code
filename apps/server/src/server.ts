@@ -126,6 +126,9 @@ import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
+import * as FileOperations from "./workspace/FileOperations.ts";
+import * as HostFileSearch from "./workspace/HostFileSearch.ts";
+import * as HostTrash from "./workspace/HostTrash.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -535,10 +538,18 @@ const layerWorkspaceFileSystem = WorkspaceFileSystem.layer.pipe(
   Layer.provide(layerKnownWorkspaces),
 );
 
+const layerFileOperations = FileOperations.layer.pipe(
+  Layer.provide(HostTrash.layer),
+  Layer.provide(layerWorkspaceEntries),
+  Layer.provide(layerKnownWorkspaces),
+);
+
 const layerWorkspace = Layer.mergeAll(
   WorkspacePaths.layer,
   layerWorkspaceEntries,
   layerWorkspaceFileSystem,
+  layerFileOperations,
+  HostFileSearch.layer,
 );
 
 const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(

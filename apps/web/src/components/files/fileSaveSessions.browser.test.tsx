@@ -83,7 +83,12 @@ describe("file save sessions in React", () => {
     expect(runAtomCommand.mock.calls.map(([, , request]) => request)).toEqual([
       {
         environmentId: target.environmentId,
-        input: { cwd: "/workspace", relativePath: "README.md", contents: "draft" },
+        input: {
+          cwd: "/workspace",
+          relativePath: "README.md",
+          contents: "draft",
+          createIfMissing: false,
+        },
       },
     ]);
     expect(onPendingChange).toHaveBeenLastCalledWith("README.md", false);

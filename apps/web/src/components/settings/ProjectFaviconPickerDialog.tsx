@@ -45,7 +45,7 @@ export function ProjectFaviconPickerDialog(props: {
     props.cwd,
     query,
     PROJECT_FILE_PICKER_RESULT_LIMIT,
-    { imageOnly: true },
+    { kind: "file", imageOnly: true },
   );
   const { resolvedTheme } = useTheme();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -136,7 +136,7 @@ export function ProjectFaviconPickerDialog(props: {
               isActionsOnly={false}
               keybindings={keybindings}
               onExecuteItem={(item) => {
-                if (item.kind !== "action") return;
+                if (item.kind !== "action" || result.matchedQuery !== query.trim()) return;
                 props.onOpenChange(false);
                 void item.run();
               }}

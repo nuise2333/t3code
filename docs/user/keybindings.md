@@ -60,6 +60,35 @@ or “Copy Number”. They copy the selected PR and leave terminal input alone.
 Without a PR, `mod+shift+c` copies the thread itself, which pastes into a
 composer as a thread chip.
 
+## Find files, folders, and threads
+
+`mod+p` searches the current project. **All** lists files, folders, and threads in
+separate groups. The other tabs narrow the search to files, folders, one file type
+(Docs, Images, Code, Video, Audio, Archives), or threads. Press Tab or `Shift+Tab`
+in the search field to switch tabs. Thread results match the command palette's.
+
+Press `mod+.` to switch between the project and the whole host, shown as **This
+computer** or the connection's name. Host search matches names in the operating
+system's file index (Spotlight on macOS, `plocate` or `locate` on Linux, and
+Everything on Windows), so it skips hidden folders and anything that index does not
+cover. Type at least two characters. On a remote connection it searches that
+machine's disk. The switch is unavailable when the host has no index or the
+connection cannot read host files. The picker always opens on the project.
+
+Paste an absolute or `~/` path, including a quoted one from Finder or Explorer,
+and the first row opens it, in any tab. A folder opens in the Files panel. A short
+path such as `/src` lists its row below the project matches, so Enter still opens
+the top match.
+
+## Files panel
+
+While a row in the Files tree has focus, `F2` renames it, `mod+backspace` moves
+the selection to the Trash, `mod+c`, `mod+x` and `mod+v` copy, cut and paste it,
+and `mod+d` duplicates it. Elsewhere these keys keep their usual meaning, and they
+are not configurable. `Cmd`/`Ctrl`-click or middle-click a folder to open it in a new
+Files tab. In the icon view, arrow keys move between items, Enter opens one, and
+`mod+ArrowUp` goes to the enclosing folder. See [Files](files.md) for what each action does.
+
 ## Find in a diff
 
 Click into a diff in the Diff panel or a pull request's Code tab, then press

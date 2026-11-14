@@ -27,15 +27,10 @@ import * as KnownWorkspaces from "./KnownWorkspaces.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import { fileHeaderMimeType } from "./fileHeaderMimeType.ts";
+import { isInGitFolder } from "./gitFolders.ts";
 import { toWslDrivePath } from "./wslDrivePath.ts";
 
 const PROJECT_READ_FILE_MAX_BYTES = 1024 * 1024;
-
-// NTFS reaches .git through trailing dots/spaces, stream suffixes and GIT~1; compare uppercased names.
-const isGitMetadataName = (segment: string) => {
-  const name = (segment.split(":")[0] ?? "").replace(/[. ]+$/, "").toUpperCase();
-  return name === ".GIT" || name === "GIT~1";
-};
 
 export class WorkspaceFileSystemOperationError extends Schema.TaggedError<WorkspaceFileSystemOperationError>()(
   "WorkspaceFileSystemOperationError",
@@ -102,11 +97,28 @@ export class WorkspaceBinaryFileError extends Schema.TaggedError<WorkspaceBinary
   }
 }
 
+export class WorkspaceFileMissingError extends Schema.TaggedError<WorkspaceFileMissingError>()(
+  "WorkspaceFileMissingError",
+  {
+    workspaceRoot: Schema.String,
+    relativePath: Schema.String,
+    resolvedPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Workspace file '${this.relativePath}' in '${this.workspaceRoot}' no longer exists.`;
+  }
+}
+
+const isMissingPathCause = (cause: unknown) =>
+  (cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+
 export const WorkspaceFileSystemError = Schema.Union([
   WorkspaceFileSystemOperationError,
   WorkspaceFilePathEscapeError,
   WorkspacePathNotFileError,
   WorkspaceBinaryFileError,
+  WorkspaceFileMissingError,
 ]);
 export type WorkspaceFileSystemError = typeof WorkspaceFileSystemError.Type;
 
@@ -230,26 +242,6 @@ export const make = Effect.gen(function* () {
     );
   };
 
-  // Reject Git folders, including renamed bare repos whose config/hooks can execute; paths must be normalized.
-  // Stop at linked worktrees' .git files since worktrees can sit inside bare repos.
-  const isInGitFolder = async (absolutePath: string) => {
-    if (absolutePath.split(path.sep).some(isGitMetadataName)) return true;
-    for (let folder = path.dirname(absolutePath); ; folder = path.dirname(folder)) {
-      const [head, commondir, objects, refs, dotGit] = await Promise.all(
-        ["HEAD", "commondir", "objects", "refs", ".git"].map((name) =>
-          NodeFSP.lstat(path.join(folder, name)).catch((error: NodeJS.ErrnoException) => {
-            // Any other failure leaves the folder unknown, so the write is refused.
-            if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
-            throw error;
-          }),
-        ),
-      );
-      // Git recognizes HEAD with commondir or objects/refs as a repository.
-      if (head && (commondir || (objects && refs))) return true;
-      if (dotGit?.isFile() || path.dirname(folder) === folder) return false;
-    }
-  };
-
   /**
    * Workspace-relative paths must stay inside the root, symlinks included. An
    * absolute or `~/` path reads a host file in place, such as a report an agent
@@ -291,8 +283,7 @@ export const make = Effect.gen(function* () {
           }),
       }).pipe(
         Effect.catchIf(
-          (error) =>
-            input.allowMissing === true && (error.cause as NodeJS.ErrnoException).code === "ENOENT",
+          (error) => input.allowMissing === true && isMissingPathCause(error.cause),
           () => Effect.succeed(null),
         ),
       );
@@ -547,7 +538,7 @@ export const make = Effect.gen(function* () {
     const namedTargetPath = path.join(realWorkspaceRoot, ...segments);
     const inGitFolder = Effect.fn("WorkspaceFileSystem.inGitFolder")((checkedPath: string) =>
       Effect.tryPromise({
-        try: () => isInGitFolder(checkedPath),
+        try: () => isInGitFolder(path, checkedPath),
         catch: (cause) =>
           new WorkspaceFileSystemOperationError({
             workspaceRoot: input.cwd,
@@ -589,6 +580,14 @@ export const make = Effect.gen(function* () {
       !input.contents.startsWith(UTF8_BOM) &&
       (yield* Effect.promise(() => startsWithUtf8Bom(realTargetPath)));
     const contents = keepsBom ? UTF8_BOM + input.contents : input.contents;
+    const createIfMissing = input.createIfMissing !== false;
+    const missingError = () =>
+      new WorkspaceFileMissingError({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+        resolvedPath: realTargetPath,
+      });
+    if (!createIfMissing && !replacesFile) return yield* missingError();
 
     yield* fileSystem.makeDirectory(path.dirname(realTargetPath), { recursive: true }).pipe(
       Effect.mapError(
@@ -609,19 +608,21 @@ export const make = Effect.gen(function* () {
         NodeFSP.writeFile(realTargetPath, contents, {
           flag:
             NodeFS.constants.O_WRONLY |
-            NodeFS.constants.O_CREAT |
+            (createIfMissing ? NodeFS.constants.O_CREAT : 0) |
             NodeFS.constants.O_TRUNC |
             (NodeFS.constants.O_NOFOLLOW ?? 0),
         }),
       catch: (cause) =>
-        new WorkspaceFileSystemOperationError({
-          workspaceRoot: input.cwd,
-          relativePath: input.relativePath,
-          resolvedPath: realTargetPath,
-          operationPath: realTargetPath,
-          operation: "write-file",
-          cause,
-        }),
+        !createIfMissing && (cause as NodeJS.ErrnoException).code === "ENOENT"
+          ? missingError()
+          : new WorkspaceFileSystemOperationError({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: realTargetPath,
+              operationPath: realTargetPath,
+              operation: "write-file",
+              cause,
+            }),
     });
     // Editor autosave overwrites existing files, which leaves the indexed paths unchanged, and
     // fff's watcher applies the new contents on its own. A forced rescan re-walks the whole

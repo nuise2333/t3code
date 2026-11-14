@@ -8,6 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import type { ProjectSearchEntriesInput } from "@t3tools/contracts";
 import { vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
@@ -72,12 +73,7 @@ const git = (cwd: string, args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) 
     return result.stdout.trim();
   });
 
-const searchWorkspaceEntries = (input: {
-  cwd: string;
-  query: string;
-  limit: number;
-  kind?: "file" | "directory";
-}) =>
+const searchWorkspaceEntries = (input: ProjectSearchEntriesInput) =>
   Effect.gen(function* () {
     const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
     return yield* workspaceEntries.search(input);
@@ -89,6 +85,25 @@ const appendSeparator = (input: string) =>
       ? input
       : `${input}${platform === "win32" ? "\\" : "/"}`,
   );
+
+describe("relativizePastedPath", () => {
+  const cwd = "/abs/My Proj";
+  it.each([
+    ["'/abs/My Proj/src/a.ts'", "src/a.ts"],
+    ['"/abs/My Proj/src/a.ts"', "src/a.ts"],
+    ["file:///abs/My%20Proj/src/a.ts", "src/a.ts"],
+    ["file:///abs/My%ZZProj/src/a.ts", "file:///abs/My%ZZProj/src/a.ts"],
+    ["/abs/My\\ Proj/src/a\\(1\\).ts", "src/a(1).ts"],
+    ["/abs/My Proj/src/a.ts:42", "src/a.ts:42"],
+    ["~/My Proj/src/a.ts", "src/a.ts", "/abs"],
+    ["C:\\repo\\src\\a.ts", "C:\\repo\\src\\a.ts"],
+    ["/abs/Other/src/a.ts", "/abs/Other/src/a.ts"],
+    ["/abs/My Projects/a.ts", "/abs/My Projects/a.ts"],
+    ["src/a.ts", "src/a.ts"],
+  ])("%s -> %s", (query, expected, homeDir = "/home/u") => {
+    expect(WorkspaceEntries.relativizePastedPath(query, cwd, homeDir)).toBe(expected);
+  });
+});
 
 it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
   afterEach(() => {
@@ -705,6 +720,20 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         expect(exact.entries.toSorted((a, b) => (a.path < b.path ? -1 : 1))).toEqual(
           expected.map((path) => ({ path, kind: "file" })),
         );
+        const code = yield* searchWorkspaceEntries({
+          cwd,
+          query: "src/foo.py",
+          limit: 25,
+          category: "code",
+        });
+        expect(code.entries.map((entry) => entry.path).toSorted()).toEqual(expected.toSorted());
+        const images = yield* searchWorkspaceEntries({
+          cwd,
+          query: "src/foo.py",
+          limit: 25,
+          category: "image",
+        });
+        expect(images.entries).toEqual([]);
 
         const partial = yield* searchWorkspaceEntries({ cwd, query: "src/fo", limit: 25 });
         for (const path of expected) {

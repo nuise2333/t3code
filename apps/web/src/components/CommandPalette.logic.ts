@@ -5,6 +5,7 @@ import {
   rankSearchGroups,
   scoreSearchTerms,
   scoreThreadSearch,
+  threadRecentUse,
   type SearchMatchHint,
   type SearchRange,
   type ThreadSearchSubject,
@@ -35,7 +36,7 @@ import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 import { isSidebarHiddenThread } from "./Sidebar.logic";
 
-export const RECENT_THREAD_LIMIT = 12;
+const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";
 export const ADDON_ICON_CLASS = "size-4";
 
@@ -769,6 +770,27 @@ export function getCommandPaletteMode(input: {
     return input.isBrowsing ? "submenu-browse" : "submenu";
   }
   return input.isBrowsing ? "root-browse" : "root";
+}
+
+/**
+ * Recent means used recently: written in or opened, whichever is later. The
+ * open thread would always lead that list, so it is left out.
+ */
+export function buildRecentThreadItems(
+  threadItems: ReadonlyArray<CommandPaletteActionItem>,
+  activeThread: { readonly environmentId: string; readonly id: string } | null | undefined,
+): CommandPaletteActionItem[] {
+  const activeThreadValue = activeThread
+    ? `thread:${activeThread.environmentId}:${activeThread.id}`
+    : null;
+  return threadItems
+    .filter((item) => item.value !== activeThreadValue)
+    .toSorted(
+      (left, right) =>
+        (right.threadSearch ? threadRecentUse(right.threadSearch) : 0) -
+        (left.threadSearch ? threadRecentUse(left.threadSearch) : 0),
+    )
+    .slice(0, RECENT_THREAD_LIMIT);
 }
 
 export function buildRootGroups(input: {

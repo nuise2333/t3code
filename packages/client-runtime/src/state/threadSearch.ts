@@ -326,12 +326,17 @@ export function visibleThreadSearch(
   previous: SettledThreadSearch | null,
 ): SettledThreadSearch {
   if (ready !== null) return ready;
-  const current = foldSearchQuery(query);
-  const before = foldSearchQuery(previous?.query ?? "");
   return previous !== null &&
+    refinesOrWidensQuery(foldSearchQuery(query), foldSearchQuery(previous.query))
+    ? previous
+    : { query: "", matches: [] };
+}
+
+/** Whether results for `before` may stand in for `current` until its own arrive. */
+export function refinesOrWidensQuery(current: string, before: string): boolean {
+  return (
     current.length > 0 &&
     before.length > 0 &&
     (current.startsWith(before) || before.startsWith(current))
-    ? previous
-    : { query: "", matches: [] };
+  );
 }

@@ -209,6 +209,8 @@ import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as FileOperations from "./workspace/FileOperations.ts";
+import * as HostFileSearch from "./workspace/HostFileSearch.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -699,6 +701,8 @@ function projectFileFailureContext(
       return { failure: "path_not_file", resolvedPath: error.resolvedPath };
     case "WorkspaceBinaryFileError":
       return { failure: "binary_file", resolvedPath: error.resolvedPath };
+    case "WorkspaceFileMissingError":
+      return { failure: "not_found", resolvedPath: error.resolvedPath };
     default:
       return unexpectedCompatibilityError(error);
   }
@@ -1545,6 +1549,8 @@ export const layerWsRpc = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const hostFileSearch = yield* HostFileSearch.HostFileSearch;
+      const fileOperations = yield* FileOperations.FileOperations;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
@@ -1840,6 +1846,9 @@ export const layerWsRpc = (
           issues: keybindingsConfig.issues,
           providers,
           ...discovery,
+          ...(hostFileSearch.backend === undefined
+            ? {}
+            : { hostFileSearch: hostFileSearch.backend }),
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
@@ -2997,6 +3006,8 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.shellOpenInEditor]: (input) => externalLauncher.launchEditor(input),
         [WS_METHODS.filesystemGetMetadata]: (input) => workspaceFileSystem.getMetadata(input),
+        [WS_METHODS.filesystemSearchHost]: (input) => hostFileSearch.search(input),
+        [WS_METHODS.filesystemFileOperation]: (input) => fileOperations.run(input),
         [WS_METHODS.filesystemBrowse]: (input) =>
           workspaceEntries.browse(input).pipe(
             Effect.mapError(

@@ -23,6 +23,7 @@ import {
   ResolvedKeybindingsConfig,
 } from "./keybindings.ts";
 import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
+import { HostFileSearchBackend } from "./filesystem.ts";
 import { ManagedPolicySummary } from "./managedPolicy.ts";
 import { ModelCapabilities, ProviderOptionDescriptor } from "./model.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
@@ -711,6 +712,8 @@ export const ServerConfig = Schema.Struct({
   shellOlderSettled: Schema.optionalKey(Schema.Boolean),
   shellRevealInFileManager: Schema.optionalKey(Schema.Boolean),
   shellRevealInFileManagerKind: Schema.optionalKey(FileManagerRevealKind),
+  /** The OS file index `filesystem.searchHost` reads; absent when the host has none. */
+  hostFileSearch: Schema.optionalKey(HostFileSearchBackend),
   threadResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
   /** Send window fields only when advertised. */
   threadSnapshotPagination: Schema.optionalKey(Schema.Boolean),

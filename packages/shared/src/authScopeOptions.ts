@@ -81,7 +81,7 @@ export const AUTH_SCOPE_OPTIONS: ReadonlyArray<{
   {
     scope: AuthFilesystemWriteScope,
     title: "Write files",
-    description: "Edit workspace files and save plans to disk.",
+    description: "Create, edit, rename, move, and trash files on this computer.",
   },
   {
     scope: AuthAccessReadScope,

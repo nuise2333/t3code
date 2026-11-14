@@ -238,12 +238,23 @@ export class ProjectMutationError extends Schema.TaggedError<ProjectMutationErro
 export const ProjectEntryKind = Schema.Literals(["file", "directory"]);
 export type ProjectEntryKind = typeof ProjectEntryKind.Type;
 
+export const ProjectFileCategory = Schema.Literals([
+  "document",
+  "image",
+  "code",
+  "video",
+  "audio",
+  "archive",
+]);
+export type ProjectFileCategory = typeof ProjectFileCategory.Type;
+
 export const ProjectSearchEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   query: TrimmedString.check(Schema.isMaxLength(256)),
   limit: PositiveInt.check(Schema.isLessThanOrEqualTo(PROJECT_SEARCH_ENTRIES_MAX_LIMIT)),
   kind: Schema.optional(ProjectEntryKind),
   imageOnly: Schema.optional(Schema.Boolean),
+  category: Schema.optional(ProjectFileCategory),
 });
 export type ProjectSearchEntriesInput = typeof ProjectSearchEntriesInput.Type;
 
@@ -462,6 +473,7 @@ export const ProjectFileFailure = Schema.Literals([
   "path_not_file",
   "binary_file",
   "operation_failed",
+  "not_found",
 ]);
 export type ProjectFileFailure = typeof ProjectFileFailure.Type;
 
@@ -517,6 +529,8 @@ export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
+  /** False for autosave, so a save cannot bring back a file renamed or trashed meanwhile. */
+  createIfMissing: Schema.optional(Schema.Boolean),
 });
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 

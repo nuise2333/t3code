@@ -172,7 +172,7 @@ function resolveCommandEditorArgs(
   }
 }
 
-function encodeUtf16LeBase64(input: string): string {
+export function encodeUtf16LeBase64(input: string): string {
   const bytes = new Uint8Array(input.length * 2);
   for (let index = 0; index < input.length; index += 1) {
     const code = input.charCodeAt(index);
@@ -191,7 +191,7 @@ function resolveWindowsRoot(env: NodeJS.ProcessEnv): string {
   return env.SYSTEMROOT || env.windir || String.raw`C:\Windows`;
 }
 
-function resolvePowerShellPath(env: NodeJS.ProcessEnv = {}): string {
+export function resolvePowerShellPath(env: NodeJS.ProcessEnv = {}): string {
   return `${resolveWindowsRoot(env)}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
 }
 

@@ -6,6 +6,7 @@ import {
   normalizeProjectPathForDispatch,
   resolvePastedPath,
   resolveWorkspaceFilePath,
+  unwrapPastedPath,
 } from "./path.ts";
 
 describe("path helpers", () => {
@@ -123,5 +124,20 @@ describe("workspaceRelativeFilePath", () => {
     ["\\\\server\\share\\repo\\..\\notes.md", "\\\\server\\share\\repo", null],
   ])("relates %s to %s", (path, workspaceRoot, relativePath) => {
     expect(workspaceRelativeFilePath(path, workspaceRoot)).toBe(relativePath);
+  });
+
+  it.each([
+    ["/Users/me/a.txt", "/Users/me/a.txt"],
+    ["'/Users/me/a b.txt'", "/Users/me/a b.txt"],
+    ['"C:\\Users\\me\\a b.txt"', "C:\\Users\\me\\a b.txt"],
+    ["/Users/me/a\\ b\\(1\\).txt", "/Users/me/a b(1).txt"],
+    ["~/a\\ b", "~/a b"],
+    ["C:\\a\\(b)", "C:\\a\\(b)"],
+    ["file:///Users/me/a%20b.txt", "/Users/me/a b.txt"],
+    ["file:///C:/Users/me/a.txt", "C:/Users/me/a.txt"],
+    ["file://%", null],
+    ["src/a\\ b", "src/a\\ b"],
+  ])("unwraps pasted %s as %s", (query, expected) => {
+    expect(unwrapPastedPath(query)).toBe(expected);
   });
 });

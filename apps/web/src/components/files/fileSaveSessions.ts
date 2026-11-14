@@ -1,14 +1,30 @@
-import { AuthFilesystemWriteScope, type EnvironmentId } from "@t3tools/contracts";
-import { type AtomCommandResult, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
+import {
+  AuthFilesystemWriteScope,
+  type EnvironmentId,
+  ProjectWriteFileError,
+} from "@t3tools/contracts";
+import {
+  type AtomCommandResult,
+  runAtomCommand,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect } from "react";
+
+import { toastManager } from "~/components/ui/toast";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { environmentSession, readEnvironmentScope, sessionHasScope } from "~/state/session";
 
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
+import { absoluteFilePath, isSameOrInside } from "./fileOperations.logic";
 import {
+  clearProjectFileQueryData,
   confirmProjectFileQueryData,
+  getProjectFileQueryAtom,
   getUnsavedProjectFileQueryData,
 } from "./projectFilesQueryState";
 
@@ -31,10 +47,14 @@ export interface FileSaveSessionDeps {
   ) => Promise<AtomCommandResult<unknown, unknown>>;
   readonly confirm: (target: FileSaveTarget, contents: string) => boolean;
   readonly readUnsaved: (target: FileSaveTarget) => string | null;
+  readonly discardUnsaved: (target: FileSaveTarget) => void;
 }
 
 interface FileSaveSession {
+  readonly target: FileSaveTarget;
   readonly coordinator: FileSaveCoordinator;
+  /** Resolved when the next write pass ends. */
+  readonly settleWaiters: Array<() => void>;
   /** Lease count per listener; surfaces may share one listener. */
   readonly listeners: Map<FilePendingListener, number>;
   readonly unsubscribeWritable: () => void;
@@ -71,6 +91,7 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
       persist: (contents) => deps.persist(target, contents),
       onConfirmed: (contents) => deps.confirm(target, contents),
       onSettled: () => {
+        for (const resolve of session.settleWaiters.splice(0)) resolve();
         if (!session.flushingOnRelease) return;
         session.flushingOnRelease = false;
         if (session.leases === 0) {
@@ -84,7 +105,9 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
     });
     const unsubscribeWritable = deps.subscribeWritable(target, () => recover(target, coordinator));
     const session: FileSaveSession = {
+      target,
       coordinator,
+      settleWaiters: [],
       listeners,
       unsubscribeWritable,
       leases: 0,
@@ -121,9 +144,43 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
     };
   };
 
+  const sessionsUnder = (environmentId: EnvironmentId, paths: readonly string[]) =>
+    [...sessions.values()].filter(
+      ({ target }) =>
+        target.environmentId === environmentId &&
+        paths.some((path) =>
+          isSameOrInside(absoluteFilePath(target.relativePath, target.cwd), path),
+        ),
+    );
+
   return {
     /** Holds the file's session open until the returned release runs. */
     acquire,
+    /** Writes drafts at or under the absolute `paths` before they move, and resolves once written. */
+    flushUnder(environmentId: EnvironmentId, paths: readonly string[]): Promise<void> {
+      return Promise.all(
+        sessionsUnder(environmentId, paths).map(
+          (session) =>
+            new Promise<void>((resolve) => {
+              session.settleWaiters.push(resolve);
+              session.coordinator.flush();
+            }),
+        ),
+      ).then(() => undefined);
+    },
+    /** Files at or under the absolute `paths` whose latest edit the server has not confirmed. */
+    unsavedUnder(environmentId: EnvironmentId, paths: readonly string[]): readonly string[] {
+      return sessionsUnder(environmentId, paths)
+        .filter(({ coordinator }) => coordinator.unconfirmedContents !== null)
+        .map(({ target }) => target.relativePath);
+    },
+    /** Forgets drafts at or under the absolute `paths`, which no longer exist. */
+    discardUnder(environmentId: EnvironmentId, paths: readonly string[]): void {
+      for (const session of sessionsUnder(environmentId, paths)) {
+        session.coordinator.discard();
+        deps.discardUnsaved(session.target);
+      }
+    },
     /** Edits for a file nobody holds open are dropped, so retired editors stay inert. */
     change(target: FileSaveTarget, contents: string): void {
       const session = sessions.get(fileSaveKey(target));
@@ -134,6 +191,32 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
 
 function fileSaveKey({ environmentId, cwd, relativePath }: FileSaveTarget): string {
   return `${environmentId}\u0000${cwd}\u0000${relativePath}`;
+}
+
+const isProjectWriteFileError = Schema.is(ProjectWriteFileError);
+const missingFileNotices = new Set<string>();
+
+/** A file the server last reported absent is being created; any other may only be overwritten. */
+function knownMissing({ environmentId, cwd, relativePath }: FileSaveTarget): boolean {
+  const read = appAtomRegistry.get(getProjectFileQueryAtom(environmentId, cwd, relativePath));
+  return Option.getOrUndefined(AsyncResult.value(read))?.exists === false;
+}
+
+function reportMissingFile(target: FileSaveTarget, result: AtomCommandResult<unknown, unknown>) {
+  const key = fileSaveKey(target);
+  if (result._tag === "Success") {
+    missingFileNotices.delete(key);
+    return;
+  }
+  const cause = squashAtomCommandFailure(result);
+  if (!isProjectWriteFileError(cause) || cause.failure !== "not_found") return;
+  if (missingFileNotices.has(key)) return;
+  missingFileNotices.add(key);
+  toastManager.add({
+    type: "warning",
+    title: "Edits not saved",
+    description: `${target.relativePath} was moved or deleted. Your edits are kept in this tab.`,
+  });
 }
 
 const fileSaveSessions = createFileSaveSessions({
@@ -150,16 +233,26 @@ const fileSaveSessions = createFileSaveSessions({
       },
     );
   },
-  persist: ({ environmentId, cwd, relativePath }, contents) =>
-    runAtomCommand(appAtomRegistry, projectEnvironment.writeFile, {
+  persist: async (target, contents) => {
+    const { environmentId, cwd, relativePath } = target;
+    const result = await runAtomCommand(appAtomRegistry, projectEnvironment.writeFile, {
       environmentId,
-      input: { cwd, relativePath, contents },
-    }),
+      input: { cwd, relativePath, contents, createIfMissing: knownMissing(target) },
+    });
+    reportMissingFile(target, result);
+    return result;
+  },
   confirm: ({ environmentId, cwd, relativePath }, contents) =>
     confirmProjectFileQueryData(environmentId, cwd, relativePath, contents),
   readUnsaved: ({ environmentId, cwd, relativePath }) =>
     getUnsavedProjectFileQueryData(environmentId, cwd, relativePath)?.contents ?? null,
+  discardUnsaved: ({ environmentId, cwd, relativePath }) =>
+    clearProjectFileQueryData(environmentId, cwd, relativePath),
 });
+
+export const flushFileSaveSessionsUnder = fileSaveSessions.flushUnder;
+export const discardFileSaveSessionsUnder = fileSaveSessions.discardUnder;
+export const unsavedFileSaveSessionsUnder = fileSaveSessions.unsavedUnder;
 
 /** Holds the file's save session while the surface is mounted; the last surface to leave flushes. */
 export function useFileSaveSession(

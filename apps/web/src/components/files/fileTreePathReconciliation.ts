@@ -74,3 +74,15 @@ export function buildFileTreePathUpdates(
 
   return updates;
 }
+
+/** Mirrors the tree's own optimistic rename, so the next listing diffs against what it shows. */
+export function moveFileTreePaths(
+  paths: readonly string[],
+  from: string,
+  to: string,
+): readonly string[] {
+  const folder = from.endsWith("/");
+  return paths.map((path) =>
+    path === from || (folder && path.startsWith(from)) ? to + path.slice(from.length) : path,
+  );
+}

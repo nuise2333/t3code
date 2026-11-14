@@ -166,12 +166,16 @@ function buildMessageSearch(
 ): Omit<typeof SearchRequest.Type, "projectId" | "excludedThreadIds"> | null {
   const { long, short } = messageSearchTokens(query);
   if (long.length === 0) return null;
-  // Two-character CJK words are too short for trigrams.
-  const indexed = hasIndex && long.every((token) => Array.from(token).length >= 3);
+  // Two-character CJK words are too short for trigrams, so they narrow the index's hits.
+  const trigrams = hasIndex ? long.filter((token) => Array.from(token).length >= 3) : [];
+  const unindexed = long.filter((token) => !trigrams.includes(token));
   const narrowing = short.filter((token) => !NON_ASCII.test(token));
   return {
-    match: indexed ? long.map((token) => `"${token.replaceAll('"', '""')}"`).join(" ") : null,
-    substrings: (indexed ? narrowing : [...long, ...narrowing]).map((token) => ({
+    match:
+      trigrams.length > 0
+        ? trigrams.map((token) => `"${token.replaceAll('"', '""')}"`).join(" ")
+        : null,
+    substrings: [...unindexed, ...narrowing].map((token) => ({
       token,
       accentInsensitive: accentInsensitiveGlob(token),
     })),
@@ -215,7 +219,7 @@ export function buildSearchSnippet(text: string, matchStart: number): string {
 
 // Filter hidden subagents and side chats before the hit limit; JS checks word starts and ranking.
 // Both paths narrow ASCII tokens with Latin-1 and Extended-A/B/Additional accent variants.
-// Without FTS5 trigrams, or for two-character CJK words, scan the same eligible messages;
+// Without FTS5 trigrams, or when every word is two-character CJK, scan the eligible messages;
 // accented queries and non-Latin case can still miss: "fermée"/"fermee", "ОШИБКА"/"ошибка".
 export const messageHitsQuery = (
   sql: SqlClient.SqlClient,

@@ -43,6 +43,11 @@ export class KnownWorkspaces extends Context.Service<
     readonly contains: (realPath: string) => Effect.Effect<boolean>;
     /** Fails unless `cwd` exists and resolves inside a known workspace. */
     readonly assertContains: (cwd: string) => Effect.Effect<void, UnknownWorkspaceError>;
+    /**
+     * Takes a symlink-resolved path. True when it is, or holds, a project root, a
+     * thread's worktree, or a managed worktrees folder.
+     */
+    readonly holdsWorkspaceRoot: (realPath: string) => Effect.Effect<boolean>;
   }
 >()("t3/workspace/KnownWorkspaces") {}
 
@@ -68,19 +73,29 @@ export const make = Effect.gen(function* () {
     );
   };
 
+  const managedWorktreeDirectories = Effect.gen(function* () {
+    const worktreeSettings = yield* settings.getSettings.pipe(
+      Effect.orElseSucceed(() => ({ worktreesDirectory: "", previousWorktreesDirectories: [] })),
+    );
+    const home = yield* HostProcess.HomeDirectory;
+    return managedWorktreesDirectories(worktreeSettings, config.worktreesDir, path, home);
+  });
+
+  const threadWorktrees = sql<{ readonly worktreePath: string; readonly projectId: string }>`
+    SELECT DISTINCT
+      json_extract(payload_json, '$.worktreePath') AS "worktreePath",
+      project_id AS "projectId"
+    FROM orchestration_v2_projection_threads
+    WHERE deleted_at IS NULL AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
+  `.pipe(
+    NodeSqliteClient.readOnly,
+    Effect.orElseSucceed(() => []),
+  );
+
   const contains: KnownWorkspaces["Service"]["contains"] = Effect.fn("KnownWorkspaces.contains")(
     function* (realPath) {
       const within = (root: string | null) => root !== null && isWithinRoot(path, realPath, root);
-      const worktreeSettings = yield* settings.getSettings.pipe(
-        Effect.orElseSucceed(() => ({ worktreesDirectory: "", previousWorktreesDirectories: [] })),
-      );
-      const home = yield* HostProcess.HomeDirectory;
-      const managedDirectories = managedWorktreesDirectories(
-        worktreeSettings,
-        config.worktreesDir,
-        path,
-        home,
-      );
+      const managedDirectories = yield* managedWorktreeDirectories;
       const managed = (yield* Effect.forEach(managedDirectories, resolveRoot)).filter(
         (root) => root !== null,
       );
@@ -91,16 +106,7 @@ export const make = Effect.gen(function* () {
         if (within(yield* resolveRoot(project.workspaceRoot))) return true;
       }
 
-      const threads = yield* sql<{ readonly worktreePath: string; readonly projectId: string }>`
-        SELECT DISTINCT
-          json_extract(payload_json, '$.worktreePath') AS "worktreePath",
-          project_id AS "projectId"
-        FROM orchestration_v2_projection_threads
-        WHERE deleted_at IS NULL AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
-      `.pipe(
-        NodeSqliteClient.readOnly,
-        Effect.orElseSucceed(() => []),
-      );
+      const threads = yield* threadWorktrees;
       const projectWorktrees = new Map<string, ReadonlyArray<string>>();
       const isProjectWorktree = Effect.fnUntraced(function* (
         projectId: string,
@@ -144,7 +150,27 @@ export const make = Effect.gen(function* () {
     if (!(yield* contains(realCwd))) return yield* new UnknownWorkspaceError({ cwd });
   });
 
-  return KnownWorkspaces.of({ contains, assertContains });
+  const holdsWorkspaceRoot: KnownWorkspaces["Service"]["holdsWorkspaceRoot"] = Effect.fn(
+    "KnownWorkspaces.holdsWorkspaceRoot",
+  )(function* (realPath) {
+    const projects = yield* projectStore.listShells().pipe(Effect.orElseSucceed(() => []));
+    const threads = yield* threadWorktrees;
+    const platform = yield* HostProcess.Platform;
+    const comparable = (value: string) =>
+      platform === "win32" || platform === "darwin" ? value.normalize("NFC").toLowerCase() : value;
+    const candidates = [
+      ...(yield* managedWorktreeDirectories),
+      ...projects.map((project) => project.workspaceRoot),
+      ...threads.map((thread) => thread.worktreePath).filter((value) => path.isAbsolute(value)),
+    ];
+    for (const candidate of candidates) {
+      const root = yield* resolveRoot(candidate);
+      if (root !== null && isWithinRoot(path, comparable(root), comparable(realPath))) return true;
+    }
+    return false;
+  });
+
+  return KnownWorkspaces.of({ contains, assertContains, holdsWorkspaceRoot });
 });
 
 export const layer = Layer.effect(KnownWorkspaces, make);

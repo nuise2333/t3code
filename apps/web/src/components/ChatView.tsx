@@ -2394,6 +2394,7 @@ export default function ChatView(props: ChatViewProps) {
     addPullRequestsSurfaceStable,
     closePreviewPanelStable,
     copyRightPanelFilePathStable,
+    duplicateFilesTabStable,
     createBrowserSurface,
     createBrowserSurfaceStable,
     moveRightPanelSurfaceStable,
@@ -4017,6 +4018,7 @@ export default function ChatView(props: ChatViewProps) {
           desktopByTabId={activePreviewState.desktopByTabId}
           previewRuntimeTabId={resolvePreviewRuntimeTabId}
           terminalLabelsById={activeTerminalLabelsById}
+          projectName={activeProject?.title}
           onActivate={activateRightPanelSurfaceStable}
           onCloseSurface={closeRightPanelSurfaceStable}
           onRenameDevice={(surfaceId, title) => {
@@ -4028,6 +4030,7 @@ export default function ChatView(props: ChatViewProps) {
           onCloseAllSurfaces={closeAllRightPanelSurfacesStable}
           onMoveSurface={moveRightPanelSurfaceStable}
           onCopyFilePath={copyRightPanelFilePathStable}
+          onDuplicateFilesTab={duplicateFilesTabStable}
           onAddBrowser={() => createBrowserSurface()}
           onAddBrowserInProfile={createBrowserSurfaceStable}
           onAddTerminal={addTerminalSurfaceStable}

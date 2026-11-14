@@ -1353,6 +1353,8 @@ export interface ConfirmDialogOptions {
   readonly variant?: ConfirmDialogVariant;
   /** Which button takes focus on open. Defaults to Cancel; destructive confirms always keep Cancel. */
   readonly initialFocus?: "confirm" | "cancel";
+  /** Names the action on the confirm button; "Confirm" otherwise. */
+  readonly confirmLabel?: string;
 }
 
 export interface LocalApi {

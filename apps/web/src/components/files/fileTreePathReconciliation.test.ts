@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildFileTreePathUpdates, shouldRebuildFileTree } from "./fileTreePathReconciliation";
+import {
+  buildFileTreePathUpdates,
+  moveFileTreePaths,
+  shouldRebuildFileTree,
+} from "./fileTreePathReconciliation";
 
 const folder = (name: string, count: number) =>
   Array.from({ length: count }, (_, index) => `${name}/entry-${index}`);
@@ -20,6 +24,26 @@ describe("buildFileTreePathUpdates", () => {
       { type: "remove", path: "src/a/", recursive: true },
       { type: "remove", path: "src/ab/", recursive: true },
       { type: "remove", path: "src/a.ts" },
+    ]);
+  });
+});
+
+describe("moveFileTreePaths", () => {
+  it("moves a renamed folder's contents with it, so the server's listing diffs to nothing", () => {
+    const before = ["src/", "src/a/", "src/a/b.ts", "src/ab.ts"];
+    const renamed = moveFileTreePaths(before, "src/a/", "src/c/");
+    expect(renamed).toEqual(["src/", "src/c/", "src/c/b.ts", "src/ab.ts"]);
+    expect(
+      buildFileTreePathUpdates(renamed, ["src/", "src/ab.ts", "src/c/", "src/c/b.ts"]),
+    ).toEqual([]);
+  });
+
+  it("leaves the listing to put a failed rename back", () => {
+    const before = ["src/", "src/a.ts"];
+    const renamed = moveFileTreePaths(before, "src/a.ts", "src/b.ts");
+    expect(buildFileTreePathUpdates(renamed, before)).toEqual([
+      { type: "remove", path: "src/b.ts" },
+      { type: "add", path: "src/a.ts" },
     ]);
   });
 });

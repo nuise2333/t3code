@@ -5,9 +5,7 @@ import type { ClosedView, ClosedViewEntry } from "./closedViewStore";
 import type { PullRequestListPreferences } from "./components/pullRequest/pullRequestListPreferences";
 import { openPreviewSession } from "./components/preview/openPreviewSession";
 import {
-  rightPanelHostRef,
   type RightPanelSurface,
-  selectThreadRightPanelState,
   type ThreadRightPanelState,
   useRightPanelStore,
 } from "./rightPanelStore";
@@ -138,17 +136,9 @@ export async function reopenClosedView(
         }
       }
       break;
-    case "files": {
-      const rootAlreadyExists = selectThreadRightPanelState(
-        panels.byThreadKey,
-        rightPanelHostRef(ref),
-      ).surfaces.some((current) => current.kind === "files");
-      panels.open(ref, "files");
-      if (!rootAlreadyExists && typeof surface.folderTrail === "string") {
-        panels.navigateFolder(ref, surface.id, "", surface.folderTrail);
-      }
+    case "files":
+      panels.openFilesTab(ref, surface);
       break;
-    }
     case "device":
       if (surface.target) {
         panels.openDevice(ref, surface.target);

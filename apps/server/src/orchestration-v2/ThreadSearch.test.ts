@@ -1106,6 +1106,23 @@ it.layer(layerTest)("ThreadSearch across scripts and without the index", (it) =>
             [trust, true],
           ],
         );
+        // A two-character Chinese word beside an indexed word still reaches past the scan window.
+        const rollout = ThreadId.make("thread:rollout");
+        yield* Effect.forEach(
+          [
+            thread(rollout, project),
+            message(rollout, "rollout", "user", "部署 enable 生产环境"),
+            message(rollout, "newest", "assistant", "done"),
+          ],
+          projections.apply,
+          { discard: true },
+        );
+        yield* sql`
+          UPDATE orchestration_v2_projection_messages SET rowid = rowid + 20000
+          WHERE message_id = 'newest'
+        `;
+        assert.deepEqual(yield* threadIds("部署 enable"), [rollout]);
+        yield* sql`DELETE FROM orchestration_v2_projection_messages WHERE message_id = 'newest'`;
         // Without the index (an SQLite build without FTS5 trigrams) search scans instead.
         yield* sql`DROP TABLE orchestration_v2_message_search`;
         assert.deepEqual(yield* threadIds("検索"), [threadId]);

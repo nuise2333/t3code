@@ -205,12 +205,15 @@ export function RightPanelSurfaceContent(props: {
       const files = props.files;
       const attachment = surface.kind === "file" ? surface.attachment : undefined;
       if (!attachment && (files.projectName === null || !files.workspaceRoot)) return null;
+      // Each `files:<id>` tab owns its tree; legacy "files" and file tabs share the workspace's.
+      const filesTabId = surface.kind === "files" && surface.id !== "files" ? surface.id : null;
+      const store = useRightPanelStore.getState;
       return (
         <Suspense fallback={null}>
           <FilePreviewPanel
             key={`${props.environmentId}:${
               attachment ? `attachment:${attachment.id}` : files.workspaceRoot
-            }`}
+            }${filesTabId === null ? "" : `:${filesTabId}`}`}
             environmentId={props.environmentId}
             cwd={files.workspaceRoot ?? ""}
             projectName={files.projectName ?? ""}
@@ -220,17 +223,30 @@ export function RightPanelSurfaceContent(props: {
             keybindings={props.keybindings}
             availableEditors={files.availableEditors}
             openInShortcutEnabled={visible}
-            relativePath={surface.kind === "file" ? surface.relativePath : null}
+            relativePath={
+              surface.kind === "file" ? surface.relativePath : (surface.folderPath ?? null)
+            }
+            knownFolder={surface.kind === "files"}
+            expansionKeySuffix={filesTabId ?? undefined}
             {...(attachment ? { attachment } : {})}
             revealLine={surface.kind === "file" ? (surface.revealLine ?? null) : null}
             revealRequestId={surface.kind === "file" ? surface.revealRequestId : 0}
             onOpenFile={files.onOpenFile}
             onNavigateFolder={(relativePath, folderTrail, keepSource) =>
-              useRightPanelStore
-                .getState()
-                .navigateFolder(threadRef, surface.id, relativePath, folderTrail, keepSource)
+              store().navigateFolder(threadRef, surface.id, relativePath, folderTrail, keepSource)
+            }
+            onOpenFolderInNewTab={(folderPath, folderTrail) =>
+              store().openFilesTab(threadRef, { folderPath, folderTrail })
             }
             folderTrail={surface.folderTrail}
+            filesView={
+              attachment === undefined
+                ? {
+                    mode: surface.view ?? "list",
+                    onModeChange: (mode) => store().setFilesView(threadRef, surface.id, mode),
+                  }
+                : undefined
+            }
             onPendingChange={files.onPendingChange}
             selectedFilePending={surface.kind === "file" && files.pendingSurfaceIds.has(surface.id)}
             workspaceMutationId={props.workspaceMutationId}

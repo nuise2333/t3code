@@ -20,6 +20,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as ServerConfig from "../config.ts";
+import { containsControlCharacter, escapeSpotlightString } from "../spotlightQuery.ts";
 
 const ICON_SIZE = 64;
 const COMMAND_TIMEOUT = "5 seconds";
@@ -79,17 +80,6 @@ const plistValue = Effect.fn("NativeAppIconResolver.plistValue")(function* (
     Effect.orElseSucceed(() => ""),
   );
 });
-
-function escapeSpotlightString(value: string): string {
-  return value.replace(/([\\'*?])/gu, "\\$1");
-}
-
-function containsControlCharacter(value: string): boolean {
-  return [...value].some((character) => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint <= 31 || codePoint === 127;
-  });
-}
 
 const resolveApplicationPath = Effect.fn("NativeAppIconResolver.resolveApplicationPath")(function* (
   app: NativeAppIconReference,

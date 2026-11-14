@@ -40,17 +40,18 @@ function fileItem(relativePath: string): FileItem {
   };
 }
 
-it.effect("filters image searches before applying the result limit", () =>
+it.effect("filters image and category searches before applying the result limit", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const items = [
-        ...Array.from({ length: 200 }, (_, index) => fileItem(`src/file-${index}.ts`)),
+        ...Array.from({ length: 300 }, (_, index) => fileItem(`src/file-${index}.ts`)),
         fileItem("public/icon.svg"),
+        fileItem("docs/guide.md"),
       ];
-      const fileSearch = vi.fn(async () => ({
+      const fileSearch = vi.fn(async (_query: string, options?: { pageSize?: number }) => ({
         ok: true as const,
         value: {
-          items,
+          items: items.slice(0, options?.pageSize),
           scores: [],
           totalMatched: items.length,
           totalFiles: items.length,
@@ -69,13 +70,22 @@ it.effect("filters image searches before applying the result limit", () =>
       vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
 
       const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
-      const resultWithoutKind = yield* searchIndex.search("", 200, undefined, true);
-      const resultWithDirectoryKind = yield* searchIndex.search("", 200, "directory", true);
+      const resultWithoutKind = yield* searchIndex.search("", 200, { imageOnly: true });
+      const resultWithDirectoryKind = yield* searchIndex.search("", 200, {
+        kind: "directory",
+        imageOnly: true,
+      });
+      const documents = yield* searchIndex.search("", 1, { category: "document" });
 
       expect(resultWithoutKind.entries).toEqual([{ kind: "file", path: "public/icon.svg" }]);
       expect(resultWithDirectoryKind.entries).toEqual([{ kind: "file", path: "public/icon.svg" }]);
-      expect(fileSearch).toHaveBeenCalledTimes(2);
-      expect(fileSearch).toHaveBeenCalledWith("", { pageSize: 25_002 });
+      expect(documents).toEqual({
+        entries: [{ kind: "file", path: "docs/guide.md" }],
+        truncated: false,
+      });
+      expect(fileSearch.mock.calls.map(([, options]) => options?.pageSize)).toEqual([
+        1608, 1608, 256, 1024,
+      ]);
     }),
   ).pipe(Effect.provide(testLayer)),
 );
@@ -120,7 +130,7 @@ it.effect("fetches past a first page of Git-ignored results", () =>
       vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
 
       const searchIndex = yield* WorkspaceSearchIndex.make(cwd);
-      const result = yield* searchIndex.search("a", 1, "file", false);
+      const result = yield* searchIndex.search("a", 1, { kind: "file" });
 
       expect(result).toEqual({ entries: [{ kind: "file", path: "src/a.ts" }], truncated: false });
     }),
@@ -150,7 +160,7 @@ it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
         vi.spyOn(FileFinder, "create").mockReturnValueOnce({ ok: true, value: finder });
 
         const searchIndex = yield* WorkspaceSearchIndex.make("/workspace/project");
-        const result = yield* searchIndex.search("report", 50, "file");
+        const result = yield* searchIndex.search("report", 50, { kind: "file" });
 
         expect(result.entries).toEqual([{ kind: "file", path: "dir\\one/report.txt" }]);
       }),
@@ -438,7 +448,7 @@ it.effect(
 
         const searchIndex = yield* WorkspaceSearchIndex.make(cwd);
         const searched = yield* searchIndex.search("link", 10);
-        const files = yield* searchIndex.search("link", 1, "file");
+        const files = yield* searchIndex.search("link", 1, { kind: "file" });
         const listed = yield* searchIndex.list();
 
         expect(searched.entries).toEqual([
@@ -501,7 +511,7 @@ it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
         );
 
         const result = yield* WorkspaceSearchIndex.make(home).pipe(
-          Effect.flatMap((searchIndex) => searchIndex.search("stl", 50, undefined, false)),
+          Effect.flatMap((searchIndex) => searchIndex.search("stl", 50)),
           Effect.map(({ entries }) => entries),
           Effect.catchTags({
             WorkspaceSearchIndexCreateFailed: (error) => Effect.succeed(error._tag),

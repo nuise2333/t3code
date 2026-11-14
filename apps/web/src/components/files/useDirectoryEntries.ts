@@ -179,10 +179,18 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
     }
   };
 
+  /** Rereads only the folders already listed; an unlisted one is read when it is opened. */
+  const refreshDirectories = (paths: Iterable<string>) => {
+    for (const path of paths) if (requested.current.has(path)) void load(path, true);
+  };
+
   return {
     entries,
+    /** One folder's listing; undefined until it is read or after a parent listing drops it. */
+    childrenOf: (directoryPath: string) => directories.get(directoryPath),
     load,
     refresh,
+    refreshDirectories,
     isPending: pending > 0,
     loadingDirectories,
     ready: directories.has(""),

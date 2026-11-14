@@ -22,7 +22,13 @@ import type {
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
+import {
+  isAbsolutePath,
+  isExplicitRelativePath,
+  isWindowsAbsolutePath,
+  unwrapPastedPath,
+  workspaceRelativeFilePath,
+} from "@t3tools/shared/path";
 import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
@@ -123,6 +129,16 @@ const IGNORE_CHECK_CHUNK_SIZE = 1000;
 
 /** Children classified at once when listing a folder; each symlink costs a realpath and a stat. */
 const SYMLINK_RESOLVE_BATCH_SIZE = 64;
+
+/** A path pasted from a file manager, terminal, or file URL, rewritten relative to `cwd` when inside it. */
+export function relativizePastedPath(query: string, cwd: string, homeDir: string): string {
+  const unwrapped = unwrapPastedPath(query);
+  if (unwrapped === null) return query;
+  const candidate = expandHomePath(unwrapped, homeDir);
+  if (!isAbsolutePath(candidate)) return query;
+  const relativePath = workspaceRelativeFilePath(candidate, cwd);
+  return relativePath === null || relativePath === "." ? query : relativePath;
+}
 
 const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(function* (
   input: FilesystemBrowseInput,
@@ -257,12 +273,17 @@ export const make = Effect.gen(function* () {
   const search: WorkspaceEntries["Service"]["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
-      const normalizedQuery = normalizeSearchQuery(input.query, {
+      const query = relativizePastedPath(
+        input.query,
+        normalizedCwd,
+        yield* HostProcess.HomeDirectory,
+      );
+      const normalizedQuery = normalizeSearchQuery(query, {
         trimLeadingPattern: /^[@./]+/,
       });
       const result = yield* Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        return yield* searchIndex.search(normalizedQuery, input.limit, input.kind, input.imageOnly);
+        return yield* searchIndex.search(normalizedQuery, input.limit, input);
       }).pipe(
         Effect.provide(
           workspaceSearchIndexes.get(
@@ -270,12 +291,13 @@ export const make = Effect.gen(function* () {
           ),
         ),
       );
-      if (input.kind === "directory" || input.imageOnly) return result;
-      const worktreeFiles = yield* findNestedWorktreeFiles(
+      const fileFilter = WorkspaceSearchIndex.fileFilterOf(input);
+      if (input.kind === "directory" && !fileFilter) return result;
+      const worktreeFiles = (yield* findNestedWorktreeFiles(
         normalizedCwd,
-        input.query,
+        query,
         result.entries,
-      );
+      )).filter((entry) => !fileFilter || fileFilter(entry.path));
       if (worktreeFiles.length === 0) return result;
       const entries = [...worktreeFiles, ...result.entries];
       return {

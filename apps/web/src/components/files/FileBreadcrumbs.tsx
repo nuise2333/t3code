@@ -33,8 +33,8 @@ import { useProjectEntriesQuery } from "./projectFilesQueryState";
 interface FileBreadcrumbsProps {
   readonly cwd: string;
   readonly environmentId: EnvironmentId;
-  /** Navigates to a folder; an empty path is the workspace root. */
-  readonly onNavigateFolder: (relativePath: string) => void;
+  /** Navigates to a folder ("" is the workspace root); newTab comes from Cmd/Ctrl-click or middle-click. */
+  readonly onNavigateFolder: (relativePath: string, newTab: boolean) => void;
   readonly onOpenFile: (relativePath: string) => void;
   readonly projectName: string;
   /** Current path; an empty path is the workspace root. */
@@ -267,7 +267,7 @@ function FolderBreadcrumb(props: {
   readonly crumb: FileBreadcrumb;
   /** Whether this crumb is below the current folder. */
   readonly descendant: boolean;
-  readonly onNavigate: (path: string) => void;
+  readonly onNavigate: (path: string, newTab: boolean) => void;
   readonly projectName: string;
 }) {
   return (
@@ -276,7 +276,12 @@ function FolderBreadcrumb(props: {
         render={
           <button
             type="button"
-            onClick={() => props.onNavigate(props.crumb.path)}
+            onClick={(event) => props.onNavigate(props.crumb.path, event.metaKey || event.ctrlKey)}
+            onAuxClick={(event) => {
+              if (event.button !== 1) return;
+              event.preventDefault();
+              props.onNavigate(props.crumb.path, true);
+            }}
             className={cn(
               "relative block max-w-40 cursor-pointer rounded-sm px-0.5 text-left outline-none pointer-coarse:after:absolute pointer-coarse:after:inset-x-0 pointer-coarse:after:-inset-y-3 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
               props.descendant ? "text-muted-foreground/70" : "text-muted-foreground",

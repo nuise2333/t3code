@@ -343,6 +343,29 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         }),
     );
 
+    // Older clients do not decode `not_found`; only writes that opt out of creating send it.
+    it.effect("reports missing workspace and host paths as failed reads unless allowed", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const outsideDir = yield* makeTempDir;
+
+        for (const relativePath of ["gone/folder", path.join(outsideDir, "gone")]) {
+          const error = yield* workspaceFileSystem
+            .readFile({ cwd, relativePath })
+            .pipe(Effect.flip);
+          expect(error).toMatchObject({
+            _tag: "WorkspaceFileSystemOperationError",
+            operation: "realpath-target",
+          });
+          expect(
+            yield* workspaceFileSystem.readFile({ cwd, relativePath, allowMissing: true }),
+          ).toMatchObject({ exists: false });
+        }
+      }),
+    );
+
     it.effect("does not read server state files", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -678,6 +701,36 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           ),
         ),
       ),
+    );
+
+    it.effect("autosave does not bring back a file that was moved away", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "notes/draft.md", "first");
+
+        yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "notes/draft.md",
+          contents: "second",
+          createIfMissing: false,
+        });
+        expect(yield* fileSystem.readFileString(path.join(cwd, "notes/draft.md"))).toBe("second");
+
+        yield* fileSystem.remove(path.join(cwd, "notes/draft.md"));
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "notes/draft.md",
+            contents: "third",
+            createIfMissing: false,
+          })
+          .pipe(Effect.flip);
+        expect(error._tag).toBe("WorkspaceFileMissingError");
+        expect(yield* fileSystem.exists(path.join(cwd, "notes/draft.md"))).toBe(false);
+      }),
     );
 
     it.effect("rejects writes outside the workspace root", () =>

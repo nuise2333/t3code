@@ -7,18 +7,21 @@ export type ConfirmDialogState =
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
       readonly initialFocus: ConfirmDialogOptions["initialFocus"];
+      readonly confirmLabel: ConfirmDialogOptions["confirmLabel"];
     }
   | {
       readonly status: "closing";
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
       readonly initialFocus: ConfirmDialogOptions["initialFocus"];
+      readonly confirmLabel: ConfirmDialogOptions["confirmLabel"];
     };
 
 type PendingConfirmation = {
   readonly message: string;
   readonly variant: ConfirmDialogVariant;
   readonly initialFocus: ConfirmDialogOptions["initialFocus"];
+  readonly confirmLabel: ConfirmDialogOptions["confirmLabel"];
   readonly resolve: (confirmed: boolean) => void;
 };
 
@@ -73,6 +76,7 @@ export function requestConfirmDialog(
       message,
       variant: options?.variant ?? "default",
       initialFocus: options?.initialFocus,
+      confirmLabel: options?.confirmLabel,
       resolve,
     } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {
@@ -86,6 +90,7 @@ export function requestConfirmDialog(
       message,
       variant: pending.variant,
       initialFocus: pending.initialFocus,
+      confirmLabel: pending.confirmLabel,
     });
   });
 
@@ -107,6 +112,7 @@ export function respondToConfirmDialog(confirmed: boolean): void {
     message: state.message,
     variant: state.variant,
     initialFocus: state.initialFocus,
+    confirmLabel: state.confirmLabel,
   });
 }
 
@@ -125,6 +131,7 @@ export function completeConfirmDialogClose(): void {
     message: next.message,
     variant: next.variant,
     initialFocus: next.initialFocus,
+    confirmLabel: next.confirmLabel,
   });
 }
 

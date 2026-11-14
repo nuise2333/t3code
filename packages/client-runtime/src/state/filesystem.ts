@@ -24,6 +24,9 @@ import {
 import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
 const BROWSE_IDLE_TTL_MS = 5_000;
+// Well under the host's 3 s search deadline: dropping a superseded keystroke's query
+// interrupts its RPC, and the host then kills that index process.
+const SEARCH_HOST_IDLE_TTL_MS = 300;
 
 export function resolveFilesystemReadAccess(input: {
   readonly isCatalogReady: boolean;
@@ -196,6 +199,12 @@ export function createFilesystemEnvironmentAtoms<R, E>(
       // A listing mirrors a directory that can change outside the app, so reopening a picker
       // lists it again. The short TTL only keeps the old listing on screen while it refreshes.
       idleTtlMs: BROWSE_IDLE_TTL_MS,
+      staleTimeMs: 0,
+    }),
+    searchHost: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:filesystem:search-host",
+      tag: WS_METHODS.filesystemSearchHost,
+      idleTtlMs: SEARCH_HOST_IDLE_TTL_MS,
       staleTimeMs: 0,
     }),
   };

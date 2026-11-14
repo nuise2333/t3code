@@ -25,13 +25,14 @@ import * as Schema from "effect/Schema";
 
 import type {
   ProjectEntry,
-  ProjectEntryKind,
   ProjectListEntriesResult,
   ProjectSearchContentsInput,
   ProjectSearchContentsResult,
+  ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { fileCategoryOf } from "@t3tools/shared/fileCategory";
 import { isProjectFaviconPath } from "@t3tools/shared/projectFavicon";
 import { scoreSubsequenceMatch } from "@t3tools/shared/searchRanking";
 
@@ -122,6 +123,21 @@ export class WorkspaceSearchIndexDestroyFailed extends Schema.TaggedError<Worksp
   }
 }
 
+export type WorkspaceSearchFilter = Pick<
+  ProjectSearchEntriesInput,
+  "kind" | "imageOnly" | "category"
+>;
+
+/** A file-only filter, or undefined when every file matches. */
+export function fileFilterOf(
+  filter: WorkspaceSearchFilter,
+): ((path: string) => boolean) | undefined {
+  const { imageOnly, category } = filter;
+  if (imageOnly) return isProjectFaviconPath;
+  if (category) return (path) => fileCategoryOf(path) === category;
+  return undefined;
+}
+
 export class WorkspaceSearchIndex extends Context.Service<
   WorkspaceSearchIndex,
   {
@@ -129,8 +145,7 @@ export class WorkspaceSearchIndex extends Context.Service<
     readonly search: (
       query: string,
       limit: number,
-      kind?: ProjectEntryKind,
-      imageOnly?: boolean,
+      filter?: WorkspaceSearchFilter,
     ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceSearchIndexSearchFailed>;
     readonly searchContents: (
       input: Omit<ProjectSearchContentsInput, "cwd">,
@@ -181,11 +196,11 @@ function mapFileSearchResult(
   result: SearchPage<FileItem>,
   limit: number,
   hostIsWindows: boolean,
-  imageOnly = false,
+  fileFilter?: (path: string) => boolean,
 ): ProjectSearchEntriesResult {
   const entries = result.items.flatMap((item) => {
     const entry = toFileEntry(item, hostIsWindows);
-    return entry && (!imageOnly || isProjectFaviconPath(entry.path)) ? [entry] : [];
+    return entry && (!fileFilter || fileFilter(entry.path)) ? [entry] : [];
   });
   return {
     entries: entries.slice(0, limit),
@@ -840,24 +855,30 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
     };
   });
 
-  // Grows the first page until hidden entries can no longer crowd visible ones out of it.
+  // Grows the page until hidden or filtered-out entries can no longer crowd `wanted` matches out of it.
   const searchVisible = Effect.fn("WorkspaceSearchIndex.searchVisible")(function* <I>(
     query: string,
     pageSize: number,
+    wanted: number,
     operation: "directorySearch" | "fileSearch" | "mixedSearch",
     execute: (pageSize: number) => Promise<Result<SearchPage<I>>>,
     pathOf: (item: I) => string,
+    matches?: (item: I) => boolean,
   ): Effect.fn.Return<SearchPage<I>, WorkspaceSearchIndexSearchFailed> {
     let size = pageSize;
     while (true) {
       const fetchSize = size;
       const result = yield* runSearch(query, fetchSize, operation, () => execute(fetchSize));
-      if (ignoredPaths.size === 0) return result;
-      const items = result.items.filter(
-        (item) => !isIgnoredPath(ignoredPaths, pathOf(item), hostIsWindows),
-      );
+      if (ignoredPaths.size === 0 && !matches) return result;
+      const items =
+        ignoredPaths.size === 0
+          ? result.items
+          : result.items.filter(
+              (item) => !isIgnoredPath(ignoredPaths, pathOf(item), hostIsWindows),
+            );
+      const found = matches ? items.filter(matches).length : items.length;
       if (
-        items.length >= pageSize ||
+        found >= wanted ||
         result.items.length >= result.totalMatched ||
         fetchSize >= WORKSPACE_INDEX_PAGE_SIZE
       ) {
@@ -911,6 +932,7 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
       const result = yield* searchVisible(
         "",
         WORKSPACE_INDEX_PAGE_SIZE,
+        WORKSPACE_INDEX_PAGE_SIZE,
         "mixedSearch",
         (pageSize) => finder.mixedSearchAsync("", { pageSize }),
         mixedItemPath,
@@ -934,34 +956,45 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
   const searchNames = Effect.fn("WorkspaceSearchIndex.searchNames")(function* (
     query: string,
     limit: number,
-    kind: ProjectEntryKind | undefined,
-    imageOnly: boolean | undefined,
+    filter: WorkspaceSearchFilter,
   ) {
+    const fileFilter = fileFilterOf(filter);
+    const kind = fileFilter ? "file" : filter.kind;
     const { entries: allSymlinks, linkPaths } = yield* listSymlinkEntries();
-    const symlinks = allSymlinks.filter((entry) =>
-      imageOnly
-        ? entry.kind === "file" && isProjectFaviconPath(entry.path)
-        : kind === undefined || entry.kind === kind,
+    const symlinks = allSymlinks.filter(
+      (entry) =>
+        (kind === undefined || entry.kind === kind) && (!fileFilter || fileFilter(entry.path)),
     );
     // Index results that are filtered-out links get dropped in the merge, so fetch past them.
     const indexLimit = limit + linkPaths.size - symlinks.length;
-    const pageSize = imageOnly ? WORKSPACE_INDEX_PAGE_SIZE : Math.max(1, indexLimit + 1);
+    const wanted = Math.max(1, indexLimit + 1);
+    // fff cannot filter by extension, so a file filter starts wider and grows past non-matches.
+    const pageSize = fileFilter
+      ? Math.min(WORKSPACE_INDEX_PAGE_SIZE, Math.max(wanted * 8, 256))
+      : wanted;
     const merge = (indexed: ProjectSearchEntriesResult) =>
       mergeSymlinkMatches(indexed, linkPaths, symlinks, query, limit);
-    if (kind === "file" || imageOnly) {
+    if (kind === "file") {
       const result = yield* searchVisible(
         query,
         pageSize,
+        wanted,
         "fileSearch",
         (size) => finder.fileSearchAsync(query, { pageSize: size }),
         (item) => item.relativePath,
+        fileFilter &&
+          ((item) => {
+            const entry = toFileEntry(item, hostIsWindows);
+            return entry !== null && fileFilter(entry.path);
+          }),
       );
-      return merge(mapFileSearchResult(result, indexLimit, hostIsWindows, imageOnly));
+      return merge(mapFileSearchResult(result, indexLimit, hostIsWindows, fileFilter));
     }
     if (kind === "directory") {
       const result = yield* searchVisible(
         query,
         pageSize,
+        wanted,
         "directorySearch",
         (size) => finder.directorySearchAsync(query, { pageSize: size }),
         (item) => item.relativePath,
@@ -971,6 +1004,7 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
     const result = yield* searchVisible(
       query,
       pageSize,
+      wanted,
       "mixedSearch",
       (size) => finder.mixedSearchAsync(query, { pageSize: size }),
       mixedItemPath,
@@ -980,15 +1014,15 @@ export const make = Effect.fn("WorkspaceSearchIndex.make")(function* (
 
   const search: WorkspaceSearchIndex["Service"]["search"] = Effect.fn(
     "WorkspaceSearchIndex.search",
-  )(function* (rawQuery, limit, kind, imageOnly) {
+  )(function* (rawQuery, limit, filter = {}) {
     // fff parses any word containing "[" or "{" as a glob and has no escape for them; fuzzy
     // matching is subsequence-based, so dropping them still matches "[id]" and "a{b}" paths.
     // "{" is dropped only when the query finds nothing as a glob, so "*.{ts,tsx}" keeps working.
     const query = rawQuery.replaceAll("[", "");
     const incompleteBeforeQuery = yield* hasIncompleteInitialScan();
-    let mapped = yield* searchNames(query, limit, kind, imageOnly);
+    let mapped = yield* searchNames(query, limit, filter);
     if (mapped.entries.length === 0 && query.includes("{")) {
-      mapped = yield* searchNames(query.replaceAll("{", ""), limit, kind, imageOnly);
+      mapped = yield* searchNames(query.replaceAll("{", ""), limit, filter);
     }
     return { ...mapped, truncated: incompleteBeforeQuery || mapped.truncated };
   });

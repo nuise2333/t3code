@@ -1,6 +1,6 @@
 import type { AssetResource, ProjectReadFileError, ScopedThreadRef } from "@t3tools/contracts";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
-import { isHostPath, workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { workspaceRelativeFilePath } from "@t3tools/shared/path";
 
 export function resolveFilePreviewPath(path: string | null, cwd: string): string | null {
   if (path === null) return null;
@@ -20,6 +20,8 @@ export function filePreviewReadErrorMessage(error: ProjectReadFileError): string
       return "The requested path is outside the workspace.";
     case "resolved_path_outside_root":
       return "The path resolves to a location outside the workspace.";
+    case "not_found":
+      return "The file no longer exists.";
     case "operation_failed":
       return error.operation === "realpath-workspace-root"
         ? "The workspace folder could not be accessed."
@@ -33,10 +35,10 @@ export function shouldShowFileExplorer(input: {
   readonly relativePath: string | null;
   readonly explorerOpen: boolean;
   readonly attachmentOpen: boolean;
+  /** Null while a host path's folder is still unknown. */
+  readonly explorerRoot: string | null;
 }): boolean {
-  if (input.attachmentOpen || (input.relativePath && isHostPath(input.relativePath))) {
-    return false;
-  }
+  if (input.attachmentOpen || input.explorerRoot === null) return false;
   return input.explorerOpen || input.relativePath === null;
 }
 

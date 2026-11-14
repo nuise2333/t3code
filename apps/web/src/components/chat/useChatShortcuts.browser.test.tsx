@@ -187,3 +187,52 @@ it("runs a side chat's composer chords only from its composer, and never thread 
   expect(toggles).toEqual(["model"]);
   expect(stops).toEqual([]);
 });
+
+// The Files tree claims Mod+D for duplicate while a row has focus; diff.toggle is Mod+D elsewhere.
+function LocalShortcutRegion(props: { toggles: string[] }) {
+  useChatShortcuts({
+    enabled: true,
+    keybindings: [
+      {
+        command: "diff.toggle",
+        shortcut: {
+          key: "d",
+          metaKey: false,
+          ctrlKey: true,
+          shiftKey: false,
+          altKey: false,
+          modKey: false,
+        },
+      },
+    ],
+    scriptKeybindings: [],
+    getShortcutContext: () => shortcutContext,
+    threadFindActive: false,
+    composerRef: { current: null },
+    branchToolbarRef: { current: null },
+    closeThreadFind: () => {},
+    commands: { "diff.toggle": () => void props.toggles.push("diff") },
+    fallback: () => undefined,
+  });
+  return (
+    <>
+      <div data-local-shortcuts="Control+D">
+        <button type="button">Tree row</button>
+      </div>
+      <button type="button">Elsewhere</button>
+    </>
+  );
+}
+
+it("leaves a shortcut to the focused region that claims it", async () => {
+  const toggles: string[] = [];
+  await using screen = await render(<LocalShortcutRegion toggles={toggles} />, options);
+
+  (screen.getByText("Tree row").element() as HTMLElement).focus();
+  await userEvent.keyboard("{Control>}d{/Control}");
+  expect(toggles).toEqual([]);
+
+  (screen.getByText("Elsewhere").element() as HTMLElement).focus();
+  await userEvent.keyboard("{Control>}d{/Control}");
+  expect(toggles).toEqual(["diff"]);
+});

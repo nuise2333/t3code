@@ -69,6 +69,18 @@ function writtenFilePaths(
   );
 }
 
+function fileOperationPaths(
+  input: EnvironmentRpcInput<typeof WS_METHODS.filesystemFileOperation>,
+  result: EnvironmentRpcSuccess<typeof WS_METHODS.filesystemFileOperation>,
+) {
+  const paths = result.items.flatMap((item) =>
+    item.destination === undefined || item.failure !== undefined
+      ? [item.path]
+      : [item.path, item.destination],
+  );
+  return new Set(paths.map((path) => resolveWorkspaceFilePath(path, input.root)));
+}
+
 export class ScratchProjectNotLoadedError extends Schema.TaggedError<ScratchProjectNotLoadedError>()(
   "ScratchProjectNotLoadedError",
   { projectId: ProjectId },
@@ -241,6 +253,26 @@ export function createProjectEnvironmentAtoms<R, E>(
       onSuccess: ({ environmentId, input }, registry, result) =>
         Effect.sync(() => {
           for (const path of writtenFilePaths(input, result))
+            fileMetadata.refreshPath(environmentId, path, registry);
+        }),
+    }),
+    fileOperation: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:filesystem:file-operation",
+      tag: WS_METHODS.filesystemFileOperation,
+      scheduler: fileScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.root]),
+      },
+      execute: (input) =>
+        requestGuarded(WS_METHODS.filesystemFileOperation, input).pipe(
+          Effect.tap((result) =>
+            Effect.forEach(fileOperationPaths(input, result), fileMetadata.invalidate),
+          ),
+        ),
+      onSuccess: ({ environmentId, input }, registry, result) =>
+        Effect.sync(() => {
+          for (const path of fileOperationPaths(input, result))
             fileMetadata.refreshPath(environmentId, path, registry);
         }),
     }),

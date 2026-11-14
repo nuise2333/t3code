@@ -106,10 +106,34 @@ describe("resolveFilePreviewPath", () => {
     expect(relativePath).toBe(expected);
     if (expected === null) {
       expect(
-        shouldShowFileExplorer({ relativePath, explorerOpen: false, attachmentOpen: false }),
+        shouldShowFileExplorer({
+          relativePath,
+          explorerOpen: false,
+          attachmentOpen: false,
+          explorerRoot: "/repo/project",
+        }),
       ).toBe(true);
     }
   });
+});
+
+describe("shouldShowFileExplorer", () => {
+  it.each([
+    ["src/main.ts", true, false, "/repo", true],
+    ["src/main.ts", false, false, "/repo", false],
+    ["/tmp/report.md", true, false, "/tmp", true],
+    ["/tmp/report.md", false, false, "/tmp", false],
+    ["/tmp/report.md", true, false, null, false],
+    [null, false, false, "/tmp/folder", true],
+    ["/attachments/a.png", true, true, null, false],
+  ] as const)(
+    "%j open=%j attachment=%j root=%j shows %j",
+    (relativePath, explorerOpen, attachmentOpen, explorerRoot, expected) => {
+      expect(
+        shouldShowFileExplorer({ relativePath, explorerOpen, attachmentOpen, explorerRoot }),
+      ).toBe(expected);
+    },
+  );
 });
 
 describe("workspaceAssetResource", () => {
