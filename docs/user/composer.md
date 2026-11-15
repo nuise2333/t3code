@@ -142,8 +142,8 @@ once keeps each model's own level.
 Under Auto effort you can also let Auto switch the model (on the same provider)
 or the provider of a new thread. It decides once, at launch, only when you
 didn't pick a model in that draft, and only among models T3 Code has benchmark
-data for: a cheaper one for questions, a stronger one for large changes. It
-never turns on fast mode, a larger context, or other paid extras. With
+data for: a cheaper one for questions, and a stronger one only for large
+changes, so other tasks never move to a pricier model than yours. It never turns on fast mode, a larger context, or other paid extras. With
 switching off, the started thread's tooltip shows what Auto would have picked.
 
 ## Routing groups

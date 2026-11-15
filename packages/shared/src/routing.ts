@@ -439,7 +439,8 @@ interface AutoModelChoice {
 }
 
 /**
- * The model Auto would launch with: the cheapest verified tier at or above the task's,
+ * The model Auto would launch with: the cheapest verified tier at or above the task's, and
+ * no pricier than the thread's model unless the task is hard,
  * among candidates that pass a routing group member's checks.
  */
 export function chooseAutoModel(input: {
@@ -524,8 +525,13 @@ export function chooseAutoModel(input: {
     }
   }
 
-  const tier = TIER_ORDER.slice(TIER_ORDER.indexOf(DESIRED_TIER[input.taskClass])).find((level) =>
-    candidates.some((candidate) => candidate.tier === level),
+  // Only hard tasks may move to a pricier tier than the thread's model, so turning Auto on saves.
+  const ceiling =
+    input.taskClass === "hard" || currentTier === null
+      ? TIER_ORDER.length
+      : TIER_ORDER.indexOf(currentTier) + 1;
+  const tier = TIER_ORDER.slice(TIER_ORDER.indexOf(DESIRED_TIER[input.taskClass]), ceiling).find(
+    (level) => candidates.some((candidate) => candidate.tier === level),
   );
   if (tier === undefined) return keep();
   const ranked = candidates
