@@ -62,7 +62,17 @@
       { "driver": "grok", "model": "*", "sourceIds": ["aa-index"] },
       { "driver": "kiro", "model": "*", "sourceIds": ["aa-index"] },
       { "driver": "pi", "model": "*", "sourceIds": ["aa-index"] },
-      { "driver": "muse", "model": "*", "sourceIds": ["aa-index"] },
+      {
+        "driver": "muse",
+        "model": "*",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
+        "sourceIds": ["aa-index"]
+      },
       { "driver": "fx", "model": "*", "sourceIds": ["aa-index"] }
     ]
   },
