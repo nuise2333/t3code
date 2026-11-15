@@ -118,6 +118,24 @@ describe("routing groups", () => {
     expect(offered({ newThread: true, capability: false })).toStrictEqual([]);
   });
 
+  it("holds the first member that looks runnable, so a stopped first member does not block sending", () => {
+    const placeholder = (runnable: (instance: string, model: string) => boolean) =>
+      pickerRoutingGroups({
+        newThread: true,
+        multiModel: false,
+        capability: true,
+        groups: [group],
+        providers: providers.map((provider) => ({
+          ...provider,
+          runnable: (model: string) => runnable(provider.instanceId, model),
+        })),
+      })[0]?.placeholder;
+    expect(placeholder((instance) => instance !== claude)).toStrictEqual(group.members[1]);
+    expect(placeholder(() => true)).toStrictEqual(group.members[0]);
+    // With nothing runnable the server reports every member's reason, so the draft keeps the first.
+    expect(placeholder(() => false)).toStrictEqual(group.members[0]);
+  });
+
   it("finds rules naming a deleted group and members on a removed provider", () => {
     const problems = routingGroupProblems({
       groups: [group],

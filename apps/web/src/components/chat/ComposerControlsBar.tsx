@@ -15,6 +15,7 @@ import {
   autoEffortSupported,
   routedEffortDisplay,
   pickerRoutingGroups,
+  routingProviderSource,
   routedGroupDisplay,
 } from "@t3tools/client-runtime/routing";
 import {
@@ -31,6 +32,7 @@ import { cn } from "~/lib/utils";
 import { resolveComposerTraitsInput } from "./composerProviderState";
 import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import {
   ComposerEffortColumn,
   type ComposerEffortRouting,
@@ -189,10 +191,10 @@ export function ComposerControlsBar(props: {
       ? (store.getComposerDraft(draftId)?.routingGroupId ?? null)
       : null,
   );
-  const providerModels = providerInstanceEntries.map((entry) => ({
-    instanceId: entry.instanceId,
-    models: entry.snapshot.models,
-  }));
+  const nowMs = Date.parse(useNowMinute());
+  const providerModels = providerInstanceEntries.map((entry) =>
+    routingProviderSource(entry.snapshot, nowMs),
+  );
   const routingGroups = pickerRoutingGroups({
     newThread: routeKind === "draft" && draftId !== null && draftId !== undefined,
     multiModel: multipleModelSelections !== null,

@@ -10,6 +10,7 @@ import {
   launchRoutingRequest,
   type PickerRoutingGroup,
   pickerRoutingGroups,
+  routingProviderSource,
 } from "@t3tools/client-runtime/routing";
 
 import type {
@@ -553,7 +554,9 @@ export function NewTaskFlowProvider(
     multiModel: false,
     capability: selectedEnvironmentServerConfig?.environment.capabilities.routingGroups,
     groups: selectedEnvironmentServerConfig?.settings.routingGroups,
-    providers: selectedEnvironmentServerConfig?.providers ?? [],
+    providers: (selectedEnvironmentServerConfig?.providers ?? []).map((provider) =>
+      routingProviderSource(provider, modelSelectionNow),
+    ),
   });
   const draftRoutingGroupId = selectedProjectDraft.routingGroupId ?? null;
   const selectedRoutingGroup =

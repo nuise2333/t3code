@@ -1,17 +1,20 @@
-import type {
-  LaunchRoutingRequest,
-  ModelSelection,
-  ProviderInstanceId,
-  ProviderOptionDescriptor,
-  RouteDecision,
-  RoutingGroup,
-  RoutingGroupRules,
-  RoutingReason,
-  RoutingSkipReason,
-  RoutingTaskClass,
+import {
+  isProviderAvailable,
+  type LaunchRoutingRequest,
+  type ModelSelection,
+  type ProviderInstanceId,
+  type ProviderOptionDescriptor,
+  type RouteDecision,
+  type RoutingGroup,
+  type RoutingGroupRules,
+  type RoutingReason,
+  type RoutingSkipReason,
+  type RoutingTaskClass,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { isReasoningSelect } from "@t3tools/shared/model";
 import { effortSetOutsidePicker } from "@t3tools/shared/routing";
+import { exhaustedUsageWindow } from "@t3tools/shared/usageLimits";
 
 const REASON_LABELS: Partial<Record<RoutingReason, string>> = {
   plan_mode: "Plan mode",
@@ -149,6 +152,24 @@ interface ModelNameSource {
     readonly shortName?: string | undefined;
     readonly aliases?: ReadonlyArray<string> | undefined;
   }>;
+  /** Whether the instance looks able to run this model now; the server decides at launch. */
+  readonly runnable?: ((model: string) => boolean) | undefined;
+}
+
+/** A provider snapshot as a group member source, with the server's cheap launch checks. */
+export function routingProviderSource(snapshot: ServerProvider, now: number): ModelNameSource {
+  const ready =
+    snapshot.enabled &&
+    snapshot.installed &&
+    snapshot.status !== "error" &&
+    snapshot.status !== "disabled" &&
+    snapshot.auth.status !== "unauthenticated" &&
+    isProviderAvailable(snapshot);
+  return {
+    instanceId: snapshot.instanceId,
+    models: snapshot.models,
+    runnable: (model) => ready && exhaustedUsageWindow(snapshot, now, model) === undefined,
+  };
 }
 
 export function routingMemberLabel(
@@ -294,7 +315,17 @@ export function pickerRoutingGroups(input: {
 }): ReadonlyArray<PickerRoutingGroup> {
   if (!input.newThread || input.multiModel) return [];
   return offeredRoutingGroups(input).flatMap((group) => {
-    const placeholder = group.members[0];
+    // The draft shows the member the server would most likely pick, so an exhausted or
+    // stopped first member does not block sending.
+    const placeholder =
+      group.members.find((member) => {
+        const provider = input.providers.find((entry) => entry.instanceId === member.instanceId);
+        const model = provider?.models.find(
+          (candidate) =>
+            candidate.slug === member.model || candidate.aliases?.includes(member.model),
+        );
+        return model !== undefined && provider?.runnable?.(model.slug) !== false;
+      }) ?? group.members[0];
     if (!placeholder) return [];
     return [
       {
