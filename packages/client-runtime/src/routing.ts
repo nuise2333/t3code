@@ -12,9 +12,10 @@ const REASON_LABELS: Partial<Record<RoutingReason, string>> = {
   plan_mode: "Plan mode",
   many_paths: "Mentions 3+ files",
   hard_keyword: "Large change",
+  debug_keyword: "Debugging",
   question: "Question, no edits",
   quick_keyword: "Small edit",
-  default_class: "Implementation task",
+  default_class: "No clear signal",
   model_row: "Tuned for this model",
   nearest_level: "Closest level this model offers",
 };

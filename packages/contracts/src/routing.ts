@@ -15,6 +15,7 @@ export const RoutingReason = Schema.Literals([
   "plan_mode",
   "many_paths",
   "hard_keyword",
+  "debug_keyword",
   "question",
   "quick_keyword",
   "default_class",
