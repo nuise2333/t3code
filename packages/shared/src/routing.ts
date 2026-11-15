@@ -21,7 +21,7 @@ const EFFORT_LADDER: ReadonlyArray<RoutingEffort> = ["low", "medium", "high"];
 
 const PATH_TOKEN =
   /(?:^|[\s`'"([])((?:[\w@.-]+\/)+[\w@.-]+|[\w-]+\.(?:tsx?|jsx?|mjs|cjs|json|md|py|go|rs|java|kt|swift|css|scss|html|ya?ml|toml|sql|sh|rb|c|cc|cpp|h|hpp|cs|php|vue|svelte))(?=$|[\s`'"),:;\]]|\.(?:\s|$))/g;
-const HARD_KEYWORD = /\b(?:migrat\w*|across|rewrit\w*|architect\w*)\b|迁移|跨模块|跨文件|重写/i;
+const HARD_KEYWORD = /\b(?:across|rewrit\w*|architect\w*)\b|跨模块|跨文件|重写/i;
 const REFACTOR = /\brefactor\w*\b|重构/i;
 const REFACTOR_SPAN = /\bacross\b|跨(?!域|平台|端)/i;
 const DEBUG_KEYWORD =

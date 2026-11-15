@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-15T00:00:00Z",
+  "updatedAt": "2026-11-15T12:00:00Z",
   "routing": {
     "version": 1,
-    "updatedAt": "2026-11-15T00:00:00Z",
+    "updatedAt": "2026-11-15T12:00:00Z",
     "sources": {
       "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
       "aa-coding": {
@@ -18,6 +18,14 @@
       "codex-docs": {
         "url": "https://learn.chatgpt.com/docs/models",
         "dataDate": "2026-11-15"
+      },
+      "claude-effort-levels": {
+        "url": "https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels",
+        "dataDate": "2026-11-15"
+      },
+      "vals-tb4": {
+        "url": "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "dataDate": "2026-11-11"
       }
     },
     "defaultEffortByClass": {
@@ -45,6 +53,18 @@
         "model": "claude-sonnet-5-5",
         "effortByClass": { "implement": "high" },
         "sourceIds": ["aa-index"]
+      },
+      {
+        "driver": "claudeAgent",
+        "model": "claude-opus-5-5",
+        "effortByClass": { "readonly": "medium" },
+        "sourceIds": ["vals-tb4", "aa-coding"]
+      },
+      {
+        "driver": "claudeAgent",
+        "model": "claude-haiku-5-5",
+        "effortByClass": { "readonly": "medium" },
+        "sourceIds": ["claude-effort-levels"]
       },
       {
         "driver": "antigravity",

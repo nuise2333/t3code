@@ -103,8 +103,14 @@ describe("classifyTask", () => {
     {
       prompt: "把数据库层迁移到新驱动",
       mode: "default",
-      taskClass: "hard",
-      reason: "hard_keyword",
+      taskClass: "implement",
+      reason: "default_class",
+    },
+    {
+      prompt: "Migrate the session store to the new database driver",
+      mode: "default",
+      taskClass: "implement",
+      reason: "default_class",
     },
     { prompt: "重构登录模块", mode: "default", taskClass: "implement", reason: "default_class" },
     {
