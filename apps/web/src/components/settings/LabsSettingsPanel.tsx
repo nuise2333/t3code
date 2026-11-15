@@ -191,21 +191,93 @@ function PromptSuggestionsRow() {
   );
 }
 
+// The three switches share one setting, so each compares only its own field across machines.
+function useAutoRoutingMixed(field: "enabled" | "allowModelSwitch" | "allowProviderSwitch") {
+  const { targets } = useSettingsScope();
+  const values = targets.map((target) => target.settings.autoRouting[field]);
+  return values.some((value) => value !== values[0]);
+}
+
 function AutoEffortRow() {
+  const { connectedEnvironments } = useSettingsScope();
+  const mixed = useAutoRoutingMixed("enabled");
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  // Older servers ignore the switches, so they show only when every machine in scope honors them.
+  const switchingOffered =
+    connectedEnvironments.length > 0 &&
+    connectedEnvironments.every(
+      (environment) => environment.serverConfig?.environment.capabilities.autoModelRouting === true,
+    );
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("auto-effort-beta")}
+      settingKeys={["autoRouting"]}
+      mixed={mixed}
+      description="Adds Auto to the effort picker for new threads. Auto picks Low, Medium or High from your first message, once, and keeps your model unless you allow switching below. Pick a level to set it yourself."
+      control={
+        <Switch
+          mixed={mixed}
+          checked={mixed ? false : settings.autoRouting.enabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ autoRouting: { enabled: Boolean(checked) } })
+          }
+          aria-label="Auto effort"
+        />
+      }
+    >
+      {settings.autoRouting.enabled && switchingOffered ? (
+        <div className="mt-2 mb-2 border-l-2 border-border/60 ps-3">
+          <AutoSwitchRow
+            id="auto-model-switch-beta"
+            setting="allowModelSwitch"
+            label="Auto can switch model"
+            description="Once, at launch, Auto may move a new thread to a cheaper or stronger model on the same provider. Only when you didn't pick the model. Off keeps your model."
+          />
+          <AutoSwitchRow
+            id="auto-provider-switch-beta"
+            setting="allowProviderSwitch"
+            label="Auto can switch provider"
+            description="Once, at launch, Auto may use another provider you set up, preferring usage that resets soon. That thread uses that provider's account and limits."
+          />
+        </div>
+      ) : null}
+    </SettingsRow>
+  );
+}
+
+function AutoSwitchRow(props: {
+  readonly id: "auto-model-switch-beta" | "auto-provider-switch-beta";
+  readonly setting: "allowModelSwitch" | "allowProviderSwitch";
+  readonly label: string;
+  readonly description: string;
+}) {
+  const mixed = useAutoRoutingMixed(props.setting);
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   return (
     <SettingsRow
       serverScoped
-      {...searchableSetting("auto-effort-beta")}
-      settingKeys={["autoRoutingEnabled"]}
-      description="Adds Auto to the effort picker for new threads. Auto picks Low, Medium or High from your first message, once, and keeps your model. Pick a level to set it yourself."
+      {...searchableSetting(props.id)}
+      settingKeys={["autoRouting"]}
+      managedPaths={[`autoRouting.${props.setting}`]}
+      mixed={mixed}
+      className="px-0 py-2 sm:px-0"
+      description={props.description}
       control={
-        <ScopedSwitch
-          settingKeys={["autoRoutingEnabled"]}
-          checked={settings.autoRoutingEnabled}
-          onCheckedChange={(checked) => updateSettings({ autoRoutingEnabled: Boolean(checked) })}
-          aria-label="Auto effort"
+        <Switch
+          mixed={mixed}
+          checked={mixed ? false : settings.autoRouting[props.setting]}
+          onCheckedChange={(checked) =>
+            updateSettings({
+              autoRouting:
+                props.setting === "allowModelSwitch"
+                  ? { allowModelSwitch: Boolean(checked) }
+                  : { allowProviderSwitch: Boolean(checked) },
+            })
+          }
+          aria-label={props.label}
         />
       }
     />

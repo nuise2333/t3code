@@ -770,6 +770,16 @@ export const IDLE_COMPACTION_MODES = [
 export const IdleCompactionMode = Schema.Literals(IDLE_COMPACTION_MODES.map((mode) => mode.value));
 export type IdleCompactionMode = typeof IdleCompactionMode.Type;
 
+export const AutoRoutingSettings = Schema.Struct({
+  /** Auto effort: a new thread's reasoning effort, up to high, from its first message. */
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Auto may pick another model on the thread's provider instance, once, at launch. */
+  allowModelSwitch: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Auto may pick a model on another configured provider instance, once, at launch. */
+  allowProviderSwitch: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type AutoRoutingSettings = typeof AutoRoutingSettings.Type;
+
 // Shipped clients reject the whole server config unless `compactIdleThreads` is boolean.
 // Keep the mode in `idleCompaction`, but accept strings from older servers.
 const LegacyCompactIdleThreads = Schema.Union([Schema.Boolean, IdleCompactionMode]);
@@ -1504,8 +1514,8 @@ export const ServerSettings = Schema.Struct({
   linkedEnvironmentsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Beta: Claude and Codex predict the next prompt after completed turns. Codex follows a change at once; open Claude threads after they restart. */
   promptSuggestionsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** Beta: new threads launched with Auto effort get a reasoning effort, up to high, picked from their first message. */
-  autoRoutingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Beta: Auto picks a new thread's effort, and optionally its model, once, from its first message. */
+  autoRouting: AutoRoutingSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   routingGroups: LenientRoutingGroups.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   routingGroupRules: RoutingGroupRules.pipe(
     Schema.catchDecoding(() => Effect.succeedSome({})),
@@ -1941,6 +1951,14 @@ export const ServerSettingsPatch = Schema.Struct({
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
   linkedEnvironmentsEnabled: Schema.optionalKey(Schema.Boolean),
   promptSuggestionsEnabled: Schema.optionalKey(Schema.Boolean),
+  autoRouting: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      allowModelSwitch: Schema.optionalKey(Schema.Boolean),
+      allowProviderSwitch: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+  /** Legacy alias for `autoRouting.enabled`, from clients that predate the object. */
   autoRoutingEnabled: Schema.optionalKey(Schema.Boolean),
   /** Replaces the whole list, like `deviceHosts`. */
   routingGroups: Schema.optionalKey(

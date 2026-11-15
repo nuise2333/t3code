@@ -61,7 +61,7 @@ export function SettingsLabsRouteScreen() {
           title="Auto effort"
           icon="brain"
           capability="autoRouting"
-          setting="autoRoutingEnabled"
+          setting="autoRouting"
           description="Adds Auto to the effort picker for new threads. Auto picks Low, Medium or High from your first message, once, and keeps your model. Pick a level to set it yourself."
         />
       </ScrollView>
@@ -245,10 +245,7 @@ export function NewThreadSettingsSection() {
   );
 }
 
-type MachineBetaSetting =
-  | "linkedEnvironmentsEnabled"
-  | "fastWorktreeCheckout"
-  | "autoRoutingEnabled";
+type MachineBetaSetting = "linkedEnvironmentsEnabled" | "fastWorktreeCheckout" | "autoRouting";
 
 /** One switch per connected machine that offers the beta, since each machine's own setting decides. */
 function MachineBetaSection({
@@ -288,7 +285,11 @@ function MachineBetaSection({
               icon={icon}
               label={environment.label}
               {...(managed ? { subtitle: `Managed by ${policy?.organization}.` } : {})}
-              value={environment.serverConfig?.settings[setting] === true}
+              value={
+                (setting === "autoRouting"
+                  ? environment.serverConfig?.settings.autoRouting?.enabled
+                  : environment.serverConfig?.settings[setting]) === true
+              }
               disabled={managed || !writable.has(environment.environmentId)}
               onValueChange={(value) =>
                 void updateSettings({
@@ -297,8 +298,8 @@ function MachineBetaSection({
                     patch:
                       setting === "linkedEnvironmentsEnabled"
                         ? { linkedEnvironmentsEnabled: value }
-                        : setting === "autoRoutingEnabled"
-                          ? { autoRoutingEnabled: value }
+                        : setting === "autoRouting"
+                          ? { autoRouting: { enabled: value } }
                           : { fastWorktreeCheckout: value },
                   },
                 })

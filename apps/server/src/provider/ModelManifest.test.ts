@@ -289,6 +289,18 @@ describe("resolveRoutingTable", () => {
     assert.isFalse(table.rows.some((row) => row.driver === "acpRegistry"));
   });
 
+  it("bundles verified tiers only for models in the bundled catalog", () => {
+    const verified = ModelManifest.BUNDLED_ROUTING_TABLE.rows.filter((row) => row.verified);
+    assert.isAbove(verified.length, 0);
+    for (const row of verified) {
+      assert.isDefined(row.tier, `${row.driver}/${row.model}`);
+      const slugs = ModelManifest.BUNDLED_MODEL_MANIFEST.providers?.[row.driver]?.models.map(
+        (model) => model.slug,
+      );
+      assert.include(slugs ?? [], row.model, `${row.driver}/${row.model}`);
+    }
+  });
+
   it("keeps only remote rows for drivers the bundled table knows", () => {
     const table = ModelManifest.resolveRoutingTable({ ...REMOTE_MANIFEST, routing: remoteRouting });
     assert.strictEqual(table.updatedAt, REMOTE_UPDATED_AT);
@@ -310,6 +322,15 @@ describe("resolveRoutingTable", () => {
     {
       name: "a row citing an unknown source",
       routing: { ...remoteRouting, rows: [{ driver: "codex", model: "*", sourceIds: ["absent"] }] },
+    },
+    {
+      name: "a row with an unknown tier",
+      routing: {
+        ...remoteRouting,
+        rows: [
+          { driver: "codex", model: "gpt-x", tier: "SS", verified: true, sourceIds: ["bench"] },
+        ],
+      },
     },
     {
       name: "duplicate rows",

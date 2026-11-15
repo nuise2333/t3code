@@ -383,11 +383,20 @@ function patchedIdleCompaction(
   return globalIdleCompaction(current) === "off" ? "off" : "onReturn";
 }
 
+/** Clients that predate the `autoRouting` object send its `enabled` switch flat. */
+function translateLegacyAutoRoutingPatch(patch: ServerSettingsPatch): ServerSettingsPatch {
+  const { autoRoutingEnabled, ...rest } = patch;
+  if (autoRoutingEnabled === undefined) return patch;
+  return { ...rest, autoRouting: { enabled: autoRoutingEnabled, ...rest.autoRouting } };
+}
+
 export function applyServerSettingsPatch(
   current: ServerSettings,
   rawPatch: ServerSettingsPatch,
 ): ServerSettings {
-  const patch = translateLegacyProjectOverridePatch(current, rawPatch);
+  const patch = translateLegacyAutoRoutingPatch(
+    translateLegacyProjectOverridePatch(current, rawPatch),
+  );
   const selectionPatch = patch.textGenerationModelSelection;
   const {
     migrateModelPreferences,

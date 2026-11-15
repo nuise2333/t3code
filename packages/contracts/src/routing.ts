@@ -42,11 +42,18 @@ const PartialEffortByClass = Schema.Struct({
   hard: Schema.optionalKey(RoutingEffort),
 });
 
+/** Coarse benchmark tiers, cheapest last; S is the highest. */
+export const RoutingTier = Schema.Literals(["S", "A", "B", "C"]);
+export type RoutingTier = typeof RoutingTier.Type;
+
 const RoutingTableRow = Schema.Struct({
   driver: ProviderDriverKind,
   /** `*` matches any model of the driver. */
   model: TrimmedNonEmptyString,
   effortByClass: Schema.optionalKey(PartialEffortByClass),
+  tier: Schema.optionalKey(RoutingTier),
+  /** Only verified rows with a tier and an exact model are switch candidates. */
+  verified: Schema.optionalKey(Schema.Boolean),
   sourceIds: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
 });
 
@@ -142,6 +149,21 @@ export const RouteGroupDecision = Schema.Struct({
 });
 export type RouteGroupDecision = typeof RouteGroupDecision.Type;
 
+/** What Auto picked for the model at launch; a shadow when switching is off. */
+export const RouteModelDecision = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+  tier: Schema.NullOr(RoutingTier),
+  switched: Schema.Literals(["none", "model", "provider"]),
+  /** False for a shadow choice: what Auto would have launched with switching on. */
+  applied: Schema.Boolean,
+  /** Candidates the hard filters removed, as a count; reasons stay out of thread payloads. */
+  skipped: NonNegativeInt,
+  /** The draft's model, only when the switch was applied. */
+  from: Schema.optionalKey(RouteGroupMember),
+});
+export type RouteModelDecision = typeof RouteModelDecision.Type;
+
 export const RouteDecision = Schema.Struct({
   taskClass: RoutingTaskClass,
   /** The choice id routing writes to `optionId`; null when it leaves the selection unchanged. */
@@ -154,11 +176,16 @@ export const RouteDecision = Schema.Struct({
   reasons: Schema.Array(RoutingReason).check(Schema.isMaxLength(4)),
   tableUpdatedAt: Schema.optionalKey(Schema.String),
   group: Schema.optionalKey(RouteGroupDecision),
+  model: Schema.optionalKey(RouteModelDecision),
 });
 export type RouteDecision = typeof RouteDecision.Type;
 
 export const LaunchRoutingRequest = Schema.Union([
-  Schema.Struct({ mode: Schema.Literal("auto") }),
+  Schema.Struct({
+    mode: Schema.Literal("auto"),
+    /** Sent only by a draft whose user did not pick its model; without it Auto keeps the model. */
+    model: Schema.optionalKey(Schema.Literal("auto")),
+  }),
   Schema.Struct({ mode: Schema.Literal("group"), groupId: RoutingGroupId }),
 ]);
 export type LaunchRoutingRequest = typeof LaunchRoutingRequest.Type;

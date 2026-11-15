@@ -35,6 +35,10 @@ models.
 `resolveRoutingTable` decodes it apart, so an invalid or newer table falls back
 to the bundled one without costing the model catalog. A remote table only tunes
 drivers the bundled table already routes; ACP Registry is never routed.
+A row's `tier` makes its exact model a candidate when Auto may switch model, but
+only with `verified: true`: mark a row verified only when an independent benchmark
+measured that harness and model and its slug is in the bundled catalog. Vendor-only
+or single-source data stays unverified or out of the table.
 
 Model data is schema-validated configuration. Tests should cover resolver, cache,
 and adapter semantics with synthetic model names, so adding a model never requires

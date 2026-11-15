@@ -129,14 +129,22 @@ Leaving reasoning level or service tier unset uses the provider's own configurat
 ## Auto effort
 
 Turn on **Settings → Labs → Auto effort** for a machine to add **Auto** to the
-effort levels of a new thread. Auto keeps your provider and model (unless an
-[Auto rule](#routing-groups) sends that kind of task to a group) and picks Low,
+effort levels of a new thread. Auto keeps your provider and model (unless you
+allow switching below or an [Auto rule](#routing-groups) sends that kind of task
+to a group) and picks Low,
 Medium, or High from the first message, once, when the thread starts. It never
 picks a level above High, and a model without those levels keeps its own. The
 started thread names the level Auto picked and why. Pick a level yourself, before
 or after sending, to stop using Auto for that thread. Typing Ultrathink or
 turning on Ultracode also counts as your choice. Sending to several models at
 once keeps each model's own level.
+
+Under Auto effort you can also let Auto switch the model (on the same provider)
+or the provider of a new thread. It decides once, at launch, only when you
+didn't pick a model in that draft, and only among models T3 Code has benchmark
+data for: a cheaper one for questions, a stronger one for large changes. It
+never turns on fast mode, a larger context, or other paid extras. With
+switching off, the started thread's tooltip shows what Auto would have picked.
 
 ## Routing groups
 

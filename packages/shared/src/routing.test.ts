@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import {
   ProjectId,
@@ -9,12 +10,14 @@ import {
   type RoutingGroup,
   type RoutingSkipReason,
   type RoutingTable,
+  type RoutingTaskClass,
+  type RoutingTier,
   type RuntimeMode,
   type ServerProvider,
   type ServerSettings,
 } from "@t3tools/contracts";
 
-import { classifyTask, resolveRoutingGroup, routeFor } from "./routing.ts";
+import { chooseAutoModel, classifyTask, resolveRoutingGroup, routeFor } from "./routing.ts";
 
 const table: RoutingTable = {
   version: 1,
@@ -372,7 +375,29 @@ describe("routeFor", () => {
       mode: "plan",
       effort: null,
     },
+    {
+      name: "a level the adapter sends as max counts as above high",
+      driver: "claudeAgent",
+      levels: CLAUDE_LEVELS,
+      prompt: PLAN,
+      mode: "plan",
+      effort: "medium",
+      nearest: true,
+      emitted: { high: "max" },
+    },
+    {
+      name: "a level the adapter sends as nothing is skipped",
+      driver: "claudeAgent",
+      levels: CLAUDE_LEVELS,
+      prompt: QUESTION,
+      mode: "default",
+      effort: "medium",
+      nearest: true,
+      emitted: { low: null },
+    },
   ] as const)("$name", ({ driver, levels, prompt, mode, effort, ...rest }) => {
+    const emitted: Readonly<Record<string, string | null>> | undefined =
+      "emitted" in rest ? rest.emitted : undefined;
     const result = routeFor({
       table,
       driver: ProviderDriverKind.make(driver),
@@ -387,6 +412,7 @@ describe("routeFor", () => {
       prompt,
       interactionMode: mode,
       apply: true,
+      emittedLevel: emitted === undefined ? undefined : (id) => emitted[id],
     });
     expect(result.decision.effort).toBe(effort);
     expect(result.decision.reasons.includes("nearest_level")).toBe("nearest" in rest);
@@ -871,5 +897,460 @@ describe("resolveRoutingGroup", () => {
         },
       ],
     });
+  });
+});
+
+describe("chooseAutoModel", () => {
+  const NOW = Date.parse("2026-06-01T00:00:00Z");
+  const hoursFromNow = (hours: number) =>
+    DateTime.formatIso(DateTime.makeUnsafe(NOW + hours * 3_600_000));
+  const claudeId = ProviderInstanceId.make("claude_fake");
+  const claudeTwoId = ProviderInstanceId.make("claude_two_fake");
+  const codexId = ProviderInstanceId.make("codex_fake");
+  const codexTwoId = ProviderInstanceId.make("codex_two_fake");
+  const codexThreeId = ProviderInstanceId.make("codex_three_fake");
+  const cursorId = ProviderInstanceId.make("cursor_fake");
+  const kiroId = ProviderInstanceId.make("kiro_fake");
+  const museId = ProviderInstanceId.make("muse_fake");
+  const piId = ProviderInstanceId.make("pi_fake");
+  const acpId = ProviderInstanceId.make("acp_fake");
+  const effort = effortSelect("effort", ["low", "medium", "high", "xhigh", "max"]);
+
+  const row = (driver: string, model: string, tier?: RoutingTier, verified = true) => ({
+    driver: ProviderDriverKind.make(driver),
+    model,
+    ...(tier === undefined ? {} : { tier }),
+    verified,
+    sourceIds: ["bench"],
+  });
+  const ROWS = [
+    row("claudeAgent", "*", "B"),
+    row("claudeAgent", "model-opus", "S"),
+    row("claudeAgent", "model-sonnet", "A"),
+    row("claudeAgent", "model-haiku", "C"),
+    row("claudeAgent", "model-guess", "C", false),
+    row("codex", "model-sol", "A"),
+    row("codex", "model-luna", "C"),
+    row("cursor", "auto", "C"),
+    row("kiro", "default", "C"),
+    row("kiro", "model-kiro", "C"),
+    row("muse", "model-muse", "S"),
+    row("pi", "model-pi", "C"),
+    row("acpRegistry", "model-acp", "C"),
+  ];
+  const tableOf = (rows: RoutingTable["rows"]): RoutingTable => ({ ...table, rows });
+
+  const provider = (
+    instanceId: ProviderInstanceId,
+    driver: string,
+    models: ReadonlyArray<string>,
+    overrides: Partial<ServerProvider> = {},
+    descriptors: ReadonlyArray<ProviderOptionDescriptor> = [effort],
+  ): ServerProvider =>
+    ({
+      instanceId,
+      driver: ProviderDriverKind.make(driver),
+      enabled: true,
+      installed: true,
+      status: "ready",
+      auth: { status: "authenticated" },
+      showInteractionModeToggle: driver !== "muse" && driver !== "kiro",
+      ...(driver === "kiro" || driver === "muse"
+        ? { supportedRuntimeModes: ["approval-required", "full-access"] }
+        : {}),
+      models: models.map((slug) => ({
+        slug,
+        name: slug,
+        aliases: [`${slug}-alias`],
+        isCustom: false,
+        capabilities: { optionDescriptors: descriptors },
+      })),
+      ...overrides,
+    }) as unknown as ServerProvider;
+  const quota = (usedPercent: number, resetsAt?: string) =>
+    ({
+      usageLimits: {
+        windows: [
+          {
+            id: "primary",
+            kind: "session",
+            label: "5h",
+            usedPercent,
+            ...(resetsAt === undefined ? {} : { resetsAt }),
+          },
+        ],
+      },
+    }) as unknown as Partial<ServerProvider>;
+  const CLAUDE_MODELS = ["model-opus", "model-sonnet", "model-haiku", "model-guess"];
+  const claude = (overrides: Partial<ServerProvider> = {}) =>
+    provider(claudeId, "claudeAgent", CLAUDE_MODELS, overrides);
+  const codex = (overrides: Partial<ServerProvider> = {}) =>
+    provider(codexId, "codex", ["model-sol", "model-luna"], overrides);
+  const settingsFor = (providers: ReadonlyArray<ServerProvider>) =>
+    ({
+      providerInstances: Object.fromEntries(
+        providers.map((entry) => [entry.instanceId, { driver: entry.driver, enabled: true }]),
+      ),
+      projectSettingsOverrides: {},
+    }) as unknown as Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+
+  const choose = (input: {
+    readonly current: ModelSelection;
+    readonly taskClass: RoutingTaskClass;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly scope?: "instance" | "provider" | "any";
+    readonly rows?: RoutingTable["rows"];
+    readonly runtimeMode?: RuntimeMode;
+    readonly interactionMode?: ProviderInteractionMode;
+  }) =>
+    chooseAutoModel({
+      table: tableOf(input.rows ?? ROWS),
+      taskClass: input.taskClass,
+      current: input.current,
+      scope: input.scope ?? "any",
+      providers: input.providers,
+      settings: settingsFor(input.providers),
+      projectId: null,
+      runtimeMode: input.runtimeMode ?? "full-access",
+      interactionMode: input.interactionMode ?? "default",
+      now: NOW,
+    });
+  const on = (instanceId: ProviderInstanceId, model: string): ModelSelection => ({
+    instanceId,
+    model,
+  });
+
+  it.each<{
+    readonly name: string;
+    readonly current: ModelSelection;
+    readonly taskClass: RoutingTaskClass;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly scope?: "instance" | "provider" | "any";
+    readonly rows?: RoutingTable["rows"];
+    readonly runtimeMode?: RuntimeMode;
+    readonly interactionMode?: ProviderInteractionMode;
+    readonly picks: ModelSelection;
+    readonly switched: "none" | "model" | "provider";
+    readonly tier: RoutingTier | null;
+    readonly skipped?: number;
+  }>([
+    {
+      name: "readonly moves to the C tier on the same instance",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-haiku"),
+      switched: "model",
+      tier: "C",
+    },
+    {
+      name: "implement takes the A tier",
+      current: on(claudeId, "model-opus"),
+      taskClass: "implement",
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-sonnet"),
+      switched: "model",
+      tier: "A",
+    },
+    {
+      name: "hard takes the S tier",
+      current: on(claudeId, "model-haiku"),
+      taskClass: "hard",
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-opus"),
+      switched: "model",
+      tier: "S",
+    },
+    {
+      name: "quick_edit with no B candidate takes the next tier up",
+      current: on(claudeId, "model-opus"),
+      taskClass: "quick_edit",
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-sonnet"),
+      switched: "model",
+      tier: "A",
+    },
+    {
+      name: "the current model stays when it sits in the chosen tier",
+      current: on(claudeId, "model-sonnet"),
+      taskClass: "implement",
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-sonnet"),
+      switched: "none",
+      tier: "A",
+    },
+    {
+      name: "the current model matched by alias stays",
+      current: on(claudeId, "model-sonnet-alias"),
+      taskClass: "implement",
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-sonnet-alias"),
+      switched: "none",
+      tier: "A",
+    },
+    {
+      name: "no candidate at or above the tier keeps the selection",
+      current: on(codexId, "model-luna"),
+      taskClass: "hard",
+      providers: [codex()],
+      picks: on(codexId, "model-luna"),
+      switched: "none",
+      tier: "C",
+    },
+    {
+      name: "a model without a verified row reports no tier",
+      current: on(codexId, "model-other"),
+      taskClass: "hard",
+      providers: [provider(codexId, "codex", ["model-other", "model-luna"])],
+      picks: on(codexId, "model-other"),
+      switched: "none",
+      tier: null,
+    },
+    {
+      name: "unverified, wildcard, opaque router, Pi and ACP rows are never candidates",
+      current: on(codexId, "model-sol"),
+      taskClass: "readonly",
+      providers: [
+        codex({}),
+        provider(claudeId, "claudeAgent", ["model-guess", "model-any"]),
+        provider(cursorId, "cursor", ["auto"]),
+        provider(kiroId, "kiro", ["default"]),
+        provider(piId, "pi", ["model-pi"]),
+        provider(acpId, "acpRegistry", ["model-acp"]),
+      ],
+      rows: ROWS.filter((entry) => entry.model !== "model-luna"),
+      picks: on(codexId, "model-sol"),
+      switched: "none",
+      tier: "A",
+      skipped: 0,
+    },
+    {
+      name: "a user's own opaque router keeps its model",
+      current: on(cursorId, "auto"),
+      taskClass: "readonly",
+      providers: [provider(cursorId, "cursor", ["auto"]), claude()],
+      picks: on(cursorId, "auto"),
+      switched: "none",
+      tier: null,
+    },
+    {
+      name: "instance scope never leaves the thread's instance",
+      current: on(codexId, "model-sol"),
+      taskClass: "readonly",
+      scope: "instance",
+      providers: [provider(codexId, "codex", ["model-sol"]), claude()],
+      picks: on(codexId, "model-sol"),
+      switched: "none",
+      tier: "A",
+    },
+    {
+      name: "provider scope never moves to another model on the thread's instance",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      scope: "provider",
+      providers: [claude(), codex()],
+      picks: on(codexId, "model-luna"),
+      switched: "provider",
+      tier: "C",
+    },
+    {
+      name: "provider scope keeps the current model when it ties another instance",
+      current: on(claudeId, "model-haiku"),
+      taskClass: "readonly",
+      scope: "provider",
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-haiku"),
+      switched: "none",
+      tier: "C",
+    },
+    {
+      name: "provider scope moves to another driver",
+      current: on(codexId, "model-sol"),
+      taskClass: "readonly",
+      providers: [provider(codexId, "codex", ["model-sol"]), claude()],
+      picks: on(claudeId, "model-haiku"),
+      switched: "provider",
+      tier: "C",
+    },
+    {
+      name: "provider scope moves to a second instance of the same driver",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [
+        provider(claudeId, "claudeAgent", ["model-opus"]),
+        provider(claudeTwoId, "claudeAgent", ["model-haiku"]),
+      ],
+      picks: on(claudeTwoId, "model-haiku"),
+      switched: "provider",
+      tier: "C",
+    },
+    {
+      name: "an exhausted current instance loses its preference",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [claude(quota(100, hoursFromNow(3))), codex()],
+      picks: on(codexId, "model-luna"),
+      switched: "provider",
+      tier: "C",
+      skipped: 3,
+    },
+    {
+      name: "a runtime mode the target would downgrade is skipped",
+      current: on(kiroId, "model-x"),
+      taskClass: "readonly",
+      runtimeMode: "auto",
+      providers: [provider(kiroId, "kiro", ["model-x", "model-kiro"]), codex()],
+      picks: on(codexId, "model-luna"),
+      switched: "provider",
+      tier: "C",
+      skipped: 1,
+    },
+    {
+      name: "a plan thread skips a provider without plan",
+      current: on(claudeId, "model-haiku"),
+      taskClass: "hard",
+      interactionMode: "plan",
+      providers: [
+        provider(claudeId, "claudeAgent", ["model-haiku"]),
+        provider(museId, "muse", ["model-muse"]),
+      ],
+      picks: on(claudeId, "model-haiku"),
+      switched: "none",
+      tier: "C",
+      skipped: 1,
+    },
+    {
+      name: "a target whose default turns Ultracode on is skipped",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [
+        provider(claudeId, "claudeAgent", ["model-opus"]),
+        provider(claudeTwoId, "claudeAgent", ["model-haiku"], {}, [
+          effort,
+          { id: "ultracode", label: "Ultracode", type: "boolean", currentValue: true },
+        ]),
+        codex(),
+      ],
+      picks: on(codexId, "model-luna"),
+      switched: "provider",
+      tier: "C",
+      skipped: 1,
+    },
+    {
+      name: "a target whose default turns Fast mode on is skipped",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [
+        provider(claudeId, "claudeAgent", ["model-opus"]),
+        provider(claudeTwoId, "claudeAgent", ["model-haiku"], {}, [
+          effort,
+          { id: "fastMode", label: "Fast", type: "boolean", currentValue: true },
+        ]),
+        codex(),
+      ],
+      picks: on(codexId, "model-luna"),
+      switched: "provider",
+      tier: "C",
+      skipped: 1,
+    },
+    {
+      name: "a target whose default context is not the smallest is skipped",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [
+        provider(claudeId, "claudeAgent", ["model-opus"]),
+        provider(claudeTwoId, "claudeAgent", ["model-haiku"], {}, [
+          effort,
+          {
+            id: "contextWindow",
+            label: "Context",
+            type: "select",
+            options: [
+              { id: "200k", label: "200k" },
+              { id: "1m", label: "1M", isDefault: true },
+            ],
+          },
+        ]),
+        codex(),
+      ],
+      picks: on(codexId, "model-luna"),
+      switched: "provider",
+      tier: "C",
+      skipped: 1,
+    },
+  ])("$name", (row) => {
+    const choice = choose(row);
+    expect(choice.selection).toEqual(row.picks);
+    expect(choice.switched).toBe(row.switched);
+    expect(choice.tier).toBe(row.tier);
+    if (row.skipped !== undefined) expect(choice.skipped).toBe(row.skipped);
+  });
+
+  it("drops the old selection's options and keeps them when it stays", () => {
+    const current: ModelSelection = {
+      instanceId: claudeId,
+      model: "model-opus",
+      options: [
+        { id: "fastMode", value: true },
+        { id: "effort", value: "max" },
+      ],
+    };
+    const providers = [claude(), codex()];
+    expect(choose({ current, taskClass: "readonly", providers }).selection).toEqual(
+      on(claudeId, "model-haiku"),
+    );
+    expect(choose({ current, taskClass: "hard", providers }).selection).toEqual(current);
+  });
+
+  it("prefers the current instance over another with more quota", () => {
+    const choice = choose({
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [codex(quota(0, hoursFromNow(1))), claude(quota(80, hoursFromNow(100)))],
+    });
+    expect(choice.selection).toEqual(on(claudeId, "model-haiku"));
+  });
+
+  it.each<{
+    readonly name: string;
+    readonly windows: ReadonlyArray<Partial<ServerProvider>>;
+    readonly picks: ProviderInstanceId;
+  }>([
+    {
+      name: "known quota above the reserve beats unknown quota",
+      windows: [{}, quota(50, hoursFromNow(5)), quota(90, hoursFromNow(1))],
+      picks: codexTwoId,
+    },
+    {
+      name: "unknown quota beats quota inside the 15% reserve",
+      windows: [{}, quota(90, hoursFromNow(1)), quota(86, hoursFromNow(1))],
+      picks: codexId,
+    },
+    {
+      name: "remaining share that resets soonest wins",
+      windows: [
+        quota(20, hoursFromNow(100)),
+        quota(40, hoursFromNow(2)),
+        quota(10, hoursFromNow(50)),
+      ],
+      picks: codexTwoId,
+    },
+    {
+      name: "unknown quota is still picked when it is all there is",
+      windows: [{}, quota(100, hoursFromNow(2)), quota(100, hoursFromNow(2))],
+      picks: codexId,
+    },
+  ])("ranks equal-tier candidates: $name", ({ windows, picks }) => {
+    const ids = [codexId, codexTwoId, codexThreeId];
+    const choice = choose({
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [
+        provider(claudeId, "claudeAgent", ["model-opus"]),
+        ...ids.map((id, index) => provider(id, "codex", ["model-luna"], windows[index])),
+      ],
+    });
+    expect(choice.selection).toEqual(on(picks, "model-luna"));
+    expect(choice.switched).toBe("provider");
   });
 });

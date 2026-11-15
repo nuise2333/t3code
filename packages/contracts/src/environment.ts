@@ -122,6 +122,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadSnooze: Schema.optionalKey(Schema.Boolean),
   /** Honors a launch's `routing` request; older servers drop it, so clients offer Auto effort only when set. */
   autoRouting: Schema.optionalKey(Schema.Boolean),
+  /** Honors `autoRouting.allowModelSwitch` and `allowProviderSwitch`; clients show those switches only when set. */
+  autoModelRouting: Schema.optionalKey(Schema.Boolean),
   /** Resolves a launch's `{ mode: "group" }` routing; clients show routing groups only when set. */
   routingGroups: Schema.optionalKey(Schema.Boolean),
   /** Serves `orchestration.forceStopThread`; hide Force stop where it is absent. */

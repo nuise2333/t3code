@@ -1,4 +1,5 @@
 import {
+  type AutoRoutingSettings,
   isProviderAvailable,
   type LaunchRoutingRequest,
   type ModelSelection,
@@ -29,6 +30,7 @@ const REASON_LABELS: Partial<Record<RoutingReason, string>> = {
 };
 
 const AUTO_REQUEST: LaunchRoutingRequest = { mode: "auto" };
+const AUTO_MODEL_REQUEST: LaunchRoutingRequest = { mode: "auto", model: "auto" };
 
 /** Auto effort needs a server that honors the request and the server's setting turned on. */
 export function autoEffortOffered(input: {
@@ -67,11 +69,35 @@ export function launchRoutingRequest(input: {
   readonly offered: boolean;
   readonly effortManual: boolean;
   readonly multiModel: boolean;
+  /** The draft's user picked its model, so Auto keeps it. */
+  readonly modelExplicit: boolean;
   readonly routingGroupId?: string | null | undefined;
 }): LaunchRoutingRequest | undefined {
   if (input.multiModel) return undefined;
   if (input.routingGroupId) return { mode: "group", groupId: input.routingGroupId };
-  return input.offered && !input.effortManual ? AUTO_REQUEST : undefined;
+  if (!input.offered || input.effortManual) return undefined;
+  return input.modelExplicit ? AUTO_REQUEST : AUTO_MODEL_REQUEST;
+}
+
+const AUTO_EFFORT_NOTE = "Picks a level up to High from your first message.";
+
+/** The Auto option's help text, naming the switches its server will honor. */
+export function autoRoutingNote(input: {
+  readonly capability: boolean | undefined;
+  readonly settings: Partial<AutoRoutingSettings> | undefined;
+  readonly modelExplicit: boolean;
+}): string {
+  const model = input.capability === true && input.settings?.allowModelSwitch === true;
+  const provider = input.capability === true && input.settings?.allowProviderSwitch === true;
+  if (!model && !provider) return AUTO_EFFORT_NOTE;
+  if (input.modelExplicit) return `${AUTO_EFFORT_NOTE} Keeps the model you picked.`;
+  const change =
+    model && provider
+      ? "model or provider"
+      : model
+        ? "to a cheaper or stronger model on this provider"
+        : "to a model on another of your providers";
+  return `Picks a level up to High, and may switch ${change}, from your first message.`;
 }
 
 export function describeRoutingReasons(reasons: ReadonlyArray<RoutingReason>): string {
@@ -218,6 +244,39 @@ export function routedGroupDisplay(input: {
     label: `${decision.name} → ${routingMemberLabel(input.selection, input.providers)}`,
     skipped: skipped.length > 0 ? `Skipped: ${skipped.join(", ")}` : null,
   };
+}
+
+const EFFORT_ONLY_REASONS: ReadonlySet<RoutingReason> = new Set(["model_row", "nearest_level"]);
+
+/**
+ * The model Auto picked at launch while the thread still uses it, or, for a shadow choice, the
+ * model it would have used with switching on. Null once its user picks another model.
+ */
+export function routedModelDisplay(input: {
+  readonly routing: RouteDecision | null | undefined;
+  readonly selection: Pick<ModelSelection, "instanceId" | "model"> | null | undefined;
+  readonly providers: ReadonlyArray<ModelNameSource>;
+}): string | null {
+  const decision = input.routing?.model;
+  if (!decision || decision.switched === "none" || !input.selection) return null;
+  const name = routingMemberLabel(decision, input.providers);
+  const reason = describeRoutingReasons(
+    input.routing?.reasons.filter((code) => !EFFORT_ONLY_REASONS.has(code)) ?? [],
+  );
+  const why = reason ? ` (${reason})` : "";
+  if (!decision.applied) {
+    return `With ${decision.switched} switching on, Auto would have used ${name}${why}`;
+  }
+  if (
+    decision.instanceId !== input.selection.instanceId ||
+    decision.model !== input.selection.model
+  ) {
+    return null;
+  }
+  const from = decision.from
+    ? `, instead of ${routingMemberLabel(decision.from, input.providers)}`
+    : "";
+  return `Auto → ${name}${why}${from}`;
 }
 
 interface RoutingGroupProblems {

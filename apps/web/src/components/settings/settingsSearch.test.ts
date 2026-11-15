@@ -225,6 +225,8 @@ describe("searchSettings", () => {
       ["CODEX_HOME path", "providers"],
       ["Shadow home path", "providers"],
       ["reasoning routing", "auto-effort-beta"],
+      ["Auto can switch model", "auto-model-switch-beta"],
+      ["Auto can switch provider", "auto-provider-switch-beta"],
       ["model group", "routing-groups"],
       ["failover", "routing-groups"],
     ] as const) {

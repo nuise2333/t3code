@@ -14,6 +14,7 @@ import {
   type RoutingSkipReason,
   type RoutingTable,
   type RoutingTaskClass,
+  type RoutingTier,
   type RuntimeMode,
   type ServerProvider,
   type ServerSettings,
@@ -26,7 +27,7 @@ import {
   optionSelectionProblem,
   withLegacyUltracodeEffort,
 } from "./model.ts";
-import { exhaustedUsageWindow } from "./usageLimits.ts";
+import { applicableUsageWindows, exhaustedUsageWindow } from "./usageLimits.ts";
 
 const EFFORT_LADDER: ReadonlyArray<RoutingEffort> = ["low", "medium", "high"];
 
@@ -89,6 +90,12 @@ export function classifyTask(input: {
   }
   return classed("implement", "default_class");
 }
+
+const AT_MOST_HIGH: ReadonlySet<string> = new Set(["none", "minimal", "low", "medium", "high"]);
+
+/** The cap applies to what reaches the provider, since an adapter can remap a label. */
+const emitsAtMostHigh = (emitted: string | null | undefined): boolean =>
+  emitted === undefined || (emitted !== null && AT_MOST_HIGH.has(emitted));
 
 const LEVEL_RANK: Readonly<Record<string, number>> = {
   none: -1,
@@ -156,6 +163,8 @@ export function routeFor(input: {
   readonly interactionMode: ProviderInteractionMode;
   /** False records a shadow decision and returns the selection unchanged. */
   readonly apply: boolean;
+  /** The level the adapter sends for a choice: undefined sends the id itself, null sends none. */
+  readonly emittedLevel?: ((choiceId: string) => string | null | undefined) | undefined;
 }): { readonly selection: ModelSelection; readonly decision: RouteDecision } {
   const { table, selection } = input;
   const classified = classifyTask(input);
@@ -193,7 +202,9 @@ export function routeFor(input: {
   if (descriptor === undefined) return unchanged("no_effort_control");
   const injected = new Set(descriptor.promptInjectedValues ?? []);
   const offered = new Set(
-    descriptor.options.map((option) => option.id).filter((id) => !injected.has(id)),
+    descriptor.options
+      .map((option) => option.id)
+      .filter((id) => !injected.has(id) && emitsAtMostHigh(input.emittedLevel?.(id))),
   );
   const modelDefault = getProviderOptionCurrentValue(descriptor);
   const defaultRank = typeof modelDefault === "string" ? LEVEL_RANK[modelDefault] : undefined;
@@ -345,4 +356,201 @@ export function resolveRoutingGroup(input: {
     return { ok: true, index, selection: acceptedOptions(member, descriptors), skipped };
   }
   return { ok: false, skipped };
+}
+
+/** Cheapest first; Auto takes the cheapest tier at or above the task's and never goes past S. */
+const TIER_ORDER: ReadonlyArray<RoutingTier> = ["C", "B", "A", "S"];
+const DESIRED_TIER: Readonly<Record<RoutingTaskClass, RoutingTier>> = {
+  readonly: "C",
+  quick_edit: "B",
+  implement: "A",
+  hard: "S",
+};
+/** Share of a usage window Auto leaves for the user's own interactive work. */
+const QUOTA_RESERVE_PERCENT = 15;
+const FALLBACK_RESET_HOURS = 168;
+
+// Provider-side routers bill opaquely, so Auto never picks one (J5); a user's own pick keeps it.
+const OPAQUE_ROUTER_MODELS: Readonly<Partial<Record<string, ReadonlyArray<string>>>> = {
+  cursor: ["auto", "default"],
+  kiro: ["default", "auto"],
+};
+// ACP agents publish arbitrary models; Pi only takes an explicit model as a hint.
+const UNROUTED_DRIVERS: ReadonlySet<string> = new Set(["acpRegistry", "pi"]);
+
+const isOpaqueRouter = (driver: string, model: string) =>
+  OPAQUE_ROUTER_MODELS[driver]?.includes(model) === true;
+
+const isCandidateRow = (row: RoutingTable["rows"][number]) =>
+  row.verified === true &&
+  row.tier !== undefined &&
+  row.model !== "*" &&
+  !UNROUTED_DRIVERS.has(row.driver) &&
+  !isOpaqueRouter(row.driver, row.model);
+
+const findModel = (provider: ServerProvider, model: string) =>
+  provider.models.find(
+    (candidate) => candidate.slug === model || candidate.aliases?.includes(model) === true,
+  );
+
+/** A launch with fresh options lands on the model's defaults; skip models whose defaults cost more. */
+function premiumByDefault(descriptors: ReadonlyArray<ProviderOptionDescriptor>): boolean {
+  if (effortSetOutsidePicker({ descriptors, selection: null, ultrathinkPrompt: false }))
+    return true;
+  return descriptors.some((descriptor) => {
+    if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
+      return getProviderOptionCurrentValue(descriptor) === true;
+    }
+    if (descriptor.id === "contextWindow" && descriptor.type === "select") {
+      const value = getProviderOptionCurrentValue(descriptor);
+      return value !== undefined && value !== descriptor.options[0]?.id;
+    }
+    return false;
+  });
+}
+
+/** 0 known with room, 1 unknown, 2 known inside the reserve; higher score spends expiring quota first. */
+function quotaRank(provider: ServerProvider, model: string, now: number) {
+  const windows = applicableUsageWindows(provider, now, model);
+  if (windows.length === 0) return { bucket: 1, score: 0 };
+  const tightest = windows.reduce((least, window) =>
+    window.usedPercent > least.usedPercent ? window : least,
+  );
+  const remaining = 100 - tightest.usedPercent;
+  if (remaining <= QUOTA_RESERVE_PERCENT) return { bucket: 2, score: 0 };
+  const resetsAt = tightest.resetsAt === undefined ? Number.NaN : Date.parse(tightest.resetsAt);
+  const hours = Number.isFinite(resetsAt)
+    ? (resetsAt - now) / 3_600_000
+    : tightest.windowDurationMins === undefined
+      ? FALLBACK_RESET_HOURS
+      : tightest.windowDurationMins / 60;
+  return { bucket: 0, score: (remaining - QUOTA_RESERVE_PERCENT) / Math.max(hours, 1) };
+}
+
+type AutoModelSkipReason = RoutingSkipReason | "premium_default";
+
+interface AutoModelChoice {
+  /** The draft's selection when nothing switches; otherwise the target with no options yet. */
+  readonly selection: ModelSelection;
+  readonly tier: RoutingTier | null;
+  readonly switched: "none" | "model" | "provider";
+  readonly skipped: number;
+  readonly skippedByReason: Readonly<Partial<Record<AutoModelSkipReason, number>>>;
+}
+
+/**
+ * The model Auto would launch with: the cheapest verified tier at or above the task's,
+ * among candidates that pass a routing group member's checks.
+ */
+export function chooseAutoModel(input: {
+  readonly table: RoutingTable;
+  readonly taskClass: RoutingTaskClass;
+  readonly current: ModelSelection;
+  /**
+   * `instance`: other models on the thread's instance. `provider`: other instances, keeping the
+   * current model on its own instance. `any`: both.
+   */
+  readonly scope: "instance" | "provider" | "any";
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+  readonly projectId: ProjectId | null;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly now: number;
+}): AutoModelChoice {
+  const { current } = input;
+  const currentProvider = input.providers.find(
+    (provider) => provider.instanceId === current.instanceId,
+  );
+  const currentSlug =
+    currentProvider === undefined
+      ? current.model
+      : (findModel(currentProvider, current.model)?.slug ?? current.model);
+  const currentTier =
+    input.table.rows.find(
+      (row) =>
+        isCandidateRow(row) && row.driver === currentProvider?.driver && row.model === currentSlug,
+    )?.tier ?? null;
+  const skippedByReason: Partial<Record<AutoModelSkipReason, number>> = {};
+  let skipped = 0;
+  const keep = (): AutoModelChoice => ({
+    selection: current,
+    tier: currentTier,
+    switched: "none",
+    skipped,
+    skippedByReason,
+  });
+  if (
+    currentProvider !== undefined &&
+    (UNROUTED_DRIVERS.has(currentProvider.driver) ||
+      isOpaqueRouter(currentProvider.driver, currentSlug))
+  ) {
+    return keep();
+  }
+
+  const candidates: Array<{
+    readonly provider: ServerProvider;
+    readonly slug: string;
+    readonly tier: RoutingTier;
+    readonly isCurrent: boolean;
+  }> = [];
+  for (const row of input.table.rows) {
+    if (!isCandidateRow(row) || row.tier === undefined) continue;
+    for (const provider of input.providers) {
+      if (provider.driver !== row.driver) continue;
+      if (input.scope === "instance" && provider.instanceId !== current.instanceId) continue;
+      const model = findModel(provider, row.model);
+      if (model === undefined) continue;
+      const isCurrent = provider.instanceId === current.instanceId && model.slug === currentSlug;
+      if (input.scope === "provider" && provider.instanceId === current.instanceId && !isCurrent) {
+        continue;
+      }
+      const reason: AutoModelSkipReason | null =
+        memberSkipReason({
+          ...input,
+          member: { instanceId: provider.instanceId, model: model.slug },
+          provider,
+          runnableInstanceIds: undefined,
+        }) ??
+        (!isCurrent && premiumByDefault(model.capabilities?.optionDescriptors ?? [])
+          ? "premium_default"
+          : null);
+      if (reason !== null) {
+        skipped += 1;
+        skippedByReason[reason] = (skippedByReason[reason] ?? 0) + 1;
+        continue;
+      }
+      candidates.push({ provider, slug: model.slug, tier: row.tier, isCurrent });
+    }
+  }
+
+  const tier = TIER_ORDER.slice(TIER_ORDER.indexOf(DESIRED_TIER[input.taskClass])).find((level) =>
+    candidates.some((candidate) => candidate.tier === level),
+  );
+  if (tier === undefined) return keep();
+  const ranked = candidates
+    .filter((candidate) => candidate.tier === tier)
+    .map((candidate) => ({
+      candidate,
+      onCurrentInstance: candidate.provider.instanceId === current.instanceId ? 0 : 1,
+      isCurrent: candidate.isCurrent ? 0 : 1,
+      ...quotaRank(candidate.provider, candidate.slug, input.now),
+    }))
+    // Staying on the thread's instance keeps its prompt cache and session; then spend expiring quota.
+    .sort(
+      (a, b) =>
+        a.onCurrentInstance - b.onCurrentInstance ||
+        a.isCurrent - b.isCurrent ||
+        a.bucket - b.bucket ||
+        b.score - a.score,
+    );
+  const chosen = ranked[0]?.candidate;
+  if (chosen === undefined || chosen.isCurrent) return { ...keep(), tier };
+  return {
+    selection: { instanceId: chosen.provider.instanceId, model: chosen.slug },
+    tier,
+    switched: chosen.provider.instanceId === current.instanceId ? "model" : "provider",
+    skipped,
+    skippedByReason,
+  };
 }

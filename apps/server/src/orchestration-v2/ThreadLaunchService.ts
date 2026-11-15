@@ -1259,7 +1259,10 @@ const make = Effect.gen(function* () {
               })
             : null;
         const modelSelection = routed?.selection ?? input.modelSelection;
-        if (routed?.decision.group !== undefined) {
+        if (
+          routed?.decision.group !== undefined ||
+          modelSelection.instanceId !== input.modelSelection.instanceId
+        ) {
           yield* threads.assertProviderInstanceEnabled({
             projectId: input.projectId,
             commandId: input.commandId,

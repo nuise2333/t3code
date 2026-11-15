@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   autoEffortOffered,
   autoEffortSupported,
+  autoRoutingNote,
   describeRoutingReasons,
   launchRoutingRequest,
   moveListItem,
@@ -11,6 +12,7 @@ import {
   pickerRoutingGroups,
   routedEffortDisplay,
   routedGroupDisplay,
+  routedModelDisplay,
   routingGroupProblems,
 } from "./routing.ts";
 
@@ -44,13 +46,32 @@ describe("launchRoutingRequest", () => {
     ({ capability, setting, manual, multi, auto }) => {
       const offered = autoEffortOffered({ capability, settingEnabled: setting });
       expect(
-        launchRoutingRequest({ offered, effortManual: manual, multiModel: multi }),
+        launchRoutingRequest({
+          offered,
+          effortManual: manual,
+          multiModel: multi,
+          modelExplicit: true,
+        }),
       ).toStrictEqual(auto ? { mode: "auto" } : undefined);
     },
   );
 
+  it("lets Auto choose the model only when the draft's user did not pick one", () => {
+    const base = { offered: true, effortManual: false, multiModel: false };
+    expect(launchRoutingRequest({ ...base, modelExplicit: false })).toStrictEqual({
+      mode: "auto",
+      model: "auto",
+    });
+    expect(launchRoutingRequest({ ...base, modelExplicit: true })).toStrictEqual({ mode: "auto" });
+  });
+
   it("asks for a picked group, even with Auto off, but not for a multi-model send", () => {
-    const base = { offered: false, effortManual: true, routingGroupId: "fast" };
+    const base = {
+      offered: false,
+      effortManual: true,
+      modelExplicit: false,
+      routingGroupId: "fast",
+    };
     expect(launchRoutingRequest({ ...base, multiModel: false })).toStrictEqual({
       mode: "group",
       groupId: "fast",
@@ -196,6 +217,126 @@ describe("routedEffortDisplay", () => {
   ])("is null when $name", ({ routing, effort }) => {
     expect(routedEffortDisplay({ routing, selection: selection(effort) })).toBeNull();
   });
+});
+
+describe("routedModelDisplay", () => {
+  const claude = ProviderInstanceId.make("claude");
+  const providers = [
+    {
+      instanceId: claude,
+      models: [
+        { slug: "claude-haiku-5-5", name: "Claude Haiku 5.5", shortName: "Haiku 5.5" },
+        { slug: "claude-opus-5-5", name: "Claude Opus 5.5", shortName: "Opus 5.5" },
+      ],
+    },
+    { instanceId, models: [{ slug: "gpt-6-luna", name: "GPT-6 Luna" }] },
+  ];
+  const decision = (model: Partial<NonNullable<RouteDecision["model"]>>): RouteDecision => ({
+    ...routed,
+    effort: "low",
+    reasons: ["question", "model_row"],
+    model: {
+      instanceId: claude,
+      model: "claude-haiku-5-5",
+      tier: "C",
+      switched: "model",
+      applied: true,
+      skipped: 0,
+      from: { instanceId: claude, model: "claude-opus-5-5" },
+      ...model,
+    },
+  });
+  const haiku = { instanceId: claude, model: "claude-haiku-5-5" };
+
+  it.each([
+    {
+      name: "a model switch while the thread keeps it",
+      routing: decision({}),
+      summary: "Auto → Haiku 5.5 (Question, no edits), instead of Opus 5.5",
+    },
+    {
+      name: "a provider switch",
+      routing: decision({ instanceId, model: "gpt-6-luna", switched: "provider" }),
+      selection: { instanceId, model: "gpt-6-luna" },
+      summary: "Auto → GPT-6 Luna (Question, no edits), instead of Opus 5.5",
+    },
+    {
+      name: "a shadow model choice",
+      routing: decision({ applied: false }),
+      selection: { instanceId: claude, model: "claude-opus-5-5" },
+      summary: "With model switching on, Auto would have used Haiku 5.5 (Question, no edits)",
+    },
+    {
+      name: "a shadow provider choice",
+      routing: decision({ instanceId, model: "gpt-6-luna", switched: "provider", applied: false }),
+      selection: { instanceId: claude, model: "claude-opus-5-5" },
+      summary: "With provider switching on, Auto would have used GPT-6 Luna (Question, no edits)",
+    },
+    {
+      name: "a manual pick after the switch",
+      routing: decision({}),
+      selection: { instanceId: claude, model: "claude-opus-5-5" },
+      summary: null,
+    },
+    { name: "Auto kept the model", routing: decision({ switched: "none" }), summary: null },
+    { name: "no model decision", routing: routed, summary: null },
+  ])("describes $name", ({ routing, selection = haiku, summary }) => {
+    expect(routedModelDisplay({ routing, selection, providers })).toBe(summary);
+  });
+});
+
+it.each([
+  {
+    model: false,
+    provider: false,
+    explicit: false,
+    note: "Picks a level up to High from your first message.",
+  },
+  {
+    model: true,
+    provider: false,
+    explicit: false,
+    note: "Picks a level up to High, and may switch to a cheaper or stronger model on this provider, from your first message.",
+  },
+  {
+    model: false,
+    provider: true,
+    explicit: false,
+    note: "Picks a level up to High, and may switch to a model on another of your providers, from your first message.",
+  },
+  {
+    model: true,
+    provider: true,
+    explicit: false,
+    note: "Picks a level up to High, and may switch model or provider, from your first message.",
+  },
+  {
+    model: true,
+    provider: true,
+    explicit: true,
+    note: "Picks a level up to High from your first message. Keeps the model you picked.",
+  },
+])(
+  "Auto's note with model $model, provider $provider, picked $explicit",
+  ({ model, provider, explicit, note }) => {
+    expect(
+      autoRoutingNote({
+        capability: true,
+        settings: { allowModelSwitch: model, allowProviderSwitch: provider },
+        modelExplicit: explicit,
+      }),
+    ).toBe(note);
+  },
+);
+
+it("ignores the switches on a server that cannot honor them", () => {
+  expect(
+    autoRoutingNote({
+      capability: undefined,
+      settings: { allowModelSwitch: true, allowProviderSwitch: true },
+      modelExplicit: false,
+    }),
+  ).toBe("Picks a level up to High from your first message.");
 });
 
 it("skips reason codes it has no words for", () => {

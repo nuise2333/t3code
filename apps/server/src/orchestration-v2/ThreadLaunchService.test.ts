@@ -3287,7 +3287,7 @@ describe("effort routing", () => {
   it.effect("applies the routed effort, capped at high, when Auto is requested and enabled", () => {
     const harness = makeHarness({
       providers: [codexProvider(["low", "medium", "high", "xhigh"])],
-      serverSettings: { autoRoutingEnabled: true },
+      serverSettings: { autoRouting: { enabled: true } },
     });
     return Effect.gen(function* () {
       const { thread, run } = yield* launchedThread(
@@ -3309,7 +3309,7 @@ describe("effort routing", () => {
   it.effect("keeps an explicit effort when the launch does not ask for Auto", () => {
     const harness = makeHarness({
       providers: [codexProvider(["low", "medium", "high"])],
-      serverSettings: { autoRoutingEnabled: true },
+      serverSettings: { autoRouting: { enabled: true } },
     });
     return Effect.gen(function* () {
       const explicit = { ...modelSelection, options: [{ id: "reasoningEffort", value: "low" }] };
@@ -3327,7 +3327,7 @@ describe("effort routing", () => {
       providers: [codexProvider(["low", "medium", "high"])],
       getLaunchSettings: Effect.sync(() => ({
         ...DEFAULT_SERVER_SETTINGS,
-        autoRoutingEnabled: enabled,
+        autoRouting: { ...DEFAULT_SERVER_SETTINGS.autoRouting, enabled },
       })),
     });
     return Effect.gen(function* () {
@@ -3505,7 +3505,7 @@ describe("effort routing", () => {
         adapters: [adapter, claudeAdapter],
         providers: [codex(), claude()],
         serverSettings: {
-          autoRoutingEnabled: true,
+          autoRouting: { enabled: true },
           routingGroups: [group([claudeModelSelection])],
           routingGroupRules: { hard: "fast" },
         },
@@ -3555,7 +3555,7 @@ describe("effort routing", () => {
         providers: [codex()],
         getLaunchSettings: Effect.sync(() => ({
           ...DEFAULT_SERVER_SETTINGS,
-          autoRoutingEnabled: true,
+          autoRouting: { ...DEFAULT_SERVER_SETTINGS.autoRouting, enabled: true },
           routingGroups: [group([modelSelection]), { ...group([xhigh]), id: "deep", name: "Deep" }],
           routingGroupRules: { hard: "fast" },
         })),
@@ -3582,6 +3582,239 @@ describe("effort routing", () => {
     });
   });
 
+  describe("model routing", () => {
+    const ready = {
+      enabled: true,
+      installed: true,
+      status: "ready",
+      availability: "available",
+      auth: { status: "authenticated" },
+    };
+    const exhausted = {
+      usageLimits: {
+        windows: [
+          { id: "primary", label: "5h", usedPercent: 100, resetsAt: "2099-01-01T00:00:00Z" },
+        ],
+      },
+    };
+    const effortSelect = (id: string, levels: ReadonlyArray<string>, defaultLevel: string) => ({
+      id,
+      label: "Effort",
+      type: "select",
+      options: levels.map((level) => ({
+        id: level,
+        label: level,
+        isDefault: level === defaultLevel,
+      })),
+    });
+    const claudeModel = (slug: string) => ({
+      slug,
+      name: slug,
+      isCustom: false,
+      capabilities: {
+        optionDescriptors: [
+          effortSelect("effort", ["low", "medium", "high", "xhigh", "max"], "high"),
+          { id: "fastMode", label: "Fast", type: "boolean" },
+        ],
+      },
+    });
+    const claude = (extra: object = {}) =>
+      ({
+        instanceId: claudeModelSelection.instanceId,
+        driver: ProviderDriverKind.make("claudeAgent"),
+        models: [claudeModel("claude-opus-5-5"), claudeModel("claude-haiku-5-5")],
+        ...ready,
+        ...extra,
+      }) as unknown as ServerProvider;
+    const codex = () =>
+      ({
+        instanceId: modelSelection.instanceId,
+        driver: ProviderDriverKind.make("codex"),
+        models: [
+          {
+            slug: "gpt-6-luna",
+            name: "Luna",
+            isCustom: false,
+            capabilities: {
+              optionDescriptors: [
+                effortSelect("reasoningEffort", ["low", "medium", "high", "xhigh"], "medium"),
+              ],
+            },
+          },
+        ],
+        ...ready,
+      }) as unknown as ServerProvider;
+    const opus = {
+      ...claudeModelSelection,
+      options: [
+        { id: "effort", value: "xhigh" },
+        { id: "fastMode", value: true },
+      ],
+    };
+    const askLaunch = (
+      command: string,
+      overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {},
+    ): ThreadLaunch.ThreadLaunchInput => ({
+      ...launchInput({
+        command,
+        thread: `${command}:thread`,
+        message: "What does the checkout flow do?",
+      }),
+      modelSelection: opus,
+      routing: { mode: "auto", model: "auto" },
+      ...overrides,
+    });
+    const autoRouting = (switches: { model?: boolean; provider?: boolean }) => ({
+      enabled: true,
+      allowModelSwitch: switches.model === true,
+      allowProviderSwitch: switches.provider === true,
+    });
+
+    it.effect("switches model on the same instance with fresh options when allowed", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({ model: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread, run } = yield* launchedThread(askLaunch("model-switch"));
+        const haiku = {
+          instanceId: claudeModelSelection.instanceId,
+          model: "claude-haiku-5-5",
+          options: [{ id: "effort", value: "medium" }],
+        };
+        assert.deepStrictEqual(thread.modelSelection, haiku);
+        assert.deepStrictEqual(run?.modelSelection, haiku);
+        assert.include(thread.routing, { taskClass: "readonly", effort: "medium", applied: true });
+        assert.deepStrictEqual(thread.routing?.model, {
+          instanceId: claudeModelSelection.instanceId,
+          model: "claude-haiku-5-5",
+          tier: "C",
+          switched: "model",
+          applied: true,
+          skipped: 0,
+          from: { instanceId: claudeModelSelection.instanceId, model: "claude-opus-5-5" },
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("records the choice as a shadow and keeps the model while switching is off", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({}) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(askLaunch("model-shadow"));
+        assert.deepStrictEqual(thread.modelSelection, {
+          ...claudeModelSelection,
+          options: [
+            { id: "effort", value: "medium" },
+            { id: "fastMode", value: true },
+          ],
+        });
+        assert.deepStrictEqual(thread.routing?.model, {
+          instanceId: claudeModelSelection.instanceId,
+          model: "claude-haiku-5-5",
+          tier: "C",
+          switched: "model",
+          applied: false,
+          skipped: 0,
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("switches provider when the thread's instance is out of quota", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(exhausted), codex()],
+        serverSettings: { autoRouting: autoRouting({ provider: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(askLaunch("provider-switch"));
+        assert.deepStrictEqual(thread.modelSelection, {
+          instanceId: modelSelection.instanceId,
+          model: "gpt-6-luna",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        });
+        assert.include(thread.routing?.model, {
+          switched: "provider",
+          applied: true,
+          tier: "C",
+          skipped: 1,
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("switches provider, not model, when only provider switching is allowed", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({ provider: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(askLaunch("provider-only"));
+        assert.equal(thread.modelSelection.instanceId, modelSelection.instanceId);
+        assert.equal(thread.modelSelection.model, "gpt-6-luna");
+        assert.include(thread.routing?.model, { switched: "provider", applied: true });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("keeps a model the user picked and records no model choice", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({ model: true, provider: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(
+          askLaunch("model-picked", { routing: { mode: "auto" } }),
+        );
+        assert.equal(thread.modelSelection.model, "claude-opus-5-5");
+        assert.include(thread.routing, { effort: "medium", applied: true });
+        assert.isUndefined(thread.routing?.model);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("does not choose a model again when a launch is replayed", () => {
+      let allowModelSwitch = true;
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        getLaunchSettings: Effect.sync(() => ({
+          ...DEFAULT_SERVER_SETTINGS,
+          autoRouting: autoRouting({ model: allowModelSwitch }),
+        })),
+      });
+      return Effect.gen(function* () {
+        const input = askLaunch("model-replay");
+        const first = yield* launchedThread(input);
+        allowModelSwitch = false;
+        const replayed = yield* launchedThread(input);
+        assert.equal(replayed.thread.modelSelection.model, "claude-haiku-5-5");
+        assert.deepStrictEqual(replayed.thread.routing, first.thread.routing);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("lets a routing group rule decide without a model choice", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: {
+          autoRouting: autoRouting({ model: true, provider: true }),
+          routingGroups: [{ id: "ask", name: "Ask", members: [opus], strategy: "order" as const }],
+          routingGroupRules: { readonly: "ask" },
+        },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(askLaunch("model-group-rule"));
+        assert.equal(thread.modelSelection.model, "claude-opus-5-5");
+        assert.include(thread.routing?.group, { id: "ask", via: "rule" });
+        assert.isUndefined(thread.routing?.model);
+      }).pipe(Effect.provide(harness.layer));
+    });
+  });
+
   it.effect("leaves ACP Registry launches unchanged", () => {
     const harness = makeHarness({
       providers: [
@@ -3590,7 +3823,7 @@ describe("effort routing", () => {
           driver: ProviderDriverKind.make("acpRegistry"),
         },
       ],
-      serverSettings: { autoRoutingEnabled: true },
+      serverSettings: { autoRouting: { enabled: true } },
     });
     return Effect.gen(function* () {
       const { thread } = yield* launchedThread(

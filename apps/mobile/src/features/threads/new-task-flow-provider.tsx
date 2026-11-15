@@ -577,7 +577,7 @@ export function NewTaskFlowProvider(
     effortSupported &&
     autoEffortOffered({
       capability: selectedEnvironmentServerConfig?.environment.capabilities.autoRouting,
-      settingEnabled: selectedEnvironmentServerConfig?.settings.autoRoutingEnabled,
+      settingEnabled: selectedEnvironmentServerConfig?.settings.autoRouting?.enabled,
     });
   const setPrompt = (value: string) => {
     if (!selectedProjectDraftKey) {
@@ -820,6 +820,8 @@ export function NewTaskFlowProvider(
       offered: effortOffered,
       effortManual: draft.effortManual === true,
       multiModel: false,
+      // Mobile drafts do not track an explicit model pick yet, so Auto keeps the model.
+      modelExplicit: true,
       routingGroupId:
         selectedEnvironmentServerConfig?.environment.capabilities.routingGroups === true
           ? draft.routingGroupId

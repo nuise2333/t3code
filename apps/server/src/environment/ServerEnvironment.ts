@@ -249,6 +249,7 @@ export const make = Effect.gen(function* () {
       projectProviderInstanceOverrides: true,
       threadSnooze: true,
       autoRouting: true,
+      autoModelRouting: true,
       routingGroups: true,
       threadForceStop: true,
       environmentThemes: true,

@@ -6,20 +6,33 @@ import {
   ProviderInstanceId,
   type RouteDecision,
   type RouteGroupDecision,
+  type RouteModelDecision,
+  ProviderDriverKind,
   RoutingSkipReason,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { isReasoningSelect } from "@t3tools/shared/model";
-import { classifyTask, resolveRoutingGroup, routeFor } from "@t3tools/shared/routing";
+import {
+  chooseAutoModel,
+  classifyTask,
+  resolveRoutingGroup,
+  routeFor,
+} from "@t3tools/shared/routing";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
+import {
+  normalizeClaudeCatalogEffort,
+  resolveClaudeModelCatalog,
+} from "../provider/ClaudeModelCatalog.ts";
 import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
+
+const CLAUDE = ProviderDriverKind.make("claudeAgent");
 
 const SKIP_REASON_TEXT: Record<RoutingSkipReason, string> = {
   instance_missing: "provider instance not found",
@@ -142,9 +155,24 @@ const make = Effect.gen(function* () {
           },
         } satisfies RoutedSelection;
       }
+      const data = yield* manifest.current;
+      const modelSlug = model?.slug ?? input.selection.model;
+      // Claude remaps effort labels before sending them; the high cap applies to what it sends.
+      const claudeCatalog =
+        provider.driver === CLAUDE
+          ? resolveClaudeModelCatalog(
+              ModelManifest.resolveProviderCatalog(data, CLAUDE) ?? undefined,
+            )
+          : undefined;
       return routeFor({
-        table: ModelManifest.resolveRoutingTable(yield* manifest.current),
+        table: ModelManifest.resolveRoutingTable(data),
         driver: provider.driver,
+        ...(claudeCatalog === undefined
+          ? {}
+          : {
+              emittedLevel: (id: string) =>
+                normalizeClaudeCatalogEffort(claudeCatalog, id, modelSlug) ?? null,
+            }),
         selection: input.selection,
         modelSlug: model?.slug,
         descriptors,
@@ -224,6 +252,91 @@ const make = Effect.gen(function* () {
     } satisfies RoutedSelection;
   });
 
+  const routeModel = Effect.fn("RoutingPolicy.routeModel")(
+    function* (
+      input: RoutingPolicyInput,
+      switches: { readonly allowModelSwitch: boolean; readonly allowProviderSwitch: boolean },
+      settings: Parameters<typeof chooseAutoModel>[0]["settings"],
+    ) {
+      const { allowModelSwitch, allowProviderSwitch } = switches;
+      const classified = classifyTask(input);
+      // A shadow uses the widest scope, to show the most Auto could have done.
+      const choice = chooseAutoModel({
+        table: ModelManifest.resolveRoutingTable(yield* manifest.current),
+        taskClass: classified.taskClass,
+        current: input.modelSelection,
+        scope:
+          allowModelSwitch === allowProviderSwitch
+            ? "any"
+            : allowModelSwitch
+              ? "instance"
+              : "provider",
+        providers: yield* providerRegistry.getProviders,
+        settings,
+        projectId: input.projectId,
+        runtimeMode: input.runtimeMode,
+        interactionMode: input.interactionMode,
+        now: DateTime.toEpochMillis(yield* DateTime.now),
+      });
+      yield* Effect.annotateCurrentSpan({
+        switched: choice.switched,
+        skippedByReason: choice.skippedByReason,
+      });
+      const applied =
+        choice.switched === "none"
+          ? allowModelSwitch || allowProviderSwitch
+          : choice.switched === "model"
+            ? allowModelSwitch
+            : allowProviderSwitch;
+      const switching = applied && choice.switched !== "none";
+      const modelDecision: RouteModelDecision = {
+        instanceId: choice.selection.instanceId,
+        model: choice.selection.model,
+        tier: choice.tier,
+        switched: choice.switched,
+        applied,
+        skipped: choice.skipped,
+        ...(switching
+          ? {
+              from: {
+                instanceId: input.modelSelection.instanceId,
+                model: input.modelSelection.model,
+              },
+            }
+          : {}),
+      };
+      const selection = switching ? choice.selection : input.modelSelection;
+      const routed = yield* routeEffort({
+        selection,
+        prompt: input.prompt,
+        interactionMode: input.interactionMode,
+        apply: true,
+        keepExplicitEffort: false,
+      });
+      if (routed !== null) {
+        return {
+          selection: routed.selection,
+          decision: { ...routed.decision, model: modelDecision },
+        };
+      }
+      return {
+        selection,
+        decision: {
+          taskClass: classified.taskClass,
+          effort: null,
+          applied: false,
+          reasons: [...classified.reasons],
+          model: modelDecision,
+        },
+      } satisfies RoutedSelection;
+    },
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Model routing failed; Auto keeps the launch's model.", cause).pipe(
+        Effect.as(null),
+      ),
+    ),
+  );
+
   const decide = Effect.fn("RoutingPolicy.decide")(function* (input: RoutingPolicyInput) {
     if (input.requested?.mode === "group") {
       return yield* resolveGroup({ ...input, groupId: input.requested.groupId, via: "picker" });
@@ -236,10 +349,15 @@ const make = Effect.gen(function* () {
       ),
     );
     if (settings === null) return null;
-    const auto = input.requested?.mode === "auto" && settings.autoRoutingEnabled;
+    const auto = input.requested?.mode === "auto" && settings.autoRouting.enabled;
     if (auto) {
       const groupId = settings.routingGroupRules[classifyTask(input).taskClass];
       if (groupId !== undefined) return yield* resolveGroup({ ...input, groupId, via: "rule" });
+      // Only a draft whose model the user did not pick asks Auto to choose one.
+      if (input.requested?.mode === "auto" && input.requested.model === "auto") {
+        const routed = yield* routeModel(input, settings.autoRouting, settings);
+        if (routed !== null) return routed;
+      }
     }
     return yield* routeEffort({
       selection: input.modelSelection,

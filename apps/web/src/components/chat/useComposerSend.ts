@@ -1327,10 +1327,11 @@ export function useComposerSend(input: ComposerSendInput) {
         ? launchRoutingRequest({
             offered: autoEffortOffered({
               capability: launchServerConfig?.environment.capabilities.autoRouting,
-              settingEnabled: launchServerConfig?.settings.autoRoutingEnabled,
+              settingEnabled: launchServerConfig?.settings.autoRouting?.enabled,
             }),
             effortManual: draftBeforePreparation?.effortManual === true,
             multiModel: false,
+            modelExplicit: draftBeforePreparation?.modelSelectionExplicit === true,
             routingGroupId:
               launchServerConfig?.environment.capabilities.routingGroups === true
                 ? draftBeforePreparation?.routingGroupId

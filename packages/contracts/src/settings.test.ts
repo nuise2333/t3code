@@ -176,14 +176,23 @@ it("drops a malformed routing group alone and keeps the first of a repeated id",
       { id: "deep", name: "Deep", members: [member], strategy: "order" },
     ],
     routingGroupRules: { hard: "deep", readonly: "fast" },
-    autoRoutingEnabled: true,
+    autoRouting: { enabled: true },
   });
   expect(settings.routingGroups.map((group) => [group.id, group.name])).toEqual([
     ["fast", "Fast"],
     ["deep", "Deep"],
   ]);
   expect(settings.routingGroupRules).toEqual({ hard: "deep", readonly: "fast" });
-  expect(settings.autoRoutingEnabled).toBe(true);
+  expect(settings.autoRouting).toEqual({
+    enabled: true,
+    allowModelSwitch: false,
+    allowProviderSwitch: false,
+  });
+  expect(DEFAULT_SERVER_SETTINGS.autoRouting).toEqual({
+    enabled: false,
+    allowModelSwitch: false,
+    allowProviderSwitch: false,
+  });
   expect(decodeServerSettings({ routingGroupRules: { hard: 42 } }).routingGroupRules).toEqual({});
   expect(DEFAULT_SERVER_SETTINGS.routingGroups).toEqual([]);
 });

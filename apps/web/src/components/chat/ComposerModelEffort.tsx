@@ -61,11 +61,16 @@ function splitSpeed(
  * launched thread names the level Auto picked until its user picks another.
  */
 export type ComposerEffortRouting =
-  | { readonly kind: "draft"; readonly auto: boolean; readonly onPickAuto: () => void }
+  | {
+      readonly kind: "draft";
+      readonly auto: boolean;
+      /** What Auto may change, such as the model when switching is on. */
+      readonly note: string;
+      readonly onPickAuto: () => void;
+    }
   | { readonly kind: "routed"; readonly display: RoutedEffortDisplay }
   | null;
 
-const AUTO_EFFORT_NOTE = "Picks a level up to High from your first message.";
 const MANUAL_EFFORT_NOTE = "Pick a level to set it yourself.";
 
 type ColumnControl =
@@ -156,7 +161,7 @@ export function describeComposerEffort(
       traits.reportedModelSelection,
     );
   const detail = autoDraft
-    ? `Auto effort. ${AUTO_EFFORT_NOTE}`
+    ? `Auto effort. ${routing.note}`
     : routing?.kind === "routed"
       ? [display.label, routing.display.summary].filter(Boolean).join(" · ")
       : display.label;
@@ -353,8 +358,8 @@ function EffortRows(props: {
   const choices = selectableProviderOptionChoices(control.descriptor);
   // An "Ultrathink:" prefix selects a level the column does not offer.
   const shown = choices.some((option) => option.id === value);
-  const note = auto
-    ? `${AUTO_EFFORT_NOTE} ${MANUAL_EFFORT_NOTE}`
+  const note = draftRouting?.auto
+    ? `${draftRouting.note} ${MANUAL_EFFORT_NOTE}`
     : routing?.kind === "routed"
       ? `${routing.display.summary}. ${MANUAL_EFFORT_NOTE}`
       : null;

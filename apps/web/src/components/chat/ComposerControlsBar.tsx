@@ -13,10 +13,12 @@ import {
 import {
   autoEffortOffered,
   autoEffortSupported,
+  autoRoutingNote,
   routedEffortDisplay,
   pickerRoutingGroups,
   routingProviderSource,
   routedGroupDisplay,
+  routedModelDisplay,
 } from "@t3tools/client-runtime/routing";
 import {
   type EnvironmentId,
@@ -179,10 +181,13 @@ export function ComposerControlsBar(props: {
   const serverConfig = useServerConfigs().get(environmentId);
   const autoOffered = autoEffortOffered({
     capability: serverConfig?.environment.capabilities.autoRouting,
-    settingEnabled: serverConfig?.settings.autoRoutingEnabled,
+    settingEnabled: serverConfig?.settings.autoRouting?.enabled,
   });
   const draftEffortManual = useComposerDraftStore((store) =>
     draftId ? store.getComposerDraft(draftId)?.effortManual === true : false,
+  );
+  const draftModelExplicit = useComposerDraftStore((store) =>
+    draftId ? store.getComposerDraft(draftId)?.modelSelectionExplicit === true : false,
   );
   const setEffortManual = useComposerDraftStore((store) => store.setEffortManual);
   const setRoutingGroup = useComposerDraftStore((store) => store.setRoutingGroup);
@@ -240,6 +245,14 @@ export function ComposerControlsBar(props: {
           providers: providerModels,
         })
       : null;
+  const routedModel =
+    routeKind === "server"
+      ? routedModelDisplay({
+          routing: props.activeThreadRouting,
+          selection: selectedModelSelection,
+          providers: providerModels,
+        })
+      : null;
   const selectedDescriptors = selectedProviderModels.find((model) => model.slug === selectedModel)
     ?.capabilities?.optionDescriptors;
   const routedDisplay =
@@ -265,6 +278,11 @@ export function ComposerControlsBar(props: {
       ? {
           kind: "draft",
           auto: !draftEffortManual,
+          note: autoRoutingNote({
+            capability: serverConfig?.environment.capabilities.autoModelRouting,
+            settings: serverConfig?.settings.autoRouting,
+            modelExplicit: draftModelExplicit,
+          }),
           onPickAuto: () => setEffortManual(draftId, false),
         }
       : routedDisplay
@@ -290,7 +308,12 @@ export function ComposerControlsBar(props: {
             .filter(Boolean)
             .join(" · "),
         }
-      : traitsEffort;
+      : routedModel
+        ? {
+            suffix: traitsEffort.suffix,
+            detail: [routedModel, traitsEffort.detail].filter(Boolean).join(" · "),
+          }
+        : traitsEffort;
   const restingBlockDefs = showModeBlock
     ? [
         {

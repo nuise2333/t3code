@@ -101,6 +101,24 @@ describe("serverSettings helpers", () => {
     expect([on.idleCompaction, on.compactIdleThreads]).toEqual(["beforeCacheExpires", true]);
   });
 
+  it("merges Auto switches and reads the flat Auto effort switch of older clients", () => {
+    const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { autoRoutingEnabled: true });
+    const switching = applyServerSettingsPatch(enabled, {
+      autoRouting: { allowModelSwitch: true },
+    });
+    expect(switching.autoRouting).toEqual({
+      enabled: true,
+      allowModelSwitch: true,
+      allowProviderSwitch: false,
+    });
+    expect(applyServerSettingsPatch(switching, { autoRoutingEnabled: false }).autoRouting).toEqual({
+      enabled: false,
+      allowModelSwitch: true,
+      allowProviderSwitch: false,
+    });
+    expect("autoRoutingEnabled" in switching).toBe(false);
+  });
+
   it("replaces routing groups and rules whole, so a cleared rule does not survive", () => {
     const member = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-fake-1" };
     const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {

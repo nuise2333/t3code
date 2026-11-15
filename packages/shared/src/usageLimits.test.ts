@@ -20,6 +20,7 @@ import {
   collectLimitNotices,
   collectLimitPools,
   elapsedShare,
+  applicableUsageWindows,
   exhaustedUsageWindow,
   paceOf,
   paceRemainingPercent,
@@ -125,6 +126,32 @@ describe("new thread model fallback", () => {
       ),
     ).toBeDefined();
   });
+  it.each([
+    ["antigravity", ["gemini-weekly", "claude-weekly"], "gemini-4-carbon", ["gemini-weekly"]],
+    ["antigravity", ["gemini-weekly", "3p-weekly"], "claude-opus-5-5", ["3p-weekly"]],
+    ["codex", ["primary", "individual"], "gpt-5.5", ["primary"]],
+    ["codex", ["individual"], "gpt-5.5", ["individual"]],
+    ["codex", ["primary", "expired"], "gpt-5.5", ["primary"]],
+  ] as const)(
+    "finds the %s windows that apply to a model below its cap",
+    (driver, ids, model, applies) => {
+      const windows = ids.map((id) => ({
+        ...window,
+        id,
+        ...(id === "expired" ? { resetsAt: "2026-09-03T11:00:00.000Z" } : {}),
+      }));
+      expect(
+        applicableUsageWindows(
+          provider({
+            driver: ProviderDriverKind.make(driver),
+            usageLimits: { checkedAt: "2026-09-03T11:00:00.000Z", windows },
+          }),
+          now,
+          model,
+        ).map((entry) => entry.id),
+      ).toEqual(applies);
+    },
+  );
   it.each([
     ["cursor", ["autoPercentUsed"], "claude-opus-5-5", false, undefined, undefined],
     ["cursor", ["autoPercentUsed"], "composer-2.5", false, undefined, undefined],
