@@ -23,6 +23,7 @@ export function LabsSettingsPanel() {
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
         <PromptSuggestionsRow />
+        <AutoEffortRow />
         <SimlockHostsRow />
         <FastWorktreeCheckoutRow />
       </SettingsSection>
@@ -184,6 +185,27 @@ function PromptSuggestionsRow() {
             updateSettings({ promptSuggestionsEnabled: Boolean(checked) })
           }
           aria-label="Suggest next prompt"
+        />
+      }
+    />
+  );
+}
+
+function AutoEffortRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("auto-effort-beta")}
+      settingKeys={["autoRoutingEnabled"]}
+      description="Adds Auto to the effort picker for new threads. Auto picks Low, Medium or High from your first message, once, and keeps your model. Pick a level to set it yourself."
+      control={
+        <ScopedSwitch
+          settingKeys={["autoRoutingEnabled"]}
+          checked={settings.autoRoutingEnabled}
+          onCheckedChange={(checked) => updateSettings({ autoRoutingEnabled: Boolean(checked) })}
+          aria-label="Auto effort"
         />
       }
     />

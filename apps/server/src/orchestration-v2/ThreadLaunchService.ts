@@ -48,6 +48,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
@@ -93,6 +94,8 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
+  /** A client in its Auto effort state; every other launch keeps its selection. */
+  readonly routing?: { readonly mode: "auto" } | undefined;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -258,6 +261,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const eventSink = yield* EventSink.EventSinkV2;
   const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  const routingPolicy = yield* RoutingPolicy.RoutingPolicy;
   // A project-folder launch that names no branch records the folder's checkout, as the composer does.
   const launchBranch = (strategy: ThreadLaunchWorkspaceStrategy, workspaceRoot: string) =>
     strategy.type === "root" && strategy.branch === undefined
@@ -1269,6 +1273,19 @@ const make = Effect.gen(function* () {
                 ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
                 ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
               };
+        // Decided once, before the claim: a replay keeps what the accepted launch recorded.
+        const routed =
+          Option.isNone(launchReceipt) &&
+          input.reuseExistingThread !== true &&
+          input.initialMessage !== undefined
+            ? yield* routingPolicy.decide({
+                modelSelection: input.modelSelection,
+                prompt: input.initialMessage.text,
+                interactionMode: input.interactionMode,
+                requested: input.routing?.mode,
+              })
+            : null;
+        const modelSelection = routed?.selection ?? input.modelSelection;
         const claimDispatch =
           input.reuseExistingThread === true
             ? threads.dispatch({
@@ -1283,10 +1300,11 @@ const make = Effect.gen(function* () {
                 threadId: candidateThreadId,
                 projectId: input.projectId,
                 title: input.title,
-                modelSelection: input.modelSelection,
+                modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
+                ...(routed === null ? {} : { routing: routed.decision }),
                 worktreePath: initialWorktreePath,
                 ...(input.importedNativeThread === undefined
                   ? {}
@@ -1333,7 +1351,7 @@ const make = Effect.gen(function* () {
                 type: "message.dispatch",
                 commandId: messageCommandId,
                 threadId,
-                modelSelection: input.modelSelection,
+                modelSelection,
                 dispatchMode: { type: "defer_start", workspaceStrategy },
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,

@@ -1,6 +1,71 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-14T15:58:47Z",
+  "updatedAt": "2026-11-15T00:00:00Z",
+  "routing": {
+    "version": 1,
+    "updatedAt": "2026-11-15T00:00:00Z",
+    "sources": {
+      "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
+      "aa-coding": {
+        "url": "https://artificialanalysis.ai/agents/coding",
+        "dataDate": "2026-11-14"
+      },
+      "aa-index": { "url": "https://artificialanalysis.ai/", "dataDate": "2026-11-15" },
+      "claude-effort": {
+        "url": "https://docs.claude.com/en/docs/build-with-claude/effort",
+        "dataDate": "2026-11-15"
+      },
+      "codex-docs": {
+        "url": "https://developers.openai.com/codex/models",
+        "dataDate": "2026-11-15"
+      }
+    },
+    "defaultEffortByClass": {
+      "readonly": "low",
+      "quick_edit": "medium",
+      "implement": "medium",
+      "hard": "high"
+    },
+    "rows": [
+      { "driver": "codex", "model": "*", "sourceIds": ["tb41", "aa-coding"] },
+      {
+        "driver": "codex",
+        "model": "gpt-6-luna",
+        "effortByClass": {
+          "readonly": "high",
+          "quick_edit": "high",
+          "implement": "high",
+          "hard": "high"
+        },
+        "sourceIds": ["codex-docs"]
+      },
+      { "driver": "claudeAgent", "model": "*", "sourceIds": ["tb41", "aa-index", "claude-effort"] },
+      {
+        "driver": "claudeAgent",
+        "model": "claude-sonnet-5-5",
+        "effortByClass": { "implement": "high" },
+        "sourceIds": ["aa-index"]
+      },
+      {
+        "driver": "antigravity",
+        "model": "*",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "medium",
+          "hard": "medium"
+        },
+        "sourceIds": ["aa-index"]
+      },
+      { "driver": "opencode", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "cursor", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "grok", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "kiro", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "pi", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "muse", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "fx", "model": "*", "sourceIds": ["aa-index"] }
+    ]
+  },
   "compatibility": [
     {
       "driver": "codex",

@@ -9,7 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as ServerConfig from "../config.ts";
 import { createPendingAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
-import { assert, it, vi } from "@effect/vitest";
+import { assert, describe, it, vi } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   ChatAttachmentId,
@@ -52,7 +52,9 @@ import * as ProjectStore from "./ProjectStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderRegistryMock from "../provider/testUtils/providerRegistryMock.ts";
+import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
@@ -247,6 +249,17 @@ function makeHarness(options: HarnessOptions = {}) {
         folderForThread: () => Effect.succeedNone,
       }),
   );
+  const layerLaunchSettings =
+    options.getLaunchSettings === undefined
+      ? Layer.empty
+      : Layer.mock(ServerSettings.ServerSettingsService)({
+          getSettings: options.getLaunchSettings,
+        });
+  const layerRouting = RoutingPolicy.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(ModelManifest.layerTest, layerExternalServices, layerLaunchSettings),
+    ),
+  );
   const layerLaunch = ThreadLaunch.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -255,11 +268,8 @@ function makeHarness(options: HarnessOptions = {}) {
         layerReceipts,
         layerOrchestrator,
         IdAllocator.layer,
-        options.getLaunchSettings === undefined
-          ? Layer.empty
-          : Layer.mock(ServerSettings.ServerSettingsService)({
-              getSettings: options.getLaunchSettings,
-            }),
+        layerRouting,
+        layerLaunchSettings,
       ),
     ),
   );
@@ -3214,4 +3224,138 @@ it.effect("replays an accepted send after the project disables the instance", ()
       assert.fail(`expected ThreadManagementProviderInstanceDisabledError, got ${fresh._tag}`);
     }
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
+});
+
+describe("effort routing", () => {
+  const codexProvider = (levels: ReadonlyArray<string>) =>
+    ({
+      instanceId: modelSelection.instanceId,
+      driver: ProviderDriverKind.make("codex"),
+      models: [
+        {
+          slug: modelSelection.model,
+          name: "Codex",
+          isCustom: false,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                label: "Reasoning",
+                type: "select",
+                options: levels.map((id) => ({ id, label: id, isDefault: id === "medium" })),
+              },
+            ],
+          },
+        },
+      ],
+    }) as unknown as ServerProvider;
+  const planLaunch = (
+    command: string,
+    overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {},
+  ): ThreadLaunch.ThreadLaunchInput => ({
+    ...launchInput({ command, thread: `${command}:thread`, message: "Plan the checkout flow" }),
+    interactionMode: "plan",
+    ...overrides,
+  });
+  const launchedThread = (input: ThreadLaunch.ThreadLaunchInput) =>
+    Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(input);
+      const projection = yield* threads.getThreadProjection(launched.threadId);
+      return { thread: projection.thread, run: projection.runs[0] };
+    });
+
+  it.effect("records a shadow decision and keeps the selection while the setting is off", () => {
+    const harness = makeHarness({ providers: [codexProvider(["low", "medium", "high", "xhigh"])] });
+    return Effect.gen(function* () {
+      const { thread, run } = yield* launchedThread(
+        planLaunch("routing-off", { routing: { mode: "auto" } }),
+      );
+      assert.deepStrictEqual(thread.modelSelection, modelSelection);
+      assert.deepStrictEqual(run?.modelSelection, modelSelection);
+      assert.deepInclude(thread.routing, {
+        taskClass: "hard",
+        effort: "high",
+        applied: false,
+        baseline: "medium",
+      });
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("applies the routed effort, capped at high, when Auto is requested and enabled", () => {
+    const harness = makeHarness({
+      providers: [codexProvider(["low", "medium", "high", "xhigh"])],
+      serverSettings: { autoRoutingEnabled: true },
+    });
+    return Effect.gen(function* () {
+      const { thread, run } = yield* launchedThread(
+        planLaunch("routing-on", {
+          routing: { mode: "auto" },
+          modelSelection: {
+            ...modelSelection,
+            options: [{ id: "reasoningEffort", value: "xhigh" }],
+          },
+        }),
+      );
+      const routed = { ...modelSelection, options: [{ id: "reasoningEffort", value: "high" }] };
+      assert.deepStrictEqual(thread.modelSelection, routed);
+      assert.deepStrictEqual(run?.modelSelection, routed);
+      assert.deepInclude(thread.routing, { effort: "high", applied: true, baseline: "xhigh" });
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("keeps an explicit effort when the launch does not ask for Auto", () => {
+    const harness = makeHarness({
+      providers: [codexProvider(["low", "medium", "high"])],
+      serverSettings: { autoRoutingEnabled: true },
+    });
+    return Effect.gen(function* () {
+      const explicit = { ...modelSelection, options: [{ id: "reasoningEffort", value: "low" }] };
+      const { thread } = yield* launchedThread(
+        planLaunch("routing-explicit", { modelSelection: explicit }),
+      );
+      assert.deepStrictEqual(thread.modelSelection, explicit);
+      assert.deepInclude(thread.routing, { effort: "high", applied: false, baseline: "low" });
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("does not decide again when a launch is replayed", () => {
+    let enabled = false;
+    const harness = makeHarness({
+      providers: [codexProvider(["low", "medium", "high"])],
+      getLaunchSettings: Effect.sync(() => ({
+        ...DEFAULT_SERVER_SETTINGS,
+        autoRoutingEnabled: enabled,
+      })),
+    });
+    return Effect.gen(function* () {
+      const input = planLaunch("routing-replay", { routing: { mode: "auto" } });
+      const first = yield* launchedThread(input);
+      enabled = true;
+      const replayed = yield* launchedThread(input);
+      assert.deepStrictEqual(replayed.thread.modelSelection, modelSelection);
+      assert.deepStrictEqual(replayed.thread.routing, first.thread.routing);
+      assert.isFalse(replayed.thread.routing?.applied);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("leaves ACP Registry launches unchanged", () => {
+    const harness = makeHarness({
+      providers: [
+        {
+          ...codexProvider(["low", "medium", "high"]),
+          driver: ProviderDriverKind.make("acpRegistry"),
+        },
+      ],
+      serverSettings: { autoRoutingEnabled: true },
+    });
+    return Effect.gen(function* () {
+      const { thread } = yield* launchedThread(
+        planLaunch("routing-acp", { routing: { mode: "auto" } }),
+      );
+      assert.deepStrictEqual(thread.modelSelection, modelSelection);
+      assert.deepInclude(thread.routing, { effort: null, applied: false });
+    }).pipe(Effect.provide(harness.layer));
+  });
 });

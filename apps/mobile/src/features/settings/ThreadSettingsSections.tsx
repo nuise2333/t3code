@@ -57,6 +57,13 @@ export function SettingsLabsRouteScreen() {
           setting="fastWorktreeCheckout"
           description="On a Mac, clone new worktrees from a checkout cached in the T3 home folder instead of writing every file. Uses Git’s normal checkout when it can’t. Turning it off deletes the cache."
         />
+        <MachineBetaSection
+          title="Auto effort"
+          icon="brain"
+          capability="autoRouting"
+          setting="autoRoutingEnabled"
+          description="Adds Auto to the effort picker for new threads. Auto picks Low, Medium or High from your first message, once, and keeps your model. Pick a level to set it yourself."
+        />
       </ScrollView>
     </SettingsScreen>
   );
@@ -238,7 +245,10 @@ export function NewThreadSettingsSection() {
   );
 }
 
-type MachineBetaSetting = "linkedEnvironmentsEnabled" | "fastWorktreeCheckout";
+type MachineBetaSetting =
+  | "linkedEnvironmentsEnabled"
+  | "fastWorktreeCheckout"
+  | "autoRoutingEnabled";
 
 /** One switch per connected machine that offers the beta, since each machine's own setting decides. */
 function MachineBetaSection({
@@ -250,7 +260,7 @@ function MachineBetaSection({
 }: {
   readonly title: string;
   readonly icon: ComponentProps<typeof SettingsSwitchRow>["icon"];
-  readonly capability: "peerLinks" | "fastWorktreeCheckout";
+  readonly capability: "peerLinks" | "fastWorktreeCheckout" | "autoRouting";
   readonly setting: MachineBetaSetting;
   readonly description: string;
 }) {
@@ -287,7 +297,9 @@ function MachineBetaSection({
                     patch:
                       setting === "linkedEnvironmentsEnabled"
                         ? { linkedEnvironmentsEnabled: value }
-                        : { fastWorktreeCheckout: value },
+                        : setting === "autoRoutingEnabled"
+                          ? { autoRoutingEnabled: value }
+                          : { fastWorktreeCheckout: value },
                   },
                 })
               }

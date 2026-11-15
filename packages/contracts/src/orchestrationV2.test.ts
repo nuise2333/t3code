@@ -11,6 +11,7 @@ import {
   OrchestrationV2ProviderThreadJson,
   OrchestrationV2RpcSchemas,
   OrchestrationV2Subagent,
+  OrchestrationV2AppThreadJson,
   OrchestrationV2ThreadShellJson,
   OrchestrationV2SubagentJson,
   OrchestrationV2ThreadHistoryPage,
@@ -648,5 +649,35 @@ describe("latestProviderTurnForAttempt", () => {
     ];
     expect(latestProviderTurnForAttempt(turns, RunAttemptId.make("goal-attempt"))?.id).toBe("last");
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
+  });
+});
+
+describe("thread routing decision", () => {
+  it("reads a thread whose routing decision this build cannot read, without it", () => {
+    const thread = {
+      id: "thread-test",
+      projectId: "project-test",
+      title: "Thread",
+      providerInstanceId: "codex",
+      modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: null,
+      lineage: { rootThreadId: "thread-test", parentThreadId: null, relationshipToParent: null },
+      forkedFrom: null,
+      createdBy: "user",
+      creationSource: "web",
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+      archivedAt: null,
+      deletedAt: null,
+    };
+    const decode = Schema.decodeUnknownSync(OrchestrationV2AppThreadJson);
+    const routing = { taskClass: "hard", effort: "high", applied: true, reasons: ["plan_mode"] };
+    expect(decode({ ...thread, routing }).routing).toEqual(routing);
+    expect(decode({ ...thread, routing: { ...routing, effort: "xhigh" } }).routing).toBeNull();
+    expect(decode(thread).routing).toBeUndefined();
   });
 });

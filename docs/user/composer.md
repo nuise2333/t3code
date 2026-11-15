@@ -126,6 +126,17 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
+## Auto effort
+
+Turn on **Settings → Labs → Auto effort** for a machine to add **Auto** to the
+effort levels of a new thread. Auto keeps your provider and model and picks Low,
+Medium, or High from the first message, once, when the thread starts. It never
+picks a level above High, and a model without those levels keeps its own. The
+started thread names the level Auto picked and why. Pick a level yourself, before
+or after sending, to stop using Auto for that thread. Typing Ultrathink or
+turning on Ultracode also counts as your choice. Sending to several models at
+once keeps each model's own level.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

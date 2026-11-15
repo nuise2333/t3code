@@ -31,6 +31,11 @@ Catalog-aware releases use `providers.claudeAgent.models[].status` instead.
 Codex uses `currentModels.codex` as a legacy-classification overlay for discovered
 models.
 
+`routing` is the auto effort table. The envelope leaves it unvalidated and
+`resolveRoutingTable` decodes it apart, so an invalid or newer table falls back
+to the bundled one without costing the model catalog. A remote table only tunes
+drivers the bundled table already routes; ACP Registry is never routed.
+
 Model data is schema-validated configuration. Tests should cover resolver, cache,
 and adapter semantics with synthetic model names, so adding a model never requires
 tests that repeat the configuration.

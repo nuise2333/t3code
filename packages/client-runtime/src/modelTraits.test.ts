@@ -10,6 +10,14 @@ describe("buildTraitsTriggerDisplay", () => {
     { currentValue: "low", defaultValue: undefined, value: "low", label: "Low" },
     { currentValue: "max", defaultValue: "high", value: "max", label: "Max" },
     { id: "effort", currentValue: undefined, defaultValue: undefined, value: null, label: "" },
+    {
+      id: "effort",
+      currentValue: "low",
+      defaultValue: undefined,
+      reasoningLabel: "Auto",
+      value: "low",
+      label: "Auto",
+    },
   ])("labels Pi thinking without inventing a selection: $label ($value)", (input) => {
     const descriptor: Extract<ProviderOptionDescriptor, { type: "select" }> = {
       id: input.id ?? "thinking",
@@ -28,6 +36,7 @@ describe("buildTraitsTriggerDisplay", () => {
         descriptors: [descriptor],
         primarySelectDescriptorId: descriptor.id,
         ultrathinkPromptControlled: false,
+        reasoningLabel: input.reasoningLabel,
       }).label,
     ).toBe(input.label);
     expect(getDescriptorStringValue(descriptor)).toBe(input.value);

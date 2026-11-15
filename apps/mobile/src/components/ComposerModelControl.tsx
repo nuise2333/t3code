@@ -14,6 +14,8 @@ export function ComposerModelControl(props: {
   readonly selection: ModelSelection | null;
   readonly provider: ProviderDriverKind | undefined;
   readonly reportedSelection?: ModelSelection | null | undefined;
+  /** Shown in place of the reasoning level, such as "Auto" for Auto effort. */
+  readonly reasoningLabel?: string | undefined;
   readonly prompt: string;
   readonly surfaceColor: string;
   readonly disabled?: boolean;
@@ -33,6 +35,7 @@ export function ComposerModelControl(props: {
         ultrathinkPromptControlled: promptTraits.ultrathinkPromptControlled,
         modelSelection: props.selection,
         reportedModelSelection: props.reportedSelection,
+        reasoningLabel: props.reasoningLabel,
       }).label
     : "";
   const badge = props.modelOption?.providerBadge;

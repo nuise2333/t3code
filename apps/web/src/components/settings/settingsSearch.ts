@@ -525,6 +525,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["beta tab autocomplete predict next message claude codex ghost text"],
   },
   {
+    id: "auto-effort-beta",
+    title: "Auto effort",
+    to: "/settings/labs",
+    scope: "environment",
+    searchTerms: ["beta auto effort reasoning routing thinking level cheaper"],
+  },
+  {
     id: "simlock-hosts",
     title: "Simlock device hosts (alpha)",
     to: "/settings/labs",

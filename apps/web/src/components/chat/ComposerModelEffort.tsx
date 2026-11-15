@@ -4,6 +4,7 @@ import {
   isReasoningControl,
   selectableProviderOptionChoices,
 } from "@t3tools/client-runtime/model-traits";
+import type { RoutedEffortDisplay } from "@t3tools/client-runtime/routing";
 import type { ProviderOptionDescriptor, RuntimeMode } from "@t3tools/contracts";
 import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { getProviderOptionCurrentLabel } from "@t3tools/shared/model";
@@ -55,6 +56,18 @@ function splitSpeed(
   };
 }
 
+/**
+ * Auto effort in the picker: a new thread's draft can leave the level to the server, and a
+ * launched thread names the level Auto picked until its user picks another.
+ */
+export type ComposerEffortRouting =
+  | { readonly kind: "draft"; readonly auto: boolean; readonly onPickAuto: () => void }
+  | { readonly kind: "routed"; readonly display: RoutedEffortDisplay }
+  | null;
+
+const AUTO_EFFORT_NOTE = "Picks a level up to High from your first message.";
+const MANUAL_EFFORT_NOTE = "Pick a level to set it yourself.";
+
 type ColumnControl =
   | { kind: "select"; descriptor: SelectDescriptor }
   | { kind: "boolean"; descriptor: BooleanDescriptor };
@@ -85,6 +98,7 @@ export function describeComposerEffort(
   traits: TraitsSelectionInput | null,
   effortDisplay: EffortDisplay,
   size: ComposerControlSize,
+  routing: ComposerEffortRouting = null,
 ): { suffix: ReactNode; detail: string | null } {
   if (!traits) return { suffix: null, detail: null };
   const visibility = getTraitsSectionVisibility(traits);
@@ -115,20 +129,23 @@ export function describeComposerEffort(
             : getDescriptorStringValue(reasoning, modelSelection, traits.reportedModelSelection),
         )
       : null;
+  const autoDraft = routing?.kind === "draft" && routing.auto && reasoning?.type === "select";
   // Workflow levels such as Ultracode always show their name; the setting names every level.
-  const word = glyph
-    ? (glyph.special ?? (effortDisplay === "label" ? glyph.label : null))
-    : !reasoning
-      ? null
-      : reasoning.type === "boolean"
-        ? `${reasoning.label} ${reasoning.currentValue === true ? "On" : "Off"}`
-        : ultrathink
-          ? "Ultrathink"
-          : (getProviderOptionCurrentLabel(
-              reasoning,
-              modelSelection,
-              traits.reportedModelSelection,
-            ) ?? (reasoning.id === "thinking" ? reasoning.label : null));
+  const word = autoDraft
+    ? "Auto"
+    : glyph
+      ? (glyph.special ?? (effortDisplay === "label" ? glyph.label : null))
+      : !reasoning
+        ? null
+        : reasoning.type === "boolean"
+          ? `${reasoning.label} ${reasoning.currentValue === true ? "On" : "Off"}`
+          : ultrathink
+            ? "Ultrathink"
+            : (getProviderOptionCurrentLabel(
+                reasoning,
+                modelSelection,
+                traits.reportedModelSelection,
+              ) ?? (reasoning.id === "thinking" ? reasoning.label : null));
   const fast = display.speedLabel === "Fast" || display.speedLabel === "Ultrafast";
   // Agent options such as modes live in the picker; the trigger adds only the context window.
   const contextWindow =
@@ -138,10 +155,15 @@ export function describeComposerEffort(
       modelSelection,
       traits.reportedModelSelection,
     );
+  const detail = autoDraft
+    ? `Auto effort. ${AUTO_EFFORT_NOTE}`
+    : routing?.kind === "routed"
+      ? [display.label, routing.display.summary].filter(Boolean).join(" · ")
+      : display.label;
   if (!word && !glyph && !fast && !display.ultracode && !contextWindow)
-    return { suffix: null, detail: display.label };
+    return { suffix: null, detail };
   return {
-    detail: display.label,
+    detail,
     suffix: (
       <span
         className={cn(
@@ -245,7 +267,7 @@ function moveBetweenRows(event: KeyboardEvent<HTMLElement>) {
   next.scrollIntoView({ block: "nearest" });
 }
 
-function EffortLevels(props: { traits: TraitsSelectionInput }) {
+function EffortLevels(props: { traits: TraitsSelectionInput; routing: ComposerEffortRouting }) {
   const traits = useTraitsSelection(props.traits);
   const { effort, others } = columnControls(traits.selectDescriptors, traits.booleanDescriptors);
   if (traits.modelIsUnavailable) {
@@ -269,7 +291,9 @@ function EffortLevels(props: { traits: TraitsSelectionInput }) {
     effort?.descriptor.id === traits.primarySelectDescriptor?.id && traits.ultrathinkInBodyText;
   return (
     <>
-      {effort ? <EffortRows control={effort} traits={traits} locked={locked} /> : null}
+      {effort ? (
+        <EffortRows control={effort} traits={traits} locked={locked} routing={props.routing} />
+      ) : null}
       {others.length > 0 ? (
         <div
           className={cn("flex flex-col gap-0.5", effort && "mt-1 border-t border-border/70 pt-1")}
@@ -299,7 +323,12 @@ function EffortLevels(props: { traits: TraitsSelectionInput }) {
 
 type TraitsSelection = ReturnType<typeof useTraitsSelection>;
 
-function EffortRows(props: { control: ColumnControl; traits: TraitsSelection; locked: boolean }) {
+function EffortRows(props: {
+  control: ColumnControl;
+  traits: TraitsSelection;
+  locked: boolean;
+  routing: ComposerEffortRouting;
+}) {
   const { control, traits } = props;
   const { descriptor } = control;
   if (control.kind === "boolean") {
@@ -317,11 +346,18 @@ function EffortRows(props: { control: ColumnControl; traits: TraitsSelection; lo
       </div>
     );
   }
-  const { locked } = props;
-  const value = traits.selectValue(control.descriptor);
+  const { locked, routing } = props;
+  const draftRouting = routing?.kind === "draft" && !locked ? routing : null;
+  const auto = draftRouting?.auto === true;
+  const value = auto ? null : traits.selectValue(control.descriptor);
   const choices = selectableProviderOptionChoices(control.descriptor);
   // An "Ultrathink:" prefix selects a level the column does not offer.
   const shown = choices.some((option) => option.id === value);
+  const note = auto
+    ? `${AUTO_EFFORT_NOTE} ${MANUAL_EFFORT_NOTE}`
+    : routing?.kind === "routed"
+      ? `${routing.display.summary}. ${MANUAL_EFFORT_NOTE}`
+      : null;
   return (
     <div role="radiogroup" aria-label={descriptor.label} className="flex flex-col gap-0.5">
       {locked ? (
@@ -329,18 +365,24 @@ function EffortRows(props: { control: ColumnControl; traits: TraitsSelection; lo
           {ULTRATHINK_IN_BODY_NOTE}
         </div>
       ) : null}
+      {draftRouting ? (
+        <ColumnRow label="Auto" selected={auto} tabStop={!shown} onPick={draftRouting.onPickAuto} />
+      ) : null}
       {choices.map((option, index) => (
         <ColumnRow
           key={option.id}
           label={option.label}
           selected={option.id === value}
-          tabStop={shown ? option.id === value : index === 0}
+          tabStop={shown ? option.id === value : !draftRouting && index === 0}
           description={option.description}
           isDefault={option.isDefault}
           disabled={locked}
           onPick={() => traits.changeSelect(control.descriptor, option.id)}
         />
       ))}
+      {note ? (
+        <div className="px-2 pt-1 pb-0.5 text-muted-foreground/80 text-xs">{note}</div>
+      ) : null}
     </div>
   );
 }
@@ -490,7 +532,10 @@ function NoEffortRow() {
 }
 
 /** The model picker's effort column: the selected model's levels and its other options. */
-export function ComposerEffortColumn(props: { traits: TraitsSelectionInput | null }) {
+export function ComposerEffortColumn(props: {
+  traits: TraitsSelectionInput | null;
+  routing?: ComposerEffortRouting;
+}) {
   const picker = use(DockedPickerContext);
   const visibility = props.traits ? getTraitsSectionVisibility(props.traits) : null;
   const controls =
@@ -516,7 +561,11 @@ export function ComposerEffortColumn(props: { traits: TraitsSelectionInput | nul
         // Capture, so Up and Down on an option row move rows instead of opening its menu.
         onKeyDownCapture={moveBetweenRows}
       >
-        {props.traits ? <EffortLevels traits={props.traits} /> : <NoEffortRow />}
+        {props.traits ? (
+          <EffortLevels traits={props.traits} routing={props.routing ?? null} />
+        ) : (
+          <NoEffortRow />
+        )}
       </div>
     </>
   );

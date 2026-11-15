@@ -3719,6 +3719,7 @@ export default function ChatView(props: ChatViewProps) {
                                   activeProjectDefaultModelSelection
                                 }
                                 activeThreadModelSelection={activeThread?.modelSelection}
+                                activeThreadRouting={serverProjection?.thread.routing}
                                 activeProjectId={activeProject?.id ?? null}
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}

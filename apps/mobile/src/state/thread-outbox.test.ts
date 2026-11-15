@@ -1243,6 +1243,7 @@ describe("thread outbox", () => {
         worktreePath: null,
         startFromOrigin: false,
         pullRequestReference: "https://github.com/acme/repo/pull/123",
+        routing: { mode: "auto" },
       },
     } satisfies QueuedThreadMessage;
 

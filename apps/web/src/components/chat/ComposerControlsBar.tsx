@@ -11,8 +11,14 @@ import {
   type RuntimeModeOption,
 } from "./ComposerFooterControls";
 import {
+  autoEffortOffered,
+  autoEffortSupported,
+  routedEffortDisplay,
+} from "@t3tools/client-runtime/routing";
+import {
   type EnvironmentId,
   type ModelSelection,
+  type RouteDecision,
   type ProviderDriverKind,
   type ProviderInstanceId,
   type RuntimeMode,
@@ -25,9 +31,12 @@ import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import {
   ComposerEffortColumn,
+  type ComposerEffortRouting,
   ComposerPickerFooter,
   describeComposerEffort,
 } from "./ComposerModelEffort";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { useServerConfigs } from "../../state/entities";
 import type { useComposerProviderModel } from "./useComposerProviderModel";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 
@@ -75,6 +84,7 @@ export function ComposerControlsBar(props: {
   selectedModelSelection: ModelSelection;
   onProviderModelSelect: ChatComposerProps["onProviderModelSelect"];
   activeThreadModelSelection: ChatComposerProps["activeThreadModelSelection"];
+  activeThreadRouting: RouteDecision | null | undefined;
   selectedModelForPickerWithCustomFallback: string;
   lockedProvider: ChatComposerProps["lockedProvider"];
   lockedContinuationGroupKey: string | null;
@@ -161,7 +171,50 @@ export function ComposerControlsBar(props: {
     promptUltrathink,
     onPromptEdit,
   });
-  const effort = describeComposerEffort(traitsInput, props.effortDisplay, controlSize);
+  const serverConfig = useServerConfigs().get(environmentId);
+  const autoOffered = autoEffortOffered({
+    capability: serverConfig?.environment.capabilities.autoRouting,
+    settingEnabled: serverConfig?.settings.autoRoutingEnabled,
+  });
+  const draftEffortManual = useComposerDraftStore((store) =>
+    draftId ? store.getComposerDraft(draftId)?.effortManual === true : false,
+  );
+  const setEffortManual = useComposerDraftStore((store) => store.setEffortManual);
+  const selectedDescriptors = selectedProviderModels.find((model) => model.slug === selectedModel)
+    ?.capabilities?.optionDescriptors;
+  const routedDisplay =
+    routeKind === "server"
+      ? routedEffortDisplay({
+          routing: props.activeThreadRouting,
+          selection: selectedModelSelection,
+          descriptors: selectedDescriptors,
+        })
+      : null;
+  const effortRouting: ComposerEffortRouting =
+    routeKind === "draft" &&
+    draftId &&
+    autoOffered &&
+    multipleModelSelections === null &&
+    autoEffortSupported({
+      driver: selectedProvider,
+      descriptors: selectedDescriptors,
+      selection: selectedModelSelection,
+      ultrathinkPrompt: promptUltrathink !== "none",
+    })
+      ? {
+          kind: "draft",
+          auto: !draftEffortManual,
+          onPickAuto: () => setEffortManual(draftId, false),
+        }
+      : routedDisplay
+        ? { kind: "routed", display: routedDisplay }
+        : null;
+  const effort = describeComposerEffort(
+    traitsInput,
+    props.effortDisplay,
+    controlSize,
+    effortRouting,
+  );
   const restingBlockDefs = showModeBlock
     ? [
         {
@@ -221,7 +274,7 @@ export function ComposerControlsBar(props: {
       triggerShortcuts={
         pickerOwnsModeShortcut ? "composer.effort composer.mode" : "composer.effort"
       }
-      effortColumn={<ComposerEffortColumn traits={traitsInput} />}
+      effortColumn={<ComposerEffortColumn traits={traitsInput} routing={effortRouting} />}
       footer={
         <ComposerPickerFooter
           traits={traitsInput}

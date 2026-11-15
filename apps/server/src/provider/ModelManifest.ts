@@ -1,5 +1,6 @@
 import {
   ModelCapabilities,
+  RoutingTable,
   TrimmedNonEmptyString,
   type ProviderDriverKind,
 } from "@t3tools/contracts";
@@ -9,6 +10,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -73,6 +75,8 @@ const ModelManifestEnvelopeSchema = Schema.Struct({
   compatibility: Schema.optional(Schema.Array(ProviderCompatibilityPolicy)),
   currentModels: Schema.Record(Schema.String, Schema.Array(Schema.String)),
   providers: Schema.optional(Schema.Record(Schema.String, ManifestProviderCatalog)),
+  /** Decoded apart by `resolveRoutingTable`, so a bad or newer table never costs the catalog. */
+  routing: Schema.optional(Schema.Unknown),
 });
 
 const hasValidProviderCatalogReferences = (
@@ -106,6 +110,27 @@ const decodeManifest = Schema.decodeUnknownEffect(ModelManifestSchema);
 
 export const BUNDLED_MODEL_MANIFEST: ModelManifestData =
   Schema.decodeUnknownSync(ModelManifestSchema)(bundledManifestJson);
+
+const decodeRoutingTable = Schema.decodeUnknownOption(RoutingTable);
+
+export const BUNDLED_ROUTING_TABLE: RoutingTable = Schema.decodeUnknownSync(RoutingTable)(
+  bundledManifestJson.routing,
+);
+
+// A remote table tunes drivers this build already routes; it cannot open a new one.
+const ROUTED_DRIVERS: ReadonlySet<string> = new Set(
+  BUNDLED_ROUTING_TABLE.rows.map((row) => row.driver),
+);
+
+export function resolveRoutingTable(manifest: ModelManifestData): RoutingTable {
+  return Option.match(decodeRoutingTable(manifest.routing), {
+    onNone: () => BUNDLED_ROUTING_TABLE,
+    onSome: (table) => ({
+      ...table,
+      rows: table.rows.filter((row) => ROUTED_DRIVERS.has(row.driver)),
+    }),
+  });
+}
 
 function manifestUpdatedAtMs(manifest: ModelManifestData): number {
   if (manifest.updatedAt === undefined) return 0;

@@ -1,7 +1,9 @@
 import {
   getPromptControlledTraits,
   getTraitSelectChange,
+  isReasoningSelect,
 } from "@t3tools/client-runtime/model-traits";
+import { type RoutedEffortDisplay, routedEffortDisplay } from "@t3tools/client-runtime/routing";
 import * as Dialog from "../../components/ui/Dialog";
 import { createV5StackNavigator as createNativeStackNavigator } from "../../native/createV5StackNavigator";
 import { useSheetStackOptions } from "../layout/nested-stacks";
@@ -261,7 +263,19 @@ type ThreadSettingsSubmenuPage =
   | { readonly kind: "descriptor"; readonly id: string }
   | { readonly kind: "runtime" };
 
+/** Auto effort: a new thread's draft can leave its level to Auto; a launched one names Auto's pick. */
+type ThreadSettingsEffortRouting =
+  | {
+      readonly kind: "draft";
+      readonly auto: boolean;
+      readonly setManual: (manual: boolean) => void;
+    }
+  | { readonly kind: "routed"; readonly display: RoutedEffortDisplay };
+
+const AUTO_EFFORT_NOTE = "Picks a level up to High from your first message.";
+
 type ThreadSettingsSessionProps = {
+  readonly effortRouting?: ThreadSettingsEffortRouting | null;
   readonly environmentId: EnvironmentId | null;
   readonly projectId: ProjectId | null;
   readonly cwd: string | null;
@@ -288,6 +302,7 @@ export type ExistingThreadSettingsRouteParams = {
 };
 
 type ThreadSettingsSessionValue = {
+  readonly effortRouting: ThreadSettingsEffortRouting | null;
   readonly environmentId: EnvironmentId | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
@@ -609,6 +624,7 @@ function ThreadSettingsSessionProvider(
     props.cwd && scannedInstanceId ? { instanceId: scannedInstanceId, cwd: props.cwd } : null;
 
   const value = {
+    effortRouting: props.effortRouting ?? null,
     environmentId,
     providerInstanceId: props.providerInstanceId,
     providerGroups,
@@ -887,11 +903,21 @@ function ThreadSettingsOptionsItem(props: {
                     session.promptTraits.ultrathinkPromptControlled &&
                     descriptor.id === session.promptTraits.primarySelectDescriptor?.id
                       ? "Ultrathink"
-                      : getProviderOptionCurrentLabel(
-                          descriptor,
-                          session.displayedModelSelection,
-                          session.reportedModelSelection,
-                        )
+                      : session.effortRouting && isReasoningSelect(descriptor)
+                        ? session.effortRouting.kind === "draft"
+                          ? session.effortRouting.auto
+                            ? "Auto"
+                            : getProviderOptionCurrentLabel(
+                                descriptor,
+                                session.displayedModelSelection,
+                                session.reportedModelSelection,
+                              )
+                          : `Auto · ${session.effortRouting.display.levelLabel}`
+                        : getProviderOptionCurrentLabel(
+                            descriptor,
+                            session.displayedModelSelection,
+                            session.reportedModelSelection,
+                          )
                   }
                   onPress={() => props.onOpenSubmenu({ kind: "descriptor", id: descriptor.id })}
                 />
@@ -1093,6 +1119,74 @@ function ThreadSettingsChoiceContent(props: {
         )
       : undefined;
 
+  const selectRows = (
+    descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
+    auto: boolean,
+    onPicked: () => void,
+  ) =>
+    selectableChoices(descriptor).map((choice) => ({
+      id: choice.id,
+      label: choice.label,
+      description: choice.description,
+      disabled: false,
+      selected:
+        !auto &&
+        choice.id ===
+          (session.promptTraits.ultrathinkPromptControlled &&
+          descriptor.id === session.promptTraits.primarySelectDescriptor?.id
+            ? "ultrathink"
+            : getProviderOptionCurrentValue(
+                descriptor,
+                session.displayedModelSelection,
+                session.reportedModelSelection,
+              )),
+      onPress: () => {
+        void Haptics.selectionAsync();
+        if (
+          session.promptTraits.ultrathinkInBodyText &&
+          descriptor.id === session.promptTraits.primarySelectDescriptor?.id
+        ) {
+          Dialog.alert(
+            "Reasoning controlled by prompt",
+            'Your prompt contains "ultrathink" in the text. Remove it to change this option.',
+          );
+          return;
+        }
+        session.applyOptionChange(descriptor.id, choice.id);
+        onPicked();
+        props.onSelected();
+      },
+    }));
+
+  const selectContent = (descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>) => {
+    const routing = isReasoningSelect(descriptor) ? session.effortRouting : null;
+    const draft = routing?.kind === "draft" ? routing : null;
+    const levels = selectRows(descriptor, draft?.auto === true, () => draft?.setManual(true));
+    return {
+      rows: draft
+        ? [
+            {
+              id: "auto-effort",
+              label: "Auto",
+              description: AUTO_EFFORT_NOTE,
+              disabled: false,
+              selected: draft.auto,
+              onPress: () => {
+                void Haptics.selectionAsync();
+                draft.setManual(false);
+                props.onSelected();
+              },
+            },
+            ...levels,
+          ]
+        : levels,
+      note:
+        routing?.kind === "routed"
+          ? `${routing.display.summary}. Pick a level to set it yourself.`
+          : null,
+    };
+  };
+
   const submenuContent =
     props.submenu.kind === "runtime"
       ? {
@@ -1108,41 +1202,10 @@ function ThreadSettingsChoiceContent(props: {
               props.onSelected();
             },
           })),
+          note: null,
         }
       : activeDescriptor?.type === "select"
-        ? {
-            rows: selectableChoices(activeDescriptor).map((choice) => ({
-              id: choice.id,
-              label: choice.label,
-              description: choice.description,
-              disabled: false,
-              selected:
-                choice.id ===
-                (session.promptTraits.ultrathinkPromptControlled &&
-                activeDescriptor.id === session.promptTraits.primarySelectDescriptor?.id
-                  ? "ultrathink"
-                  : getProviderOptionCurrentValue(
-                      activeDescriptor,
-                      session.displayedModelSelection,
-                      session.reportedModelSelection,
-                    )),
-              onPress: () => {
-                void Haptics.selectionAsync();
-                if (
-                  session.promptTraits.ultrathinkInBodyText &&
-                  activeDescriptor.id === session.promptTraits.primarySelectDescriptor?.id
-                ) {
-                  Dialog.alert(
-                    "Reasoning controlled by prompt",
-                    'Your prompt contains "ultrathink" in the text. Remove it to change this option.',
-                  );
-                  return;
-                }
-                session.applyOptionChange(activeDescriptor.id, choice.id);
-                props.onSelected();
-              },
-            })),
-          }
+        ? selectContent(activeDescriptor)
         : null;
 
   if (!submenuContent) {
@@ -1174,6 +1237,9 @@ function ThreadSettingsChoiceContent(props: {
           />
         ))}
       </View>
+      {submenuContent.note ? (
+        <Text className="px-2 pt-2 text-sm text-foreground-muted">{submenuContent.note}</Text>
+      ) : null}
     </ScrollView>
   );
 }
@@ -1397,6 +1463,11 @@ export function ExistingThreadSettingsRouteScreen({
     ) ?? null;
   const updateModelSelection = (selection: ModelSelection) =>
     selectThreadModel(route.params, selection);
+  const routedEffort = routedEffortDisplay({
+    routing: structure?.projection.thread.routing,
+    selection: modelSelection,
+    descriptors: currentModelOption?.capabilities?.optionDescriptors,
+  });
 
   return (
     <ThreadSettingsPickerScreen
@@ -1427,6 +1498,7 @@ export function ExistingThreadSettingsRouteScreen({
         rememberModelOptions(modelSelection.instanceId, modelSelection.model, options ?? []);
         updateModelSelection({ ...modelSelection, options });
       }}
+      effortRouting={routedEffort ? { kind: "routed", display: routedEffort } : null}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
       onClose={() => navigation.goBack()}
@@ -1457,6 +1529,11 @@ export function NewTaskThreadSettingsRouteScreen() {
       restoreSelection={withRememberedModelOptions}
       optionDescriptors={optionDescriptors}
       onUpdateOptionSelections={flow.setSelectedModelOptions}
+      effortRouting={
+        flow.autoEffortOffered
+          ? { kind: "draft", auto: !flow.effortManual, setManual: flow.setEffortManual }
+          : null
+      }
       runtimeMode={flow.runtimeMode}
       onUpdateRuntimeMode={flow.setRuntimeMode}
       onClose={() => navigation.goBack()}

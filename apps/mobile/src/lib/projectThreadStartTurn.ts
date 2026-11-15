@@ -3,6 +3,7 @@ import {
   MessageId,
   ThreadId,
   type ChatAttachment,
+  type LaunchRoutingRequest,
   type ModelSelection,
   type OrchestrationMessageContext,
   type ProjectId,
@@ -35,6 +36,7 @@ export interface ProjectThreadStartTurnSpec {
   readonly worktreePath: string | null;
   readonly startFromOrigin: boolean;
   readonly worktreeBranchName: string;
+  readonly routing?: LaunchRoutingRequest;
 }
 
 export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpec) {
@@ -58,6 +60,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
     titleSeed: title,
     runtimeMode: spec.runtimeMode,
     interactionMode: spec.interactionMode,
+    ...(spec.routing ? { routing: spec.routing } : {}),
     bootstrap: {
       createThread: {
         projectId: spec.projectId,

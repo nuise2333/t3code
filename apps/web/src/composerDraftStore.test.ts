@@ -1791,6 +1791,11 @@ describe("composerDraftStore modelSelection", () => {
       replaceOptions: true,
     });
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBeUndefined();
+
+    store.setEffortManual(threadRef, true);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.effortManual).toBe(true);
+    store.setEffortManual(threadRef, false);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.effortManual).toBeUndefined();
   });
 
   it("replaces only the targeted provider options on the current model selection", () => {
@@ -2288,6 +2293,7 @@ describe("composerDraftStore model seed migration", () => {
               modelSelectionByProvider: { [CODEX_INSTANCE]: staleSelection },
               activeProvider: CODEX_INSTANCE,
               modelSelectionExplicit: true,
+              effortManual: true,
             },
             [serverThreadKey]: {
               prompt: "",
@@ -2326,6 +2332,7 @@ describe("composerDraftStore model seed migration", () => {
         modelSelectionByProvider: { [CODEX_INSTANCE]: staleSelection },
         activeProvider: CODEX_INSTANCE,
         modelSelectionExplicit: true,
+        effortManual: true,
       });
       expect(draftByKey(serverThreadKey)).toMatchObject({
         modelSelectionByProvider: { [CODEX_INSTANCE]: staleSelection },

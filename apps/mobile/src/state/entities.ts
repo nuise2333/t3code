@@ -290,6 +290,17 @@ export function useServerConfigs(): ReadonlyMap<EnvironmentId, ServerConfig> {
 const selectReportedModelSelection = (thread: EnvironmentThread | null) =>
   thread === null ? null : deriveReportedModelSelection(thread.projection);
 
+const selectThreadRouting = (thread: EnvironmentThread | null) =>
+  thread?.projection.thread.routing ?? null;
+
+/** The thread's launch effort routing decision, if its server recorded one. */
+export function useThreadRouting(ref: ScopedThreadRef | null) {
+  return useAtomValue(
+    ref === null ? EMPTY_THREAD_ATOM : environmentThreadDetails.threadAtom(ref),
+    selectThreadRouting,
+  );
+}
+
 export function useThreadReportedModelSelection(ref: ScopedThreadRef | null) {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_ATOM : environmentThreadDetails.threadAtom(ref),

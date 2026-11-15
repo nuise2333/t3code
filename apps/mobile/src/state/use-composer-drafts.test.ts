@@ -2215,6 +2215,8 @@ describe("mobile composer drafts", () => {
         model: "gpt-5.4",
         options: [{ id: "reasoningEffort", value: "xhigh" }],
       },
+      effortManual: true,
+      runtimeMode: "full-access",
       workspaceSelection: {
         mode: "worktree",
         branch: "main",
@@ -2225,11 +2227,19 @@ describe("mobile composer drafts", () => {
     expect(clearComposerDraftContentState({ [draftKey]: draft }, draftKey)).toEqual({
       [draftKey]: {
         modelSelection: draft.modelSelection,
+        effortManual: true,
+        runtimeMode: "full-access",
         workspaceSelection: draft.workspaceSelection,
         text: "",
         attachments: [],
       },
     });
+    // The manual effort mark belongs to the selection it describes.
+    expect(
+      clearComposerDraftContentState({ [draftKey]: draft }, draftKey, {
+        clearModelSelection: true,
+      })[draftKey]?.effortManual,
+    ).toBeUndefined();
   });
 
   it("drops another environment's upload stamp when a draft moves across machines", () => {

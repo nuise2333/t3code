@@ -152,6 +152,7 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
       historyOrigin: "v1_import",
       linkOrigin,
       tags: ["private"],
+      routing: { taskClass: "hard", effort: "high", applied: true, reasons: ["plan_mode"] },
     };
     const sourceRun = makeSourceRun("completed");
     const result = yield* planFork(sourceRun, {
@@ -167,6 +168,7 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
     assert.isNull(result.targetThread.activeOrderKey);
     assert.isNull(result.targetThread.autoSettleDisabledAt);
     assert.isUndefined(result.targetThread.delegatedFrom);
+    assert.isNull(result.targetThread.routing);
     assert.equal(result.targetThread.historyOrigin, "v1_import");
     assert.deepEqual(result.targetThread.linkOrigin, linkOrigin);
     assert.deepEqual(result.targetThread.tags, ["private"]);

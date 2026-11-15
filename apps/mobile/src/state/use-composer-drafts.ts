@@ -447,6 +447,8 @@ export interface ComposerDraft {
   readonly interactionMode?: ProviderInteractionMode;
   /** `/clear` armed this draft: its next message starts a fresh provider session. */
   readonly freshContext?: boolean;
+  /** The user picked an effort level, so a new thread keeps it instead of Auto effort. */
+  readonly effortManual?: boolean;
   readonly workspaceSelection?: ComposerDraftWorkspaceSelection;
   readonly project?: ComposerDraftProject;
 }
@@ -484,6 +486,7 @@ export type ComposerDraftSettingsUpdate = Pick<
   | "runtimeMode"
   | "interactionMode"
   | "freshContext"
+  | "effortManual"
   | "workspaceSelection"
   | "project"
 >;
@@ -518,6 +521,7 @@ const ComposerDraftSchema = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeModeSchema),
   interactionMode: Schema.optional(ProviderInteractionModeSchema),
   freshContext: Schema.optional(Schema.Boolean),
+  effortManual: Schema.optional(Schema.Boolean),
   workspaceSelection: Schema.optional(ComposerDraftWorkspaceSelectionSchema),
   project: Schema.optional(ComposerDraftProjectSchema),
 });
@@ -1709,6 +1713,7 @@ export function clearComposerDraftContentState(
     importedShareIds: _importedShareIds,
     context: _context,
     modelSelection,
+    effortManual,
     workspaceSelection,
     project: _project,
     ...retained
@@ -1716,6 +1721,7 @@ export function clearComposerDraftContentState(
   const draft = {
     ...retained,
     ...(options?.clearModelSelection || modelSelection === undefined ? {} : { modelSelection }),
+    ...(options?.clearModelSelection || effortManual === undefined ? {} : { effortManual }),
     ...(options?.clearWorkspaceSelection || workspaceSelection === undefined
       ? {}
       : { workspaceSelection }),
@@ -1876,6 +1882,7 @@ export function sameComposerDraftState(a: ComposerDraft, b: ComposerDraft): bool
     a.runtimeMode === b.runtimeMode &&
     a.interactionMode === b.interactionMode &&
     a.freshContext === b.freshContext &&
+    a.effortManual === b.effortManual &&
     a.workspaceSelection === b.workspaceSelection
   );
 }

@@ -44,6 +44,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { createModelSelection } from "@t3tools/shared/model";
+import { autoEffortOffered, launchRoutingRequest } from "@t3tools/client-runtime/routing";
 import { type SetStateAction, useLayoutEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -1321,6 +1322,17 @@ export function useComposerSend(input: ComposerSendInput) {
           )
         : null;
       if (backgroundThreadRef) beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
+      const launchServerConfig = readEnvironmentPresentation(environmentId)?.serverConfig;
+      const routing = isLocalDraftThread
+        ? launchRoutingRequest({
+            offered: autoEffortOffered({
+              capability: launchServerConfig?.environment.capabilities.autoRouting,
+              settingEnabled: launchServerConfig?.settings.autoRoutingEnabled,
+            }),
+            effortManual: draftBeforePreparation?.effortManual === true,
+            multiModel: false,
+          })
+        : undefined;
       const startPromise = startThreadTurn({
         environmentId,
         input: {
@@ -1343,6 +1355,7 @@ export function useComposerSend(input: ComposerSendInput) {
           dispatchMode: turnDispatchMode,
           ...(freshArm === undefined ? {} : { freshContext: true }),
           ...(bootstrap ? { bootstrap } : {}),
+          ...(routing ? { routing } : {}),
           createdAt: messageCreatedAt,
         },
       });

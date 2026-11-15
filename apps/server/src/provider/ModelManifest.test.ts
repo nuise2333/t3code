@@ -265,6 +265,85 @@ const layerService = (input: {
     Layer.provideMerge(layerHttpClient(input.response)),
   );
 
+describe("resolveRoutingTable", () => {
+  const remoteRouting = {
+    version: 1,
+    updatedAt: REMOTE_UPDATED_AT,
+    sources: { bench: { url: "https://example.test/bench", dataDate: "2099-01-01" } },
+    defaultEffortByClass: {
+      readonly: "medium",
+      quick_edit: "medium",
+      implement: "high",
+      hard: "high",
+    },
+    rows: [
+      { driver: "codex", model: "*", sourceIds: ["bench"] },
+      { driver: "synthetic-driver", model: "*", sourceIds: ["bench"] },
+      { driver: "acpRegistry", model: "*", sourceIds: ["bench"] },
+    ],
+  };
+
+  it("bundles a table that never routes above high", () => {
+    const table = ModelManifest.BUNDLED_ROUTING_TABLE;
+    assert.isAbove(table.rows.length, 0);
+    assert.isFalse(table.rows.some((row) => row.driver === "acpRegistry"));
+  });
+
+  it("keeps only remote rows for drivers the bundled table knows", () => {
+    const table = ModelManifest.resolveRoutingTable({ ...REMOTE_MANIFEST, routing: remoteRouting });
+    assert.strictEqual(table.updatedAt, REMOTE_UPDATED_AT);
+    assert.deepStrictEqual(
+      table.rows.map((row) => row.driver),
+      ["codex"],
+    );
+  });
+
+  it.each([
+    { name: "missing", routing: undefined },
+    {
+      name: "an effort above high",
+      routing: {
+        ...remoteRouting,
+        defaultEffortByClass: { ...remoteRouting.defaultEffortByClass, hard: "xhigh" },
+      },
+    },
+    {
+      name: "a row citing an unknown source",
+      routing: { ...remoteRouting, rows: [{ driver: "codex", model: "*", sourceIds: ["absent"] }] },
+    },
+    {
+      name: "duplicate rows",
+      routing: { ...remoteRouting, rows: [remoteRouting.rows[0], remoteRouting.rows[0]] },
+    },
+  ])("falls back to the bundled table when the remote one is $name", ({ routing }) => {
+    assert.deepStrictEqual(
+      ModelManifest.resolveRoutingTable({ ...REMOTE_MANIFEST, routing }),
+      ModelManifest.BUNDLED_ROUTING_TABLE,
+    );
+  });
+
+  it.effect("keeps a fetched model catalog whose routing table is invalid", () => {
+    const remote = { ...REMOTE_MANIFEST, routing: { version: 2 } };
+    return Effect.gen(function* () {
+      const service = yield* ModelManifest.make;
+      const refreshed = yield* service.refresh;
+      assert.deepStrictEqual(refreshed.currentModels, REMOTE_MANIFEST.currentModels);
+      assert.deepStrictEqual(
+        ModelManifest.resolveRoutingTable(refreshed),
+        ModelManifest.BUNDLED_ROUTING_TABLE,
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        layerService({
+          prefix: "model-manifest-invalid-routing-test",
+          response: () => Response.json(remote),
+        }),
+      ),
+    );
+  });
+});
+
 describe("ModelManifest service", () => {
   it.effect("prefers a fetched manifest over the bundle and caches it to disk", () =>
     Effect.gen(function* () {

@@ -3,6 +3,12 @@ import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { useNowMinuteMs } from "../../lib/clock";
 import * as Dialog from "../../components/ui/Dialog";
 import React, { useEffect, useRef, useState } from "react";
+import { isClaudeUltrathinkPrompt } from "@t3tools/shared/model";
+import {
+  autoEffortOffered,
+  autoEffortSupported,
+  launchRoutingRequest,
+} from "@t3tools/client-runtime/routing";
 
 import type {
   EnvironmentId,
@@ -212,6 +218,11 @@ type NewTaskFlowContextValue = {
   readonly setSelectedModelOptions: (
     value: ReadonlyArray<ProviderOptionSelection> | undefined,
   ) => void;
+  /** Auto effort is offered here: the server honors it and its setting is on. */
+  readonly autoEffortOffered: boolean;
+  /** The user picked an effort level for this draft, so the new thread keeps it. */
+  readonly effortManual: boolean;
+  readonly setEffortManual: (manual: boolean) => void;
   readonly setExpandedProvider: (value: string | null) => void;
 };
 
@@ -523,6 +534,18 @@ export function NewTaskFlowProvider(
   };
 
   const providerGroups = groupByProvider(modelOptions);
+  const effortSupported = autoEffortSupported({
+    driver: selectedModelOption?.providerDriver,
+    descriptors: selectedModelOption?.capabilities?.optionDescriptors,
+    selection: selectedModel,
+    ultrathinkPrompt: isClaudeUltrathinkPrompt(prompt),
+  });
+  const effortOffered =
+    effortSupported &&
+    autoEffortOffered({
+      capability: selectedEnvironmentServerConfig?.environment.capabilities.autoRouting,
+      settingEnabled: selectedEnvironmentServerConfig?.settings.autoRoutingEnabled,
+    });
   const setPrompt = (value: string) => {
     if (!selectedProjectDraftKey) {
       return;
@@ -760,6 +783,11 @@ export function NewTaskFlowProvider(
     }
     const workspaceSelection = resolveWorkspaceSelection(draft.workspaceSelection);
     const mode = workspaceSelection.mode;
+    const routing = launchRoutingRequest({
+      offered: effortOffered,
+      effortManual: draft.effortManual === true,
+      multiModel: false,
+    });
     return {
       environmentId: selectedProject.environmentId,
       threadId: ThreadId.make(metadata.threadId),
@@ -793,6 +821,7 @@ export function NewTaskFlowProvider(
         ...((workspaceSelection?.startFromOrigin ?? startFromOrigin)
           ? { startFromOrigin: true }
           : {}),
+        ...(routing ? { routing } : {}),
       },
       createdAt: metadata.createdAt,
     };
@@ -924,6 +953,15 @@ export function NewTaskFlowProvider(
     loadBranches,
     setRuntimeMode,
     setSelectedModelOptions,
+    autoEffortOffered: effortOffered,
+    effortManual: selectedProjectDraft.effortManual === true,
+    setEffortManual: (manual: boolean) => {
+      if (selectedProjectDraftKey) {
+        updateComposerDraftSettings(selectedProjectDraftKey, {
+          effortManual: manual ? true : undefined,
+        });
+      }
+    },
     setExpandedProvider: (value: string | null) => updateFlow({ expandedProvider: value }),
   } satisfies NewTaskFlowContextValue;
 

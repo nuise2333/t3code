@@ -63,6 +63,10 @@
       "types": "./src/model.ts",
       "import": "./src/model.ts"
     },
+    "./routing": {
+      "types": "./src/routing.ts",
+      "import": "./src/routing.ts"
+    },
     "./advertisedEndpoint": {
       "types": "./src/advertisedEndpoint.ts",
       "import": "./src/advertisedEndpoint.ts"

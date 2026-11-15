@@ -9,6 +9,7 @@ import {
   WS_METHODS,
   type ChatAttachment,
   MessageId,
+  type LaunchRoutingRequest,
   type ModelSelection,
   type NodeId,
   type OrchestrationV2Command,
@@ -193,6 +194,8 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly bootstrap?: StartThreadBootstrap;
+  /** Asks the server to pick the effort for a new thread; ignored when the turn joins an existing one. */
+  readonly routing?: LaunchRoutingRequest;
   readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly dispatchMode?: "auto" | "queue" | "steer" | "restart" | "start";
   /** Start a new provider session; needs the server's `freshContext` capability. */
@@ -796,6 +799,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(input.routing === undefined ? {} : { routing: input.routing }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

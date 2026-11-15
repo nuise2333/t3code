@@ -1,3 +1,4 @@
+import { routedEffortDisplay } from "@t3tools/client-runtime/routing";
 import { useSidebarWorkspaceTabs } from "../layout/workspace/useSystemWorkspaceTabBar";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
@@ -24,6 +25,7 @@ import {
   type ModelSelection,
   type ServerConfig as T3ServerConfig,
   type UsageLimitsReport,
+  type RouteDecision,
 } from "@t3tools/contracts";
 import {
   collectProviderUsageLimits,
@@ -215,6 +217,9 @@ function useCompactComposerEditor(text: ScaledTextRole, value: string) {
 
 export interface ThreadComposerProps {
   readonly isDraft?: boolean;
+  /** A new thread's draft leaves its effort to Auto. */
+  readonly draftAutoEffort?: boolean;
+  readonly threadRouting?: RouteDecision | null;
   readonly canOperateThread: boolean;
   readonly placeholder: string;
   readonly contentMaxWidth?: number;
@@ -751,6 +756,18 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         option.selection.instanceId === currentModelSelection.instanceId &&
         option.selection.model === currentModelSelection.model,
     ) ?? null;
+  const routedEffort = props.isDraft
+    ? null
+    : routedEffortDisplay({
+        routing: props.threadRouting,
+        selection: currentModelSelection,
+        descriptors: currentModelOption?.capabilities?.optionDescriptors,
+      });
+  const reasoningLabel = props.draftAutoEffort
+    ? "Auto"
+    : routedEffort
+      ? `Auto · ${routedEffort.levelLabel}`
+      : undefined;
   const openSettings = () => {
     settingsSheetPresentation.open();
   };
@@ -829,6 +846,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         selection={currentModelSelection}
         provider={selectedProviderStatus?.driver}
         reportedSelection={props.reportedModelSelection}
+        reasoningLabel={reasoningLabel}
         prompt={draftMessage}
         surfaceColor={composerPanel}
         iconOnly={!compactEditor.isExpanded}

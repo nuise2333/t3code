@@ -975,6 +975,7 @@ export function NewTaskDraftScreen(props: {
           editorRef: promptInputRef,
           sendBlockedReason: setupBlockReason,
           interactionLocked: isComposerInteractionLocked,
+          autoEffort: flow.autoEffortOffered && !flow.effortManual,
         }}
         canOperateThread={canOperate}
         selectedThread={thread}
