@@ -12,11 +12,11 @@
       },
       "aa-index": { "url": "https://artificialanalysis.ai/", "dataDate": "2026-11-15" },
       "claude-effort": {
-        "url": "https://docs.claude.com/en/docs/build-with-claude/effort",
+        "url": "https://platform.claude.com/docs/en/build-with-claude/effort",
         "dataDate": "2026-11-15"
       },
       "codex-docs": {
-        "url": "https://developers.openai.com/codex/models",
+        "url": "https://learn.chatgpt.com/docs/models",
         "dataDate": "2026-11-15"
       }
     },
