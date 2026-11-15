@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ThreadProjection,
   ProjectId,
   ProviderInstanceId,
+  NodeId,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -89,6 +90,24 @@ it("stamps authoritative provenance on commands that create threads or messages"
   expect(stamped).not.toHaveProperty("delegatedFrom");
   expect(stamped).not.toHaveProperty("initialMessage");
   expect(stamped).not.toHaveProperty("routing");
+  const delegated = ThreadManagementService.withCreationProvenance(
+    {
+      type: "delegated_task.request",
+      createdBy: "agent",
+      creationSource: "mcp",
+      commandId: CommandId.make("command:thread-management:delegate"),
+      parentThreadId: ThreadId.make("thread:thread-management:parent"),
+      parentRunId: RunId.make("run:thread-management:parent"),
+      parentNodeId: NodeId.make("node:thread-management:parent"),
+      task: "Review it",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      routing: { taskClass: "hard", effort: null, applied: false, reasons: ["plan_mode"] },
+    },
+    { createdBy: "user", creationSource: "web" },
+  );
+  expect(delegated).not.toHaveProperty("routing");
 });
 
 const layerReceiptsTest = CommandReceiptStore.layer.pipe(

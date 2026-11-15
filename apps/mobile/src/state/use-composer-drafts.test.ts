@@ -1999,6 +1999,7 @@ describe("mobile composer drafts", () => {
       [key]: {
         ...getComposerDraftSnapshot(key),
         runtimeMode: "approval-required",
+        routingGroupId: "fast",
         workspaceSelection: { mode: "worktree", branch: "feature/a", worktreePath: null },
       },
     });
@@ -2009,6 +2010,7 @@ describe("mobile composer drafts", () => {
     const moved = getComposerDraftSnapshot(key);
     expect(moved.text).toBe("moving house");
     expect(moved.runtimeMode).toBe("approval-required");
+    expect(moved.routingGroupId).toBeUndefined();
 
     expect(moved.workspaceSelection).toBeUndefined();
     expect(moved.project).toEqual({ ...to, createdAt });
@@ -2216,6 +2218,7 @@ describe("mobile composer drafts", () => {
         options: [{ id: "reasoningEffort", value: "xhigh" }],
       },
       effortManual: true,
+      routingGroupId: "fast",
       runtimeMode: "full-access",
       workspaceSelection: {
         mode: "worktree",
@@ -2228,6 +2231,7 @@ describe("mobile composer drafts", () => {
       [draftKey]: {
         modelSelection: draft.modelSelection,
         effortManual: true,
+        routingGroupId: "fast",
         runtimeMode: "full-access",
         workspaceSelection: draft.workspaceSelection,
         text: "",
@@ -2239,6 +2243,11 @@ describe("mobile composer drafts", () => {
       clearComposerDraftContentState({ [draftKey]: draft }, draftKey, {
         clearModelSelection: true,
       })[draftKey]?.effortManual,
+    ).toBeUndefined();
+    expect(
+      clearComposerDraftContentState({ [draftKey]: draft }, draftKey, {
+        clearModelSelection: true,
+      })[draftKey]?.routingGroupId,
     ).toBeUndefined();
   });
 

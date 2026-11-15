@@ -14,6 +14,8 @@ import {
   autoEffortOffered,
   autoEffortSupported,
   routedEffortDisplay,
+  pickerRoutingGroups,
+  routedGroupDisplay,
 } from "@t3tools/client-runtime/routing";
 import {
   type EnvironmentId,
@@ -33,6 +35,7 @@ import {
   ComposerEffortColumn,
   type ComposerEffortRouting,
   ComposerPickerFooter,
+  ComposerRoutingGroupColumn,
   describeComposerEffort,
 } from "./ComposerModelEffort";
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -180,6 +183,61 @@ export function ComposerControlsBar(props: {
     draftId ? store.getComposerDraft(draftId)?.effortManual === true : false,
   );
   const setEffortManual = useComposerDraftStore((store) => store.setEffortManual);
+  const setRoutingGroup = useComposerDraftStore((store) => store.setRoutingGroup);
+  const draftRoutingGroupId = useComposerDraftStore((store) =>
+    routeKind === "draft" && draftId
+      ? (store.getComposerDraft(draftId)?.routingGroupId ?? null)
+      : null,
+  );
+  const providerModels = providerInstanceEntries.map((entry) => ({
+    instanceId: entry.instanceId,
+    models: entry.snapshot.models,
+  }));
+  const routingGroups = pickerRoutingGroups({
+    newThread: routeKind === "draft" && draftId !== null && draftId !== undefined,
+    multiModel: multipleModelSelections !== null,
+    capability: serverConfig?.environment.capabilities.routingGroups,
+    groups: serverConfig?.settings.routingGroups,
+    providers: providerModels,
+  });
+  const pickedGroup =
+    draftRoutingGroupId === null
+      ? null
+      : (routingGroups.find((group) => group.id === draftRoutingGroupId) ?? {
+          id: draftRoutingGroupId,
+          name: "Missing group",
+          summary: null,
+        });
+  const clearPickedGroup = () => {
+    if (draftId && draftRoutingGroupId !== null) setRoutingGroup(draftId, null);
+  };
+  // Groups launch one model, so a second model leaves the group for a manual pick.
+  const handleMultipleModelSelectionsChange = useStableCallback(
+    (selections: ReadonlyArray<ModelSelection> | null) => {
+      if (selections !== null) clearPickedGroup();
+      onMultipleModelSelectionsChange(selections);
+    },
+  );
+  // Re-picking the group's first member is still a manual pick of that model.
+  const handleProviderModelSelect = useStableCallback(
+    (...args: Parameters<typeof onProviderModelSelect>) => {
+      clearPickedGroup();
+      onProviderModelSelect(...args);
+    },
+  );
+  const handleRoutingGroupSelect = useStableCallback((groupId: string) => {
+    const group = routingGroups.find((candidate) => candidate.id === groupId);
+    if (draftId && group)
+      setRoutingGroup(draftId, { id: group.id, placeholder: group.placeholder });
+  });
+  const routedGroup =
+    routeKind === "server"
+      ? routedGroupDisplay({
+          routing: props.activeThreadRouting,
+          selection: selectedModelSelection,
+          providers: providerModels,
+        })
+      : null;
   const selectedDescriptors = selectedProviderModels.find((model) => model.slug === selectedModel)
     ?.capabilities?.optionDescriptors;
   const routedDisplay =
@@ -191,6 +249,7 @@ export function ComposerControlsBar(props: {
         })
       : null;
   const effortRouting: ComposerEffortRouting =
+    pickedGroup === null &&
     routeKind === "draft" &&
     draftId &&
     autoOffered &&
@@ -209,12 +268,27 @@ export function ComposerControlsBar(props: {
       : routedDisplay
         ? { kind: "routed", display: routedDisplay }
         : null;
-  const effort = describeComposerEffort(
+  const traitsEffort = describeComposerEffort(
     traitsInput,
     props.effortDisplay,
     controlSize,
     effortRouting,
   );
+  const effort = pickedGroup
+    ? {
+        suffix: null,
+        detail: pickedGroup.summary
+          ? `Routing group: first usable of ${pickedGroup.summary}`
+          : "This routing group no longer exists",
+      }
+    : routedGroup
+      ? {
+          suffix: traitsEffort.suffix,
+          detail: [routedGroup.label, routedGroup.skipped, traitsEffort.detail]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : traitsEffort;
   const restingBlockDefs = showModeBlock
     ? [
         {
@@ -245,9 +319,9 @@ export function ComposerControlsBar(props: {
       disabled={providerCatalogPending || isSendBusy}
       multipleModelsEnabled={multipleModelsEnabled}
       multipleModelSelections={multipleModelSelections}
-      onMultipleModelSelectionsChange={onMultipleModelSelectionsChange}
+      onMultipleModelSelectionsChange={handleMultipleModelSelectionsChange}
       selectedModelSelection={selectedModelSelection}
-      onProviderModelSelect={onProviderModelSelect}
+      onProviderModelSelect={handleProviderModelSelect}
       activeInstanceId={
         providerCatalogPending
           ? (activeThreadModelSelection?.instanceId ?? selectedInstanceId)
@@ -271,10 +345,24 @@ export function ComposerControlsBar(props: {
       )}
       triggerSuffix={effort.suffix}
       triggerDetail={effort.detail}
+      {...(pickedGroup ? { triggerLabel: pickedGroup.name } : {})}
+      routingGroups={routingGroups}
+      activeRoutingGroupId={draftRoutingGroupId}
+      onRoutingGroupSelect={handleRoutingGroupSelect}
       triggerShortcuts={
         pickerOwnsModeShortcut ? "composer.effort composer.mode" : "composer.effort"
       }
-      effortColumn={<ComposerEffortColumn traits={traitsInput} routing={effortRouting} />}
+      effortColumn={
+        pickedGroup ? (
+          <ComposerRoutingGroupColumn name={pickedGroup.name} summary={pickedGroup.summary} />
+        ) : (
+          <ComposerEffortColumn
+            traits={traitsInput}
+            routing={effortRouting}
+            routedGroup={routedGroup}
+          />
+        )
+      }
       footer={
         <ComposerPickerFooter
           traits={traitsInput}

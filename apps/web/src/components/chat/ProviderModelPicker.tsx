@@ -22,6 +22,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
+import type { PickerRoutingGroup } from "@t3tools/client-runtime/routing";
 import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
@@ -127,6 +128,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
    */
   effortColumn?: ReactNode;
   footer?: ReactNode;
+  /** A new thread's routing groups, listed in their own tab; picking one closes the picker. */
+  routingGroups?: ReadonlyArray<PickerRoutingGroup>;
+  activeRoutingGroupId?: string | null;
+  onRoutingGroupSelect?: (groupId: string) => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
@@ -309,6 +314,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           : (props.getModelDisabledReason?.(instanceId, model) ?? null)
       }
       onInstanceModelChange={handleInstanceModelChange}
+      {...(props.onRoutingGroupSelect && props.routingGroups && props.routingGroups.length > 0
+        ? {
+            routingGroups: props.routingGroups,
+            activeRoutingGroupId: props.activeRoutingGroupId ?? null,
+            onRoutingGroupSelect: (groupId: string) => {
+              if (props.disabled) return;
+              props.onRoutingGroupSelect?.(groupId);
+              setIsMenuOpen(false);
+            },
+          }
+        : {})}
       {...(docked
         ? {
             docked,

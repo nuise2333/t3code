@@ -129,13 +129,29 @@ Leaving reasoning level or service tier unset uses the provider's own configurat
 ## Auto effort
 
 Turn on **Settings → Labs → Auto effort** for a machine to add **Auto** to the
-effort levels of a new thread. Auto keeps your provider and model and picks Low,
+effort levels of a new thread. Auto keeps your provider and model (unless an
+[Auto rule](#routing-groups) sends that kind of task to a group) and picks Low,
 Medium, or High from the first message, once, when the thread starts. It never
 picks a level above High, and a model without those levels keeps its own. The
 started thread names the level Auto picked and why. Pick a level yourself, before
 or after sending, to stop using Auto for that thread. Typing Ultrathink or
 turning on Ultracode also counts as your choice. Sending to several models at
 once keeps each model's own level.
+
+## Routing groups
+
+A routing group is an ordered list of models, each with its own options. Create
+one in **Settings → Providers → Routing groups** on web and desktop, or
+**Settings → Routing groups** on mobile, then pick it from a new thread's model
+picker. When the thread starts, it runs on the first model in the list that is
+set up, has usage left, and supports the thread's permissions and plan mode. It
+decides once; later turns stay on that model, and the thread names the group and
+any model it skipped. If no model qualifies, the thread does not start and the
+error lists why each one was skipped.
+
+With Auto effort on, a group can also be chosen by the kind of first message:
+set **Auto rules** under the groups, and a new thread left on Auto starts through
+that kind's group instead of only picking an effort.
 
 ## Quote an assistant response
 

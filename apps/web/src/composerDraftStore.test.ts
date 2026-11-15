@@ -1277,11 +1277,19 @@ describe("composerDraftStore project draft thread mapping", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId });
     store.setPrompt(draftId, "keep this prompt");
+    store.setRoutingGroup(draftId, {
+      id: "fast",
+      placeholder: modelSelection(CODEX_DRIVER, "gpt-5.5"),
+    });
+    store.setDraftThreadContext(draftId, { branch: "same-machine" });
+    expect(store.getComposerDraft(draftId)?.routingGroupId).toBe("fast");
     store.setDraftThreadContext(draftId, {
       projectRef: remoteProjectRef,
       environmentSelection: "auto",
       loadBalancedEnvironmentId: OTHER_TEST_ENVIRONMENT_ID,
     });
+    // The other machine's settings own its group ids.
+    expect(store.getComposerDraft(draftId)?.routingGroupId).toBeUndefined();
     expect(store.getDraftThread(draftId)).toMatchObject({
       environmentId: OTHER_TEST_ENVIRONMENT_ID,
       environmentSelection: "auto",
@@ -1796,6 +1804,17 @@ describe("composerDraftStore modelSelection", () => {
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.effortManual).toBe(true);
     store.setEffortManual(threadRef, false);
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.effortManual).toBeUndefined();
+
+    const placeholder = modelSelection(CODEX_DRIVER, "gpt-5.5");
+    store.setRoutingGroup(threadRef, { id: "fast", placeholder });
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toMatchObject({
+      routingGroupId: "fast",
+      modelSelectionByProvider: { [placeholder.instanceId]: placeholder },
+    });
+    store.setModelSelection(threadRef, placeholder);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.routingGroupId).toBe("fast");
+    store.setModelSelection(threadRef, placeholder, { explicit: true });
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.routingGroupId).toBeUndefined();
   });
 
   it("replaces only the targeted provider options on the current model selection", () => {
@@ -2294,6 +2313,7 @@ describe("composerDraftStore model seed migration", () => {
               activeProvider: CODEX_INSTANCE,
               modelSelectionExplicit: true,
               effortManual: true,
+              routingGroupId: "fast",
             },
             [serverThreadKey]: {
               prompt: "",
@@ -2333,6 +2353,7 @@ describe("composerDraftStore model seed migration", () => {
         activeProvider: CODEX_INSTANCE,
         modelSelectionExplicit: true,
         effortManual: true,
+        routingGroupId: "fast",
       });
       expect(draftByKey(serverThreadKey)).toMatchObject({
         modelSelectionByProvider: { [CODEX_INSTANCE]: staleSelection },

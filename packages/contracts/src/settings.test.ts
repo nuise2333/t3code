@@ -163,6 +163,31 @@ it("drops a hand-edited non-string hidden tag and keeps the rest of the settings
   expect(settings.hideTaggedThreads).toBe(true);
 });
 
+it("drops a malformed routing group alone and keeps the first of a repeated id", () => {
+  const member = { instanceId: "codex", model: "gpt-fake-1" };
+  const settings = decodeServerSettings({
+    routingGroups: [
+      { id: "fast", name: "Fast", members: [member], strategy: "order" },
+      { id: "Bad Id", name: "Bad", members: [member], strategy: "order" },
+      { id: "empty", name: "Empty", members: [], strategy: "order" },
+      { id: "quota", name: "Quota", members: [member], strategy: "quota" },
+      "not a group",
+      { id: "fast", name: "Fast again", members: [member], strategy: "order" },
+      { id: "deep", name: "Deep", members: [member], strategy: "order" },
+    ],
+    routingGroupRules: { hard: "deep", readonly: "fast" },
+    autoRoutingEnabled: true,
+  });
+  expect(settings.routingGroups.map((group) => [group.id, group.name])).toEqual([
+    ["fast", "Fast"],
+    ["deep", "Deep"],
+  ]);
+  expect(settings.routingGroupRules).toEqual({ hard: "deep", readonly: "fast" });
+  expect(settings.autoRoutingEnabled).toBe(true);
+  expect(decodeServerSettings({ routingGroupRules: { hard: 42 } }).routingGroupRules).toEqual({});
+  expect(DEFAULT_SERVER_SETTINGS.routingGroups).toEqual([]);
+});
+
 describe("ServerSettings secret providers", () => {
   const onePassword = (account: string) => ({
     kind: "one_password",

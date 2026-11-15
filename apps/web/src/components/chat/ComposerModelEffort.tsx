@@ -4,7 +4,7 @@ import {
   isReasoningControl,
   selectableProviderOptionChoices,
 } from "@t3tools/client-runtime/model-traits";
-import type { RoutedEffortDisplay } from "@t3tools/client-runtime/routing";
+import type { RoutedEffortDisplay, RoutedGroupDisplay } from "@t3tools/client-runtime/routing";
 import type { ProviderOptionDescriptor, RuntimeMode } from "@t3tools/contracts";
 import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { getProviderOptionCurrentLabel } from "@t3tools/shared/model";
@@ -535,6 +535,8 @@ function NoEffortRow() {
 export function ComposerEffortColumn(props: {
   traits: TraitsSelectionInput | null;
   routing?: ComposerEffortRouting;
+  /** The group a launched thread started through, with skipped members in a tooltip. */
+  routedGroup?: RoutedGroupDisplay | null;
 }) {
   const picker = use(DockedPickerContext);
   const visibility = props.traits ? getTraitsSectionVisibility(props.traits) : null;
@@ -565,6 +567,54 @@ export function ComposerEffortColumn(props: {
           <EffortLevels traits={props.traits} routing={props.routing ?? null} />
         ) : (
           <NoEffortRow />
+        )}
+        {props.routedGroup ? <RoutedGroupNote display={props.routedGroup} /> : null}
+      </div>
+    </>
+  );
+}
+
+function RoutedGroupNote(props: { display: RoutedGroupDisplay }) {
+  const text = <span className="block truncate">Routing group: {props.display.label}</span>;
+  return (
+    <div className="mt-1 border-t border-border/70 px-2 pt-1.5 pb-0.5 text-muted-foreground/80 text-xs">
+      {props.display.skipped ? (
+        <Tooltip>
+          <TooltipTrigger render={<span tabIndex={0} className="block outline-none" />}>
+            {text}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{props.display.skipped}</TooltipPopup>
+        </Tooltip>
+      ) : (
+        text
+      )}
+    </div>
+  );
+}
+
+/** Stands in for the effort column while a routing group is picked: the group sets each member. */
+export function ComposerRoutingGroupColumn(props: { name: string; summary: string | null }) {
+  return (
+    <>
+      <div className="shrink-0 px-3 pt-2.5">
+        <div className="flex h-8.25 -translate-y-px items-center gap-2 border-b border-border/70 pb-1.5 text-sm">
+          <span className="text-muted-foreground">Routing group</span>
+          <span className="ms-auto min-w-0 truncate text-muted-foreground text-xs">
+            {props.name}
+          </span>
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 pt-2.5 pb-1.5 text-muted-foreground text-xs">
+        {props.summary ? (
+          <>
+            <p>Starts on the first usable model, in order:</p>
+            <p className="text-foreground">{props.summary}</p>
+            <p>
+              Each member keeps the options set in Settings. Pick a model to choose it yourself.
+            </p>
+          </>
+        ) : (
+          <p>This group no longer exists. Pick a model or another group.</p>
         )}
       </div>
     </>

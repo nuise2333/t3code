@@ -1331,6 +1331,10 @@ export function useComposerSend(input: ComposerSendInput) {
             }),
             effortManual: draftBeforePreparation?.effortManual === true,
             multiModel: false,
+            routingGroupId:
+              launchServerConfig?.environment.capabilities.routingGroups === true
+                ? draftBeforePreparation?.routingGroupId
+                : undefined,
           })
         : undefined;
       const startPromise = startThreadTurn({

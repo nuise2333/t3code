@@ -66,7 +66,11 @@ import {
   resolveProjectProviderInstanceEnabled,
   SECRET_REQUEST_UNSAVED_NOTE,
 } from "@t3tools/contracts";
-import { getProviderOptionCurrentValue, withLegacyUltracodeEffort } from "@t3tools/shared/model";
+import {
+  getProviderOptionCurrentValue,
+  optionSelectionProblem,
+  withLegacyUltracodeEffort,
+} from "@t3tools/shared/model";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
@@ -116,6 +120,7 @@ import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingEr
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   clientModeCeiling,
@@ -456,23 +461,8 @@ function invalidOptionSelections(
     }
     seen.add(selection.id);
     if (descriptors === undefined) continue;
-    const descriptor = descriptors.find((candidate) => candidate.id === selection.id);
-    if (descriptor === undefined) {
-      const known = descriptors.map((candidate) => candidate.id).join(", ");
-      problems.push(`Unknown option ${selection.id}; supported options: ${known || "none"}.`);
-      continue;
-    }
-    if (descriptor.type === "boolean" && typeof selection.value !== "boolean") {
-      problems.push(`Option ${selection.id} expects a boolean value.`);
-      continue;
-    }
-    if (
-      descriptor.type === "select" &&
-      !descriptor.options.some((choice) => choice.id === selection.value)
-    ) {
-      const choices = descriptor.options.map((choice) => choice.id).join(", ");
-      problems.push(`Option ${selection.id} must be one of: ${choices}.`);
-    }
+    const problem = optionSelectionProblem(selection, descriptors);
+    if (problem !== null) problems.push(problem);
   }
   return problems;
 }
@@ -1253,6 +1243,7 @@ const make = Effect.gen(function* () {
   const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
   const projects = yield* ProjectService.ProjectService;
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
+  const routingPolicy = yield* RoutingPolicy.RoutingPolicy;
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
@@ -2608,6 +2599,9 @@ const make = Effect.gen(function* () {
             constraints: [...constraints],
           };
         }),
+        ...(settings.routingGroups.length === 0
+          ? {}
+          : { routingGroups: settings.routingGroups.map(({ id, name }) => ({ id, name })) }),
         features: {
           appOwnedSubagents: true,
           asyncPolling: true,
@@ -2621,6 +2615,20 @@ const make = Effect.gen(function* () {
       };
     }),
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, input) {
+      const groupId = input.routingGroupId;
+      if (
+        groupId !== undefined &&
+        (input.target?.providerInstanceId !== undefined ||
+          input.target?.driverKind !== undefined ||
+          input.target?.model !== undefined ||
+          input.target?.options !== undefined ||
+          input.target?.environmentId !== undefined)
+      ) {
+        return yield* failure(
+          "invalid_request",
+          "routingGroupId picks the model here; omit target's provider, model, options and environmentId.",
+        );
+      }
       const environmentId =
         input.target === undefined
           ? undefined
@@ -2668,12 +2676,16 @@ const make = Effect.gen(function* () {
         operation: "delegate-task",
       });
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
-      const target = yield* resolveTargetRechecking({
-        parent,
-        target: input.target,
-        providers,
-        skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
-      });
+      const target =
+        groupId === undefined
+          ? yield* resolveTargetRechecking({
+              parent,
+              target: input.target,
+              providers,
+              skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
+            })
+          : undefined;
+      // A group skips members that cannot run the mode instead of stepping it down.
       const runtimeMode = yield* resolveRuntimeMode(
         parent.thread.runtimeMode,
         input.runtimeMode,
@@ -2683,6 +2695,23 @@ const make = Effect.gen(function* () {
         parent.thread.interactionMode,
         input.interactionMode,
       );
+      // A retry replays the accepted request, so it neither resolves again nor fails on quota.
+      const routed =
+        groupId === undefined || isRetryOfAcceptedDelegation
+          ? null
+          : yield* routingPolicy
+              .resolveGroup({
+                groupId,
+                via: "picker",
+                prompt: input.task,
+                interactionMode,
+                runtimeMode,
+                projectId: parent.thread.projectId,
+                runnableInstanceIds: yield* loadOrchestrationCapableInstanceIds(),
+              })
+              .pipe(Effect.mapError((error) => failure("model_unavailable", error.message)));
+      const modelSelection =
+        target?.modelSelection ?? routed?.selection ?? parent.thread.modelSelection;
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
       if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
         const project = yield* requireProject(parent.thread.projectId);
@@ -2727,10 +2756,11 @@ const make = Effect.gen(function* () {
           parentNodeId: parentRun.rootNodeId,
           task: taskPrompt(input),
           ...(input.title === undefined ? {} : { title: input.title }),
-          modelSelection: target.modelSelection,
+          modelSelection,
           runtimeMode,
           interactionMode,
           ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
+          ...(routed === null ? {} : { routing: routed.decision }),
           // Async delegations wake the parent on every child terminal; wait
           // delegations deliver through the blocking tool call until `awaitTask`
           // gives up the wait (timeout, cancelled call) and upgrades the wake.
@@ -3593,4 +3623,5 @@ export const layer: Layer.Layer<
   | SecretRequests.SecretRequests
   | ServerSettings.ServerSettingsService
   | RemoteDelegation.RemoteDelegation
+  | RoutingPolicy.RoutingPolicy
 > = Layer.effect(OrchestratorMcpService, make);

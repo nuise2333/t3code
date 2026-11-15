@@ -35,6 +35,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { MAX_ROUTING_GROUPS, RoutingGroup, RoutingGroupRules } from "./routing.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
@@ -1356,6 +1357,32 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+const decodeRoutingGroupOption = Schema.decodeUnknownOption(RoutingGroup);
+
+/** Bad entries drop alone and a repeated id keeps its first group, so a hand edit cannot reset settings. */
+const LenientRoutingGroups = Schema.Array(Schema.Unknown).pipe(
+  Schema.decodeTo(
+    Schema.Array(RoutingGroup),
+    SchemaTransformation.transform<
+      ReadonlyArray<typeof RoutingGroup.Encoded>,
+      ReadonlyArray<unknown>
+    >({
+      decode: (values) => {
+        const seen = new Set<string>();
+        const kept: Array<typeof RoutingGroup.Encoded> = [];
+        for (const value of values) {
+          const decoded = decodeRoutingGroupOption(value);
+          if (Option.isNone(decoded) || seen.has(decoded.value.id)) continue;
+          seen.add(decoded.value.id);
+          kept.push(value as typeof RoutingGroup.Encoded);
+        }
+        return kept.slice(0, MAX_ROUTING_GROUPS);
+      },
+      encode: (values) => values,
+    }),
+  ),
+);
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1479,6 +1506,11 @@ export const ServerSettings = Schema.Struct({
   promptSuggestionsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Beta: new threads launched with Auto effort get a reasoning effort, up to high, picked from their first message. */
   autoRoutingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  routingGroups: LenientRoutingGroups.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  routingGroupRules: RoutingGroupRules.pipe(
+    Schema.catchDecoding(() => Effect.succeedSome({})),
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1910,6 +1942,12 @@ export const ServerSettingsPatch = Schema.Struct({
   linkedEnvironmentsEnabled: Schema.optionalKey(Schema.Boolean),
   promptSuggestionsEnabled: Schema.optionalKey(Schema.Boolean),
   autoRoutingEnabled: Schema.optionalKey(Schema.Boolean),
+  /** Replaces the whole list, like `deviceHosts`. */
+  routingGroups: Schema.optionalKey(
+    Schema.Array(RoutingGroup).check(Schema.isMaxLength(MAX_ROUTING_GROUPS)),
+  ),
+  /** Replaces every rule; omit a class to clear it. */
+  routingGroupRules: Schema.optionalKey(RoutingGroupRules),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

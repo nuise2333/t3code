@@ -38,6 +38,7 @@ import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as RemoteDelegation from "./RemoteDelegation.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
@@ -224,7 +225,7 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
       McpHttpServer.layerThreadToolkit,
     ).pipe(
       Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
-      Layer.provide(NodeCrypto.layer),
+      Layer.provide(Layer.mergeAll(NodeCrypto.layer, ModelManifest.layerTest)),
       Layer.provide(boxThreads(seen, linkSession)),
       Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
       Layer.provide(boxLaunches(seen)),
@@ -295,7 +296,7 @@ const makeLaptop = Effect.gen(function* () {
     Layer.provide(NodeServices.layer),
     Layer.provide(PeerForwarding.layer),
     Layer.provide(Layer.succeedContext(linking)),
-    Layer.provide(NodeCrypto.layer),
+    Layer.provide(Layer.mergeAll(NodeCrypto.layer, ModelManifest.layerTest)),
     Layer.provideMerge(
       Layer.mock(ThreadManagement.ThreadManagementService)({
         getThreadShell: (threadId) =>

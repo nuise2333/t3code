@@ -1,7 +1,8 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef, useState } from "react";
-import { StarIcon } from "lucide-react";
+import { ListOrderedIcon, StarIcon } from "lucide-react";
+import type { ModelPickerTab } from "./ProviderModelPicker.logic";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -30,16 +31,17 @@ const PICKER_TOOLTIP_SIDE = "left" as const;
 const PICKER_TOOLTIP_SIDE_OFFSET = 8;
 
 export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
-  selectedInstanceId: ProviderInstanceId | "favorites";
-  onSelectInstance: (instanceId: ProviderInstanceId | "favorites") => void;
+  selectedInstanceId: ModelPickerTab;
+  onSelectInstance: (instanceId: ModelPickerTab) => void;
   onFocusSearch: () => void;
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   showFavorites?: boolean;
+  showRoutingGroups?: boolean;
   disabledInstanceIds?: ReadonlySet<ProviderInstanceId>;
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
 }) {
-  const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
+  const handleSelect = (instanceId: ModelPickerTab) => {
     props.onSelectInstance(instanceId);
   };
   const showFavorites = props.showFavorites ?? true;
@@ -65,6 +67,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
     props.instanceEntries,
     props.selectedInstanceId,
     showFavorites,
+    props.showRoutingGroups,
   ]);
 
   return (
@@ -119,6 +122,32 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   </TooltipPopup>
                 </Tooltip>
               </div>
+              {props.showRoutingGroups ? (
+                <div className="relative w-full" data-model-picker-provider="groups">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Toolbar.Button
+                          className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
+                          onClick={() => handleSelect("groups")}
+                          type="button"
+                          aria-label="Routing groups"
+                          aria-pressed={props.selectedInstanceId === "groups"}
+                        >
+                          <ListOrderedIcon className="size-5 shrink-0" aria-hidden />
+                        </Toolbar.Button>
+                      }
+                    />
+                    <TooltipPopup
+                      side={PICKER_TOOLTIP_SIDE}
+                      sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
+                      align="center"
+                    >
+                      Routing groups
+                    </TooltipPopup>
+                  </Tooltip>
+                </div>
+              ) : null}
               <div className="border-b border-border/70" aria-hidden="true" />
             </>
           ) : null}

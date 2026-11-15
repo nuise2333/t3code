@@ -3050,6 +3050,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (noProviderAvailable || pendingUserInputs.length > 0 || isEditingQueuedMessage) {
           return;
         }
+        // A routing group sets each member's effort, so the shown placeholder has none to step.
+        if (
+          useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.routingGroupId
+        ) {
+          return;
+        }
         const change = getComposerReasoningStep({
           provider: selectedProvider,
           instanceId: selectedInstanceId,

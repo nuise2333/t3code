@@ -234,6 +234,8 @@ export interface ThreadDetailScreenProps {
     readonly interactionLocked: boolean;
     /** The new thread leaves its effort to Auto. */
     readonly autoEffort?: boolean;
+    /** The new thread launches through this routing group. */
+    readonly routingGroupName?: string | null;
   };
   readonly worktreeSetup?: WorktreeSetupCardProps | null;
   readonly setupWorkingStartedAt?: string | null;
@@ -1847,6 +1849,7 @@ function ThreadDetailBody(
                       <ThreadComposer
                         isDraft={Boolean(props.draftMode)}
                         draftAutoEffort={props.draftMode?.autoEffort === true}
+                        draftRoutingGroupName={props.draftMode?.routingGroupName ?? null}
                         threadRouting={threadRouting}
                         canOperateThread={props.canOperateThread}
                         reportedModelSelection={reportedModelSelection}

@@ -225,6 +225,8 @@ describe("searchSettings", () => {
       ["CODEX_HOME path", "providers"],
       ["Shadow home path", "providers"],
       ["reasoning routing", "auto-effort-beta"],
+      ["model group", "routing-groups"],
+      ["failover", "routing-groups"],
     ] as const) {
       expect(searchSettings(title)[0]?.id, title).toBe(id);
     }

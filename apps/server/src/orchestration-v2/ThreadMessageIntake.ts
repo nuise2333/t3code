@@ -270,7 +270,10 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
         ),
       ),
       Effect.tapError((error) => {
-        if (error._tag === "ThreadManagementProviderInstanceDisabledError") {
+        if (
+          error._tag === "ThreadManagementProviderInstanceDisabledError" ||
+          error._tag === "RoutingGroupUnavailableError"
+        ) {
           return AttachmentClaims.releaseClaimedAttachments(claimed.claimedPaths);
         }
         // Project/receipt reads precede dispatch; create-thread errors can wrap post-message reads and prove nothing alone.

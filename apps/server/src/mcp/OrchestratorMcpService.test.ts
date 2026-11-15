@@ -62,6 +62,7 @@ import {
 } from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
@@ -82,6 +83,7 @@ const decodeTarget = Schema.decodeUnknownEffect(OrchestratorMcpTarget);
 
 const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
 );
 
@@ -3367,6 +3369,170 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
   );
 
+  it.effect(
+    "delegates to the member a routing group picks and replays without resolving again",
+    () =>
+      Effect.gen(function* () {
+        const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        const resolved = yield* Ref.make<ReadonlyArray<RoutingPolicy.RoutingGroupInput>>([]);
+        let accepted = false;
+        let delegated = false;
+        const chosen = {
+          instanceId: ProviderInstanceId.make("claude_fake"),
+          model: "claude-fake-1",
+        };
+        const decision = {
+          taskClass: "implement",
+          effort: null,
+          applied: false,
+          reasons: ["default_class"],
+          group: {
+            id: "cheap",
+            name: "Cheap",
+            via: "picker",
+            chosen: 1,
+            member: chosen,
+            skipped: [
+              {
+                index: 0,
+                instanceId: ProviderInstanceId.make("codex_fake"),
+                model: "codex-fake-1",
+                reason: "usage_exhausted",
+              },
+            ],
+          },
+        } as const;
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          runId: parentRunId,
+          parentNodeId,
+          origin: "app_owned",
+          createdBy: "agent",
+          driver: ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId: chosen.instanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Review the change.",
+          title: null,
+          model: chosen.model,
+          status: "running",
+          result: null,
+          startedAt: null,
+          completedAt: null,
+        };
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.sync(() => accepted),
+            assertProviderInstanceEnabled: () => Effect.void,
+            isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+            getThreadRecords: (threadId) =>
+              Effect.succeed(
+                threadId === parentThreadId
+                  ? parentProjection(delegated ? [task] : [])
+                  : childProjection,
+              ),
+            dispatch: (command) =>
+              Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    delegated = true;
+                  }),
+                ),
+                Effect.as({
+                  sequence: 1,
+                  storedEvents: [
+                    {
+                      sequence: 1,
+                      commandId: null,
+                      event: { type: "subagent.updated", payload: task },
+                    },
+                  ],
+                } as never),
+              ),
+          }),
+          ServerSettings.layerTest({
+            routingGroups: [{ id: "cheap", name: "Cheap", members: [chosen], strategy: "order" }],
+          }),
+          providerRegistryLayer([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+          ]),
+          adapterRegistryLayer([codexInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        const layer = OrchestratorMcpService.layer.pipe(
+          Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+          Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          Layer.provide(
+            Layer.mock(RoutingPolicy.RoutingPolicy)({
+              resolveGroup: (input) =>
+                input.groupId === "gone"
+                  ? Effect.fail(
+                      new RoutingPolicy.RoutingGroupUnavailableError({
+                        groupId: "gone",
+                        groupName: null,
+                        skipped: [],
+                      }),
+                    )
+                  : Ref.update(resolved, (inputs) => [...inputs, input]).pipe(
+                      Effect.as({ selection: chosen, decision }),
+                    ),
+            }),
+          ),
+          Layer.provide(layerDependencies),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const both = yield* service
+            .delegateTask(scope, {
+              task: "Review the change.",
+              routingGroupId: "cheap",
+              target: { model: "gpt-5.4" },
+            })
+            .pipe(Effect.flip);
+          assert.equal(both.code, "invalid_request");
+          const gone = yield* service
+            .delegateTask(scope, { task: "Review the change.", routingGroupId: "gone" })
+            .pipe(Effect.flip);
+          assert.equal(gone.code, "model_unavailable");
+          assert.include(gone.message, "no longer exists");
+
+          const request = { task: "Review the change.", routingGroupId: "cheap" } as const;
+          yield* service.delegateTask(scope, { ...request, clientRequestId: "delegate-group" });
+          accepted = true;
+          yield* service.delegateTask(scope, { ...request, clientRequestId: "delegate-group" });
+          const inputs = yield* Ref.get(resolved);
+          assert.equal(inputs.length, 1);
+          assert.include(inputs[0], {
+            groupId: "cheap",
+            via: "picker",
+            runtimeMode: "full-access",
+          });
+          assert.deepEqual([...(inputs[0]?.runnableInstanceIds ?? [])], [codexInstanceId]);
+          const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+            readonly modelSelection: unknown;
+            readonly routing?: unknown;
+          }>;
+          assert.deepEqual(commands[0]?.modelSelection, chosen);
+          assert.deepEqual(commands[0]?.routing, decision);
+
+          const capabilities = yield* service.capabilities(scope);
+          assert.deepEqual(capabilities.routingGroups, [{ id: "cheap", name: "Cheap" }]);
+        }).pipe(Effect.provide(layer));
+      }),
+  );
+
   describe("scheduled tasks at modes above the caller's", () => {
     const projectId = ProjectId.make("project:scheduled");
     const boundThreadId = ThreadId.make("thread:scheduled-bound");
@@ -3418,6 +3584,7 @@ describe("OrchestratorMcpService provider resolution", () => {
     ) =>
       OrchestratorMcpService.layer.pipe(
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
         Layer.provide(
           Layer.mock(GitVcsDriver.GitVcsDriver)({
             resolvePrimaryRemoteName: () => Effect.succeed("origin"),
@@ -3649,6 +3816,7 @@ describe("OrchestratorMcpService provider resolution", () => {
     ) =>
       OrchestratorMcpService.layer.pipe(
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
         Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)(git)),
         Layer.provide(
           Layer.mergeAll(

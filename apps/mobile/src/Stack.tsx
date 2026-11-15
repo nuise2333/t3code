@@ -129,6 +129,11 @@ import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRoute
 import { SettingsNotificationsRouteScreen } from "./features/settings/SettingsNotificationsRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { SettingsLabsRouteScreen } from "./features/settings/ThreadSettingsSections";
+import {
+  SettingsRoutingGroupEditRouteScreen,
+  SettingsRoutingGroupMemberRouteScreen,
+  SettingsRoutingGroupsRouteScreen,
+} from "./features/settings/SettingsRoutingGroupsRouteScreen";
 import { SettingsEnvironmentFilterProvider } from "./features/settings/settings-environment-filter";
 import { openSettings, settingsOpenIn } from "./features/settings/settings-navigation";
 import { DEFAULT_SETTINGS_PAGE } from "./features/layout/workspace/workspace-tab-navigation";
@@ -207,6 +212,19 @@ const SETTINGS_SCREENS = {
     screen: SettingsProviderAccountsRouteScreen,
     linking: "settings/provider-accounts",
     options: settingsPage("Providers"),
+  }),
+  SettingsRoutingGroups: createNativeStackScreen({
+    screen: SettingsRoutingGroupsRouteScreen,
+    linking: "settings/routing-groups",
+    options: settingsPage("Routing groups"),
+  }),
+  SettingsRoutingGroupEdit: createNativeStackScreen({
+    screen: SettingsRoutingGroupEditRouteScreen,
+    options: settingsPage("Routing group"),
+  }),
+  SettingsRoutingGroupMember: createNativeStackScreen({
+    screen: SettingsRoutingGroupMemberRouteScreen,
+    options: THREAD_SETTINGS_ROUTE,
   }),
   SettingsEnvironmentMaintenance: createNativeStackScreen({
     screen: SettingsEnvironmentMaintenanceRouteScreen,

@@ -1,21 +1,32 @@
-import type {
-  ModelSelection,
-  ProviderDriverKind,
-  ProviderInteractionMode,
-  ProviderOptionDescriptor,
-  RouteDecision,
-  RoutingEffort,
-  RoutingReason,
-  RoutingTable,
-  RoutingTaskClass,
+import {
+  isProviderAvailable,
+  resolveProjectProviderInstanceEnabled,
+  type ModelSelection,
+  type ProjectId,
+  type ProviderDriverKind,
+  type ProviderInstanceId,
+  type ProviderInteractionMode,
+  type ProviderOptionDescriptor,
+  type RouteDecision,
+  type RoutingEffort,
+  type RoutingGroup,
+  type RoutingReason,
+  type RoutingSkipReason,
+  type RoutingTable,
+  type RoutingTaskClass,
+  type RuntimeMode,
+  type ServerProvider,
+  type ServerSettings,
 } from "@t3tools/contracts";
 
 import {
   getProviderOptionCurrentValue,
   isClaudeUltrathinkPrompt,
   isReasoningSelect,
+  optionSelectionProblem,
   withLegacyUltracodeEffort,
 } from "./model.ts";
+import { exhaustedUsageWindow } from "./usageLimits.ts";
 
 const EFFORT_LADDER: ReadonlyArray<RoutingEffort> = ["low", "medium", "high"];
 
@@ -224,4 +235,114 @@ export function routeFor(input: {
     },
     decision,
   };
+}
+
+export interface RoutingGroupSkip {
+  readonly index: number;
+  readonly instanceId: ProviderInstanceId;
+  readonly model: string;
+  readonly reason: RoutingSkipReason;
+}
+
+export type RoutingGroupResolution =
+  | {
+      readonly ok: true;
+      readonly index: number;
+      readonly selection: ModelSelection;
+      readonly skipped: ReadonlyArray<RoutingGroupSkip>;
+    }
+  | { readonly ok: false; readonly skipped: ReadonlyArray<RoutingGroupSkip> };
+
+function memberSkipReason(input: {
+  readonly member: ModelSelection;
+  readonly provider: ServerProvider | undefined;
+  readonly settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+  readonly projectId: ProjectId | null;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly runnableInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
+  readonly now: number;
+}): RoutingSkipReason | null {
+  const { member, provider } = input;
+  if (provider === undefined) return "instance_missing";
+  if (!provider.enabled) return "instance_disabled";
+  if (
+    input.runnableInstanceIds?.has(member.instanceId) === false ||
+    !provider.installed ||
+    provider.status === "error" ||
+    provider.status === "disabled" ||
+    provider.auth.status === "unauthenticated" ||
+    !isProviderAvailable(provider)
+  ) {
+    return "not_ready";
+  }
+  if (!resolveProjectProviderInstanceEnabled(input.settings, input.projectId, member.instanceId)) {
+    return "project_disabled";
+  }
+  const model = provider.models.find(
+    (candidate) =>
+      candidate.slug === member.model || candidate.aliases?.includes(member.model) === true,
+  );
+  if (model === undefined) return "model_unavailable";
+  if (exhaustedUsageWindow(provider, input.now, model.slug) !== undefined) return "usage_exhausted";
+  // A provider without the thread's mode would quietly run it as approval-required.
+  const modes = provider.supportedRuntimeModes;
+  if (modes !== undefined && modes.length > 0 && !modes.includes(input.runtimeMode)) {
+    return "runtime_mode";
+  }
+  if (input.interactionMode === "plan" && provider.showInteractionModeToggle !== true) {
+    return "plan_unsupported";
+  }
+  return null;
+}
+
+/** A member's options are the user's choice; only ones its model still accepts are kept. */
+function acceptedOptions(
+  member: ModelSelection,
+  descriptors: ReadonlyArray<ProviderOptionDescriptor> | undefined,
+): ModelSelection {
+  if (member.options === undefined || descriptors === undefined) return member;
+  const seen = new Set<string>();
+  const options = member.options.filter((option) => {
+    if (seen.has(option.id)) return false;
+    seen.add(option.id);
+    return optionSelectionProblem(option, descriptors) === null;
+  });
+  const { options: _options, ...rest } = member;
+  return options.length === 0 ? rest : { ...rest, options };
+}
+
+/** The first member, in order, that can run this launch; never a model outside the group. */
+export function resolveRoutingGroup(input: {
+  readonly group: RoutingGroup;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+  readonly projectId: ProjectId | null;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId> | undefined;
+  readonly now: number;
+}): RoutingGroupResolution {
+  const skipped: Array<RoutingGroupSkip> = [];
+  for (const [index, member] of input.group.members.entries()) {
+    const provider = input.providers.find(
+      (candidate) => candidate.instanceId === member.instanceId,
+    );
+    const reason = memberSkipReason({
+      ...input,
+      runnableInstanceIds: input.runnableInstanceIds,
+      member,
+      provider,
+    });
+    if (reason !== null) {
+      skipped.push({ index, instanceId: member.instanceId, model: member.model, reason });
+      continue;
+    }
+    const descriptors = provider?.models.find(
+      (candidate) =>
+        candidate.slug === member.model || candidate.aliases?.includes(member.model) === true,
+    )?.capabilities?.optionDescriptors;
+    return { ok: true, index, selection: acceptedOptions(member, descriptors), skipped };
+  }
+  return { ok: false, skipped };
 }

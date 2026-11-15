@@ -3,7 +3,13 @@ import {
   getTraitSelectChange,
   isReasoningSelect,
 } from "@t3tools/client-runtime/model-traits";
-import { type RoutedEffortDisplay, routedEffortDisplay } from "@t3tools/client-runtime/routing";
+import {
+  type PickerRoutingGroup,
+  type RoutedEffortDisplay,
+  type RoutedGroupDisplay,
+  routedEffortDisplay,
+  routedGroupDisplay,
+} from "@t3tools/client-runtime/routing";
 import * as Dialog from "../../components/ui/Dialog";
 import { createV5StackNavigator as createNativeStackNavigator } from "../../native/createV5StackNavigator";
 import { useSheetStackOptions } from "../layout/nested-stacks";
@@ -276,6 +282,12 @@ const AUTO_EFFORT_NOTE = "Picks a level up to High from your first message.";
 
 type ThreadSettingsSessionProps = {
   readonly effortRouting?: ThreadSettingsEffortRouting | null;
+  /** A new thread's routing groups; picking one applies at once and replaces the model. */
+  readonly routingGroups?: ReadonlyArray<PickerRoutingGroup>;
+  readonly selectedRoutingGroupId?: string | null;
+  readonly onSelectRoutingGroup?: (groupId: string) => void;
+  /** The group a launched thread started through, with its skipped members. */
+  readonly routedGroup?: RoutedGroupDisplay | null;
   readonly environmentId: EnvironmentId | null;
   readonly projectId: ProjectId | null;
   readonly cwd: string | null;
@@ -291,7 +303,8 @@ type ThreadSettingsSessionProps = {
   readonly optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
-  readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  /** Omitted where the selection has no runtime mode, which hides the Runtime row. */
+  readonly onUpdateRuntimeMode?: (mode: RuntimeMode) => void;
 };
 
 /** The composer draft the sheet edits: the thread's own, or a queued message being edited. */
@@ -303,6 +316,10 @@ export type ExistingThreadSettingsRouteParams = {
 
 type ThreadSettingsSessionValue = {
   readonly effortRouting: ThreadSettingsEffortRouting | null;
+  readonly routingGroups: ReadonlyArray<PickerRoutingGroup>;
+  readonly selectedRoutingGroupId: string | null;
+  readonly pressRoutingGroup: (groupId: string) => void;
+  readonly routedGroup: RoutedGroupDisplay | null;
   readonly environmentId: EnvironmentId | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
@@ -315,7 +332,7 @@ type ThreadSettingsSessionValue = {
   readonly setManageHidden: (value: boolean) => void;
   readonly runtimeMode: RuntimeMode;
   readonly runtimeModeChoices: ReadonlyArray<RuntimeModeChoice>;
-  readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  readonly onUpdateRuntimeMode: ((mode: RuntimeMode) => void) | undefined;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly promptTraits: ReturnType<typeof getPromptControlledTraits>;
   readonly displayedModelSelection: ModelSelection | null;
@@ -504,7 +521,10 @@ function ThreadSettingsSessionProvider(
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const displayedPrompt = pendingModel ? (pendingPrompt ?? props.prompt) : props.prompt;
 
+  const selectedRoutingGroupId = props.selectedRoutingGroupId ?? null;
+  // A picked group holds its first member as the selection, but no model row is chosen.
   const isApplied = (option: ModelOption) =>
+    selectedRoutingGroupId === null &&
     option.selection.instanceId === props.selectedModel?.instanceId &&
     option.selection.model === props.selectedModel.model;
   const isDisplayed = (option: ModelOption) =>
@@ -623,8 +643,19 @@ function ThreadSettingsSessionProvider(
   const workspaceScan =
     props.cwd && scannedInstanceId ? { instanceId: scannedInstanceId, cwd: props.cwd } : null;
 
+  const pressRoutingGroup = (groupId: string) => {
+    void Haptics.selectionAsync();
+    setPendingModel(null);
+    setPendingPrompt(null);
+    props.onSelectRoutingGroup?.(groupId);
+  };
+
   const value = {
     effortRouting: props.effortRouting ?? null,
+    routingGroups: props.onSelectRoutingGroup ? (props.routingGroups ?? []) : [],
+    selectedRoutingGroupId,
+    pressRoutingGroup,
+    routedGroup: props.routedGroup ?? null,
     environmentId,
     providerInstanceId: props.providerInstanceId,
     providerGroups,
@@ -722,6 +753,14 @@ type ThreadSettingsCatalogItem =
       readonly key: string;
       readonly text: string;
     }
+  | { readonly kind: "groupHeader"; readonly key: "routing-groups" }
+  | {
+      readonly kind: "group";
+      readonly key: string;
+      readonly group: PickerRoutingGroup;
+      readonly isFirst: boolean;
+      readonly isLast: boolean;
+    }
   | {
       readonly kind: "empty";
       readonly key: "empty";
@@ -779,6 +818,30 @@ function ThreadSettingsProviderListHeader(props: {
 }
 
 function buildThreadSettingsCatalogItems(
+  session: ThreadSettingsSessionValue,
+): ReadonlyArray<ThreadSettingsCatalogItem> {
+  const query = session.searchQuery.trim().toLowerCase();
+  const routingGroups =
+    session.providerFilter === null
+      ? session.routingGroups.filter((group) => group.name.toLowerCase().includes(query))
+      : [];
+  const groupItems: ReadonlyArray<ThreadSettingsCatalogItem> =
+    routingGroups.length === 0
+      ? []
+      : [
+          { kind: "groupHeader", key: "routing-groups" },
+          ...routingGroups.map((group, index) => ({
+            kind: "group" as const,
+            key: `routing-group:${group.id}`,
+            group,
+            isFirst: index === 0,
+            isLast: index === routingGroups.length - 1,
+          })),
+        ];
+  return [...groupItems, ...buildProviderCatalogItems(session)];
+}
+
+function buildProviderCatalogItems(
   session: ThreadSettingsSessionValue,
 ): ReadonlyArray<ThreadSettingsCatalogItem> {
   return session.providerGroups.flatMap((group) => {
@@ -881,6 +944,23 @@ function ThreadSettingsOptionsItem(props: {
   return (
     <View style={{ paddingBottom: insets.bottom + props.bottomInset + 12 }}>
       <ChatGptSharingStatus provider={selectedProvider} />
+      {session.routedGroup ? (
+        <View className="px-5 pb-2 pt-2">
+          <Text className="text-sm text-foreground">
+            Routing group: {session.routedGroup.label}
+          </Text>
+          {session.routedGroup.skipped ? (
+            <Text className="text-sm text-foreground-muted">{session.routedGroup.skipped}</Text>
+          ) : null}
+        </View>
+      ) : null}
+      {session.selectedRoutingGroupId !== null ? (
+        <Text className="px-5 pb-2 pt-2 text-sm text-foreground-muted">
+          {session.routingGroups.some((group) => group.id === session.selectedRoutingGroupId)
+            ? "The thread starts on the group's first usable model, with the options set for it in Settings. Pick a model to choose it yourself."
+            : "This routing group no longer exists. Pick a model or another group."}
+        </Text>
+      ) : null}
       <Text className="px-5 pb-2 pt-2 text-sm font-t3-medium text-foreground-muted">Options</Text>
       <Animated.View
         className="mx-4 overflow-hidden rounded-2xl bg-grouped-card"
@@ -939,17 +1019,19 @@ function ThreadSettingsOptionsItem(props: {
             </Animated.View>
           );
         })}
-        <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
-          <DisclosureRow
-            isLast
-            label="Runtime"
-            value={
-              session.runtimeModeChoices.find((choice) => choice.mode === session.runtimeMode)
-                ?.label
-            }
-            onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
-          />
-        </Animated.View>
+        {session.onUpdateRuntimeMode ? (
+          <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
+            <DisclosureRow
+              isLast
+              label="Runtime"
+              value={
+                session.runtimeModeChoices.find((choice) => choice.mode === session.runtimeMode)
+                  ?.label
+              }
+              onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
+            />
+          </Animated.View>
+        ) : null}
       </Animated.View>
 
       <Text className="px-5 pb-2 pt-7 text-sm font-t3-medium text-foreground-muted">Catalog</Text>
@@ -1036,6 +1118,30 @@ function ThreadSettingsMainContent(props: {
           isLast={item.isLast}
           option={item.option}
         />
+      );
+    } else if (item.kind === "groupHeader") {
+      content = (
+        <Text className="px-5 pb-2 pt-2 text-sm font-t3-medium text-foreground-muted">
+          Routing groups
+        </Text>
+      );
+    } else if (item.kind === "group") {
+      content = (
+        <View
+          className={cn(
+            "mx-4 overflow-hidden bg-grouped-card",
+            item.isFirst && "rounded-t-2xl",
+            item.isLast && "mb-3 rounded-b-2xl",
+          )}
+        >
+          <ChoiceRow
+            label={item.group.name}
+            description={item.group.summary}
+            selected={session.selectedRoutingGroupId === item.group.id}
+            isLast={item.isLast}
+            onPress={() => session.pressRoutingGroup(item.group.id)}
+          />
+        </View>
       );
     } else if (item.kind === "notice") {
       content = <Text className="mx-8 mt-2 text-xs text-foreground-muted">{item.text}</Text>;
@@ -1198,7 +1304,7 @@ function ThreadSettingsChoiceContent(props: {
             selected: choice.mode === session.runtimeMode,
             onPress: () => {
               void Haptics.selectionAsync();
-              session.onUpdateRuntimeMode(choice.mode);
+              session.onUpdateRuntimeMode?.(choice.mode);
               props.onSelected();
             },
           })),
@@ -1468,6 +1574,11 @@ export function ExistingThreadSettingsRouteScreen({
     selection: modelSelection,
     descriptors: currentModelOption?.capabilities?.optionDescriptors,
   });
+  const routedGroup = routedGroupDisplay({
+    routing: structure?.projection.thread.routing,
+    selection: modelSelection,
+    providers: serverConfig?.providers ?? [],
+  });
 
   return (
     <ThreadSettingsPickerScreen
@@ -1499,6 +1610,7 @@ export function ExistingThreadSettingsRouteScreen({
         updateModelSelection({ ...modelSelection, options });
       }}
       effortRouting={routedEffort ? { kind: "routed", display: routedEffort } : null}
+      routedGroup={routedGroup}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
       onClose={() => navigation.goBack()}
@@ -1510,10 +1622,14 @@ export function ExistingThreadSettingsRouteScreen({
 export function NewTaskThreadSettingsRouteScreen() {
   const flow = useNewTaskFlow();
   const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
-  const optionDescriptors = resolveProviderOptionDescriptors({
-    capabilities: flow.selectedModelOption?.capabilities,
-    selections: flow.selectedModel?.options,
-  });
+  const groupPicked = flow.selectedRoutingGroup !== null;
+  // A group sets each member's options itself, so the placeholder's options are not shown.
+  const optionDescriptors = groupPicked
+    ? []
+    : resolveProviderOptionDescriptors({
+        capabilities: flow.selectedModelOption?.capabilities,
+        selections: flow.selectedModel?.options,
+      });
 
   return (
     <ThreadSettingsPickerScreen
@@ -1530,10 +1646,13 @@ export function NewTaskThreadSettingsRouteScreen() {
       optionDescriptors={optionDescriptors}
       onUpdateOptionSelections={flow.setSelectedModelOptions}
       effortRouting={
-        flow.autoEffortOffered
+        flow.autoEffortOffered && !groupPicked
           ? { kind: "draft", auto: !flow.effortManual, setManual: flow.setEffortManual }
           : null
       }
+      routingGroups={flow.routingGroups}
+      selectedRoutingGroupId={flow.selectedRoutingGroup?.id ?? null}
+      onSelectRoutingGroup={flow.setRoutingGroup}
       runtimeMode={flow.runtimeMode}
       onUpdateRuntimeMode={flow.setRuntimeMode}
       onClose={() => navigation.goBack()}

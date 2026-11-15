@@ -3,6 +3,7 @@ import {
   clampedPositiveInt,
   NonNegativeInt,
   ModelSelection,
+  RoutingGroupId,
   TrimmedNonEmptyString,
   ThreadId,
   RunId,
@@ -141,6 +142,10 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ),
     title: TrimmedNonEmptyString,
     modelSelection: Schema.optional(ModelSelection),
+    routingGroupId: Schema.optional(RoutingGroupId).annotate({
+      description:
+        "Group id from orchestrator_capabilities; launches its first usable model. Not with modelSelection.",
+    }),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
     workspaceStrategy: Schema.optional(

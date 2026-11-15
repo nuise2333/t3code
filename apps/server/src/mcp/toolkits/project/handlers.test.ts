@@ -11,6 +11,7 @@ import {
   type ModelSelection,
   type RuntimeMode,
   type OrchestrationV2ThreadShell,
+  type ServerSettings as ServerSettingsType,
   ThreadId,
 } from "@t3tools/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -33,6 +34,7 @@ import { OrchestratorRuntimeModeAboveCeilingError } from "../../../orchestration
 import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ServerConfig from "../../../config.ts";
+import * as RoutingPolicy from "../../../routing/RoutingPolicy.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
@@ -61,6 +63,9 @@ const clientLaunchHarness = (input: {
   readonly hostedAppUrl?: string;
   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
   readonly refusedByCeiling?: true;
+  readonly routingGroups?: ServerSettingsType["routingGroups"];
+  /** The launch finds no usable member in the group it asked for. */
+  readonly noUsableMember?: true;
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = {
@@ -77,6 +82,7 @@ const clientLaunchHarness = (input: {
     }),
     ServerSettings.layerTest({
       fallbackModelSelection: input.fallbackModel ?? null,
+      ...(input.routingGroups === undefined ? {} : { routingGroups: input.routingGroups }),
       ...(input.defaultRuntimeMode === undefined
         ? {}
         : { defaultRuntimeMode: input.defaultRuntimeMode }),
@@ -125,6 +131,22 @@ const clientLaunchHarness = (input: {
       checkWorktreeBase: input.checkWorktreeBase ?? (() => Effect.void),
       launch: (launch) => {
         input.launched.push(launch);
+        if (input.noUsableMember) {
+          return Effect.fail(
+            new RoutingPolicy.RoutingGroupUnavailableError({
+              groupId: "cheap",
+              groupName: "Cheap",
+              skipped: [
+                {
+                  index: 0,
+                  instanceId: ProviderInstanceId.make("pi"),
+                  model: "pi-model",
+                  reason: "usage_exhausted",
+                },
+              ],
+            }),
+          );
+        }
         if (input.refusedByCeiling) {
           return Effect.fail(
             new ThreadLaunch.ThreadLaunchError({
@@ -343,6 +365,72 @@ it.effect("a launch steps an inherited mode down to the provider's, and refuses 
 
     const offered = yield* launchPi("approval-required");
     expect(offered.launched[0]?.runtimeMode).toBe("approval-required");
+  }),
+);
+
+it.effect("a launch with a routing group hands the group to the launch, unstepped", () =>
+  Effect.gen(function* () {
+    const pi = ProviderInstanceId.make("pi");
+    const member = { instanceId: pi, model: "pi-model" };
+    const launchGroup = Effect.fn("test.launchGroup")(function* (
+      params: { readonly modelSelection?: ModelSelection; readonly noUsableMember?: true } = {},
+    ) {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const { projectId, dependencies } = clientLaunchHarness({
+        runtimeModeCeiling: "auto",
+        launched,
+        routingGroups: [{ id: "cheap", name: "Cheap", members: [member], strategy: "order" }],
+        ...(params.noUsableMember === undefined ? {} : { noUsableMember: true }),
+        providers: [
+          {
+            instanceId: pi,
+            driver: ProviderDriverKind.make("pi"),
+            enabled: true,
+            installed: true,
+            status: "ready",
+            version: null,
+            auth: { status: "authenticated" },
+            checkedAt: "2026-01-01T00:00:00Z",
+            models: [],
+            slashCommands: [],
+            skills: [],
+            supportedRuntimeModes: ["approval-required", "full-access"],
+          },
+        ],
+      });
+      const toolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
+      const result = yield* toolkit
+        .handle("t3_thread_launch", {
+          projectId,
+          title: "Fix",
+          routingGroupId: "cheap",
+          ...(params.modelSelection === undefined ? {} : { modelSelection: params.modelSelection }),
+        })
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+      return { result: result.at(-1)?.result, launched };
+    });
+
+    const grouped = yield* launchGroup();
+    expect(grouped.launched[0]).toMatchObject({
+      routing: { mode: "group", groupId: "cheap" },
+      modelSelection: member,
+      // A member that lacks the mode is skipped by the group, not stepped down here.
+      runtimeMode: "auto",
+    });
+
+    const both = yield* launchGroup({ modelSelection: member });
+    expect(both.result).toMatchObject({ code: "invalid_request" });
+    expect(both.launched).toHaveLength(0);
+
+    const none = yield* launchGroup({ noUsableMember: true });
+    expect(none.result).toMatchObject({ code: "model_unavailable" });
+    expect((none.result as { readonly message: string }).message).toContain("usage limit reached");
   }),
 );
 

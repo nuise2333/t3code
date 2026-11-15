@@ -1,4 +1,4 @@
-import { ProviderInstanceId, type RouteDecision } from "@t3tools/contracts";
+import { ProviderInstanceId, type RouteDecision, type RoutingGroup } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -6,7 +6,12 @@ import {
   autoEffortSupported,
   describeRoutingReasons,
   launchRoutingRequest,
+  moveListItem,
+  newRoutingGroupId,
+  pickerRoutingGroups,
   routedEffortDisplay,
+  routedGroupDisplay,
+  routingGroupProblems,
 } from "./routing.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
@@ -43,6 +48,96 @@ describe("launchRoutingRequest", () => {
       ).toStrictEqual(auto ? { mode: "auto" } : undefined);
     },
   );
+
+  it("asks for a picked group, even with Auto off, but not for a multi-model send", () => {
+    const base = { offered: false, effortManual: true, routingGroupId: "fast" };
+    expect(launchRoutingRequest({ ...base, multiModel: false })).toStrictEqual({
+      mode: "group",
+      groupId: "fast",
+    });
+    expect(launchRoutingRequest({ ...base, multiModel: true })).toBeUndefined();
+  });
+});
+
+describe("routing groups", () => {
+  const claude = ProviderInstanceId.make("claude");
+  const providers = [
+    { instanceId, models: [{ slug: "gpt-6", name: "GPT-6", shortName: "GPT 6" }] },
+    { instanceId: claude, models: [{ slug: "opus", name: "Claude Opus" }] },
+  ];
+  const group: RoutingGroup = {
+    id: "fast",
+    name: "Fast",
+    strategy: "order",
+    members: [
+      { instanceId: claude, model: "opus" },
+      { instanceId, model: "gpt-6" },
+    ],
+  };
+  const routing: RouteDecision = {
+    ...routed,
+    group: {
+      id: "fast",
+      name: "Fast",
+      via: "picker",
+      chosen: 1,
+      member: { instanceId, model: "gpt-6" },
+      skipped: [{ index: 0, instanceId: claude, model: "opus", reason: "usage_exhausted" }],
+    },
+  };
+
+  it("names the group, the chosen model and the skipped members as launched", () => {
+    expect(routedGroupDisplay({ routing, selection: group.members[1], providers })).toStrictEqual({
+      groupName: "Fast",
+      label: "Fast → GPT 6",
+      skipped: "Skipped: Claude Opus (usage limit)",
+    });
+  });
+
+  it("drops the label after a manual pick", () => {
+    expect(routedGroupDisplay({ routing, selection: group.members[0], providers })).toBeNull();
+    expect(
+      routedGroupDisplay({ routing: routed, selection: group.members[1], providers }),
+    ).toBeNull();
+  });
+
+  it("offers groups only to a new single-model thread on a server that resolves them", () => {
+    const offered = (input: { newThread: boolean; multiModel?: boolean; capability?: boolean }) =>
+      pickerRoutingGroups({
+        newThread: input.newThread,
+        multiModel: input.multiModel ?? false,
+        capability: input.capability ?? true,
+        groups: [group],
+        providers,
+      });
+    expect(offered({ newThread: true })).toStrictEqual([
+      { id: "fast", name: "Fast", summary: "Claude Opus, GPT 6", placeholder: group.members[0] },
+    ]);
+    expect(offered({ newThread: false })).toStrictEqual([]);
+    expect(offered({ newThread: true, multiModel: true })).toStrictEqual([]);
+    expect(offered({ newThread: true, capability: false })).toStrictEqual([]);
+  });
+
+  it("finds rules naming a deleted group and members on a removed provider", () => {
+    const problems = routingGroupProblems({
+      groups: [group],
+      rules: { hard: "fast", readonly: "gone" },
+      providers: [{ instanceId }],
+    });
+    expect(problems.missingRuleGroups).toStrictEqual(["readonly"]);
+    expect([...problems.missingMembers]).toStrictEqual([["fast", [0]]]);
+  });
+
+  it("makes a unique id from a name", () => {
+    expect(newRoutingGroupId("Cheap & Fast!", [])).toBe("cheap-fast");
+    expect(newRoutingGroupId("Cheap fast", ["cheap-fast", "cheap-fast-2"])).toBe("cheap-fast-3");
+    expect(newRoutingGroupId("快速", [])).toBe("group");
+  });
+
+  it("moves a member within bounds only", () => {
+    expect(moveListItem(["a", "b", "c"], 2, -1)).toStrictEqual(["a", "c", "b"]);
+    expect(moveListItem(["a", "b"], 0, -1)).toStrictEqual(["a", "b"]);
+  });
 });
 
 describe("routedEffortDisplay", () => {

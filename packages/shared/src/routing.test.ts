@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ModelSelection,
+  type ProviderInteractionMode,
   type ProviderOptionDescriptor,
+  type RoutingGroup,
+  type RoutingSkipReason,
   type RoutingTable,
+  type RuntimeMode,
+  type ServerProvider,
+  type ServerSettings,
 } from "@t3tools/contracts";
 
-import { classifyTask, routeFor } from "./routing.ts";
+import { classifyTask, resolveRoutingGroup, routeFor } from "./routing.ts";
 
 const table: RoutingTable = {
   version: 1,
@@ -573,6 +580,296 @@ describe("routeFor", () => {
       effort: null,
       applied: false,
       reasons: ["plan_mode", "no_effort_control"],
+    });
+  });
+});
+
+describe("resolveRoutingGroup", () => {
+  const NOW = Date.parse("2026-06-01T00:00:00Z");
+  const codexId = ProviderInstanceId.make("codex_fake");
+  const claudeId = ProviderInstanceId.make("claude_fake");
+  const kiroId = ProviderInstanceId.make("kiro_fake");
+  const museId = ProviderInstanceId.make("muse_fake");
+  const acpId = ProviderInstanceId.make("acp_fake");
+  const descriptors: ReadonlyArray<ProviderOptionDescriptor> = [
+    effortSelect("reasoningEffort", ["low", "medium", "high", "xhigh"]),
+    { id: "fastMode", label: "Fast", type: "boolean" },
+  ];
+  const provider = (
+    instanceId: ProviderInstanceId,
+    driver: string,
+    overrides: Partial<ServerProvider> = {},
+  ): ServerProvider =>
+    ({
+      instanceId,
+      driver: ProviderDriverKind.make(driver),
+      enabled: true,
+      installed: true,
+      status: "ready",
+      auth: { status: "authenticated" },
+      models: [
+        {
+          slug: "model-a",
+          name: "Model A",
+          aliases: ["model-a-alias"],
+          isCustom: false,
+          capabilities: { optionDescriptors: descriptors },
+        },
+      ],
+      ...overrides,
+    }) as unknown as ServerProvider;
+  const providers = (overrides: Partial<Record<string, Partial<ServerProvider>>> = {}) => [
+    provider(codexId, "codex", { showInteractionModeToggle: true, ...overrides.codex }),
+    provider(claudeId, "claudeAgent", { showInteractionModeToggle: true, ...overrides.claude }),
+    provider(kiroId, "kiro", {
+      showInteractionModeToggle: false,
+      supportedRuntimeModes: ["approval-required", "full-access"],
+      ...overrides.kiro,
+    }),
+    provider(museId, "muse", {
+      showInteractionModeToggle: false,
+      supportedRuntimeModes: ["approval-required", "full-access"],
+      ...overrides.muse,
+    }),
+    provider(acpId, "acpRegistry", overrides.acp),
+  ];
+  const settings = (
+    overrides: Partial<Pick<ServerSettings, "projectSettingsOverrides">> = {},
+  ): Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides"> =>
+    ({
+      providerInstances: Object.fromEntries(
+        [
+          [codexId, "codex"],
+          [claudeId, "claudeAgent"],
+          [kiroId, "kiro"],
+          [museId, "muse"],
+          [acpId, "acpRegistry"],
+        ].map(([id, driver]) => [id, { driver, enabled: true }]),
+      ),
+      projectSettingsOverrides: {},
+      ...overrides,
+    }) as unknown as Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+  const member = (instanceId: ProviderInstanceId, extra: Partial<ModelSelection> = {}) => ({
+    instanceId,
+    model: "model-a",
+    ...extra,
+  });
+  const group = (members: ReadonlyArray<ModelSelection>): RoutingGroup => ({
+    id: "fast",
+    name: "Fast",
+    members,
+    strategy: "order",
+  });
+  const projectId = ProjectId.make("project-fake");
+  const resolve = (input: {
+    readonly members: ReadonlyArray<ModelSelection>;
+    readonly providers?: ReadonlyArray<ServerProvider>;
+    readonly settings?: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+    readonly runtimeMode?: RuntimeMode;
+    readonly interactionMode?: ProviderInteractionMode;
+    readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId>;
+  }) =>
+    resolveRoutingGroup({
+      group: group(input.members),
+      providers: input.providers ?? providers(),
+      settings: input.settings ?? settings(),
+      projectId,
+      runtimeMode: input.runtimeMode ?? "full-access",
+      interactionMode: input.interactionMode ?? "default",
+      runnableInstanceIds: input.runnableInstanceIds,
+      now: NOW,
+    });
+  const exhausted = (resetsAt: string) =>
+    ({
+      usageLimits: {
+        windows: [{ id: "primary", kind: "session", label: "5h", usedPercent: 100, resetsAt }],
+      },
+    }) as unknown as Partial<ServerProvider>;
+
+  it.each<{
+    readonly name: string;
+    readonly skipped: ModelSelection;
+    readonly providers?: ReadonlyArray<ServerProvider>;
+    readonly settings?: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+    readonly runtimeMode?: RuntimeMode;
+    readonly interactionMode?: ProviderInteractionMode;
+    readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId>;
+    readonly reason: RoutingSkipReason;
+  }>([
+    {
+      name: "a missing instance",
+      skipped: member(ProviderInstanceId.make("gone")),
+      reason: "instance_missing",
+    },
+    {
+      name: "a disabled instance",
+      skipped: member(codexId),
+      providers: providers({ codex: { enabled: false } }),
+      reason: "instance_disabled",
+    },
+    {
+      name: "an unauthenticated instance",
+      skipped: member(codexId),
+      providers: providers({ codex: { auth: { status: "unauthenticated" } } }),
+      reason: "not_ready",
+    },
+    {
+      name: "an uninstalled instance",
+      skipped: member(codexId),
+      providers: providers({ codex: { installed: false } }),
+      reason: "not_ready",
+    },
+    {
+      name: "an unavailable instance",
+      skipped: member(codexId),
+      providers: providers({ codex: { availability: "unavailable" } }),
+      reason: "not_ready",
+    },
+    {
+      name: "an instance whose probe failed",
+      skipped: member(codexId),
+      providers: providers({ codex: { status: "error" } }),
+      reason: "not_ready",
+    },
+    {
+      name: "an instance the caller cannot run",
+      skipped: member(codexId),
+      runnableInstanceIds: new Set([claudeId]),
+      reason: "not_ready",
+    },
+    {
+      name: "an instance the project turns off",
+      skipped: member(codexId),
+      settings: settings({
+        projectSettingsOverrides: {
+          [projectId]: { providerInstances: { [codexId]: { enabled: false } } },
+        } as unknown as ServerSettings["projectSettingsOverrides"],
+      }),
+      reason: "project_disabled",
+    },
+    {
+      name: "a model the instance does not list",
+      skipped: member(codexId, { model: "model-retired" }),
+      reason: "model_unavailable",
+    },
+    {
+      name: "an exhausted usage window",
+      skipped: member(codexId),
+      providers: providers({ codex: exhausted("2026-06-01T03:00:00Z") }),
+      reason: "usage_exhausted",
+    },
+    {
+      name: "a runtime mode the provider would downgrade",
+      skipped: member(kiroId),
+      runtimeMode: "auto",
+      reason: "runtime_mode",
+    },
+    {
+      name: "plan mode on a provider without plan",
+      skipped: member(museId),
+      interactionMode: "plan",
+      reason: "plan_unsupported",
+    },
+    {
+      name: "plan mode on an ACP Registry agent that states no toggle",
+      skipped: member(acpId),
+      interactionMode: "plan",
+      reason: "plan_unsupported",
+    },
+  ])("skips $name and takes the next member", (row) => {
+    const result = resolve({
+      members: [row.skipped, member(claudeId)],
+      ...(row.providers === undefined ? {} : { providers: row.providers }),
+      ...(row.settings === undefined ? {} : { settings: row.settings }),
+      ...(row.runtimeMode === undefined ? {} : { runtimeMode: row.runtimeMode }),
+      ...(row.interactionMode === undefined ? {} : { interactionMode: row.interactionMode }),
+      ...(row.runnableInstanceIds === undefined
+        ? {}
+        : { runnableInstanceIds: row.runnableInstanceIds }),
+    });
+    expect(result).toEqual({
+      ok: true,
+      index: 1,
+      selection: member(claudeId),
+      skipped: [
+        {
+          index: 0,
+          instanceId: row.skipped.instanceId,
+          model: row.skipped.model,
+          reason: row.reason,
+        },
+      ],
+    });
+  });
+
+  it("takes the first usable member in order", () => {
+    expect(resolve({ members: [member(codexId), member(claudeId)] })).toMatchObject({
+      ok: true,
+      index: 0,
+      selection: member(codexId),
+      skipped: [],
+    });
+  });
+
+  it("matches a member's model by alias and keeps a window that has reset", () => {
+    expect(
+      resolve({
+        members: [member(codexId, { model: "model-a-alias" })],
+        providers: providers({ codex: exhausted("2026-05-31T23:00:00Z") }),
+      }),
+    ).toMatchObject({ ok: true, index: 0 });
+  });
+
+  it("does not skip instances that report no quota", () => {
+    expect(resolve({ members: [member(kiroId)], runtimeMode: "approval-required" })).toMatchObject({
+      ok: true,
+      index: 0,
+      skipped: [],
+    });
+  });
+
+  it("keeps valid explicit options, even above high, and drops stale or invalid ones", () => {
+    const result = resolve({
+      members: [
+        member(codexId, {
+          options: [
+            { id: "reasoningEffort", value: "xhigh" },
+            { id: "fastMode", value: "yes" },
+            { id: "retiredOption", value: true },
+          ],
+        }),
+      ],
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      selection: { ...member(codexId), options: [{ id: "reasoningEffort", value: "xhigh" }] },
+    });
+    expect(
+      resolve({
+        members: [member(codexId, { options: [{ id: "reasoningEffort", value: "ludicrous" }] })],
+      }),
+    ).toMatchObject({ ok: true, selection: member(codexId) });
+  });
+
+  it("lists every member's reason when none can run", () => {
+    expect(
+      resolve({
+        members: [member(codexId), member(museId), member(ProviderInstanceId.make("gone"))],
+        providers: providers({ codex: exhausted("2026-06-01T03:00:00Z") }),
+        interactionMode: "plan",
+      }),
+    ).toEqual({
+      ok: false,
+      skipped: [
+        { index: 0, instanceId: codexId, model: "model-a", reason: "usage_exhausted" },
+        { index: 1, instanceId: museId, model: "model-a", reason: "plan_unsupported" },
+        {
+          index: 2,
+          instanceId: ProviderInstanceId.make("gone"),
+          model: "model-a",
+          reason: "instance_missing",
+        },
+      ],
     });
   });
 });

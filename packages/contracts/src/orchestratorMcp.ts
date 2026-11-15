@@ -32,6 +32,7 @@ import {
   ThreadPullRequestKey,
   ThreadPullRequestLinkSource,
 } from "./threadPullRequest.ts";
+import { RoutingGroupId } from "./routing.ts";
 import { secretRequestPageUrl } from "./secretRequest.ts";
 import { hasOnlyPairedSurrogates } from "./threadMetadataMcp.ts";
 import { LastThreadTitleRegeneration, ThreadTitleRegeneration } from "./threadTitle.ts";
@@ -171,6 +172,10 @@ export type OrchestratorMcpTerminalDelegatedTaskStatus =
 export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   task: OrchestratorMcpPrompt,
   target: Schema.optional(OrchestratorMcpTarget),
+  routingGroupId: Schema.optional(RoutingGroupId).annotate({
+    description:
+      "Group id from orchestrator_capabilities; runs its first usable model here. Not with a target model or environment.",
+  }),
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole),
   isolation: Schema.optional(
@@ -691,6 +696,10 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   providers: Schema.Array(OrchestratorMcpProviderCapability),
+  /** This environment's routing groups; absent when it has none. */
+  routingGroups: Schema.optional(
+    Schema.Array(Schema.Struct({ id: RoutingGroupId, name: Schema.String })),
+  ),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,
     asyncPolling: Schema.Boolean,

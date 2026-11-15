@@ -1,7 +1,8 @@
 import * as Schema from "effect/Schema";
 
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { ProviderDriverKind } from "./providerInstance.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 /** Auto routing never picks a level above high; higher levels stay a manual choice. */
 export const RoutingEffort = Schema.Literals(["low", "medium", "high"]);
@@ -79,6 +80,68 @@ export const RoutingTable = RoutingTableEnvelope.pipe(
 );
 export type RoutingTable = typeof RoutingTable.Type;
 
+export const RoutingGroupId = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/),
+);
+export type RoutingGroupId = typeof RoutingGroupId.Type;
+
+export const MAX_ROUTING_GROUPS = 16;
+export const MAX_ROUTING_GROUP_MEMBERS = 8;
+
+/** An ordered list of selections; a launch takes the first member that can run it. */
+export const RoutingGroup = Schema.Struct({
+  /** Stable once created; a rename changes only `name`. */
+  id: RoutingGroupId,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  members: Schema.Array(ModelSelection).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_ROUTING_GROUP_MEMBERS),
+  ),
+  strategy: Schema.Literal("order"),
+});
+export type RoutingGroup = typeof RoutingGroup.Type;
+
+/** Group ids by task class; consulted only for launches that ask for Auto. */
+export const RoutingGroupRules = Schema.Struct({
+  readonly: Schema.optionalKey(RoutingGroupId),
+  quick_edit: Schema.optionalKey(RoutingGroupId),
+  implement: Schema.optionalKey(RoutingGroupId),
+  hard: Schema.optionalKey(RoutingGroupId),
+});
+export type RoutingGroupRules = typeof RoutingGroupRules.Type;
+
+export const RoutingSkipReason = Schema.Literals([
+  "instance_missing",
+  "instance_disabled",
+  "not_ready",
+  "project_disabled",
+  "model_unavailable",
+  "usage_exhausted",
+  "runtime_mode",
+  "plan_unsupported",
+]);
+export type RoutingSkipReason = typeof RoutingSkipReason.Type;
+
+const RouteGroupMember = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+});
+
+export const RouteGroupDecision = Schema.Struct({
+  id: RoutingGroupId,
+  /** The name at launch, so a later rename or delete keeps the thread's label. */
+  name: TrimmedNonEmptyString,
+  via: Schema.Literals(["picker", "rule"]),
+  chosen: NonNegativeInt,
+  /** Members as they were at launch, so later group edits do not relabel this thread. */
+  member: RouteGroupMember,
+  skipped: Schema.Array(
+    Schema.Struct({ ...RouteGroupMember.fields, index: NonNegativeInt, reason: RoutingSkipReason }),
+  ).check(Schema.isMaxLength(MAX_ROUTING_GROUP_MEMBERS)),
+});
+export type RouteGroupDecision = typeof RouteGroupDecision.Type;
+
 export const RouteDecision = Schema.Struct({
   taskClass: RoutingTaskClass,
   /** The choice id routing writes to `optionId`; null when it leaves the selection unchanged. */
@@ -90,8 +153,12 @@ export const RouteDecision = Schema.Struct({
   applied: Schema.Boolean,
   reasons: Schema.Array(RoutingReason).check(Schema.isMaxLength(4)),
   tableUpdatedAt: Schema.optionalKey(Schema.String),
+  group: Schema.optionalKey(RouteGroupDecision),
 });
 export type RouteDecision = typeof RouteDecision.Type;
 
-export const LaunchRoutingRequest = Schema.Struct({ mode: Schema.Literal("auto") });
+export const LaunchRoutingRequest = Schema.Union([
+  Schema.Struct({ mode: Schema.Literal("auto") }),
+  Schema.Struct({ mode: Schema.Literal("group"), groupId: RoutingGroupId }),
+]);
 export type LaunchRoutingRequest = typeof LaunchRoutingRequest.Type;

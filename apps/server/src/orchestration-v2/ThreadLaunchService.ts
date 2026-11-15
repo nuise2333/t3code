@@ -14,6 +14,7 @@ import {
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
   type ProviderDriverKind,
+  type LaunchRoutingRequest,
   type ProviderInteractionMode,
   ProjectId,
   type RunId,
@@ -94,8 +95,8 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
-  /** A client in its Auto effort state; every other launch keeps its selection. */
-  readonly routing?: { readonly mode: "auto" } | undefined;
+  /** Auto effort or a routing group; every other launch keeps its selection. */
+  readonly routing?: LaunchRoutingRequest | undefined;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -209,7 +210,9 @@ export class ThreadLaunchService extends Context.Service<
       input: ThreadLaunchInput,
     ) => Effect.Effect<
       ThreadLaunchResult,
-      ThreadLaunchError | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+      | ThreadLaunchError
+      | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+      | RoutingPolicy.RoutingGroupUnavailableError
     >;
     /** Check a new worktree's base ref and branch name before creation for early errors; launch otherwise accepts and reports these failures inside the thread. */
     readonly checkWorktreeBase: (
@@ -1193,11 +1196,18 @@ const make = Effect.gen(function* () {
       }
 
       const launchReceipt = yield* readReceipt(input, input.commandId);
-      yield* threads.assertProviderInstanceEnabled({
-        projectId: input.projectId,
-        commandId: input.commandId,
-        instanceId: input.modelSelection.instanceId,
-      });
+      const groupRequested = input.routing?.mode === "group";
+      if (groupRequested && input.reuseExistingThread === true) {
+        return yield* mapError(input, "update-thread")("Routing groups apply only to new threads.");
+      }
+      // A group's placeholder member may be off here; its resolution checks every member.
+      if (!groupRequested) {
+        yield* threads.assertProviderInstanceEnabled({
+          projectId: input.projectId,
+          commandId: input.commandId,
+          instanceId: input.modelSelection.instanceId,
+        });
+      }
       return yield* Effect.gen(function* () {
         // Recover ids from accepted launch receipts before allocating; retries have no client id and new ids collide with receipts.
         const reusableLaunchReceipt =
@@ -1234,6 +1244,28 @@ const make = Effect.gen(function* () {
           yield* validateReusableThread(input, candidateThreadId);
         }
 
+        // Decided once, before the claim: a replay keeps what the accepted launch recorded.
+        const routed =
+          Option.isNone(launchReceipt) &&
+          input.reuseExistingThread !== true &&
+          (input.initialMessage !== undefined || groupRequested)
+            ? yield* routingPolicy.decide({
+                modelSelection: input.modelSelection,
+                prompt: input.initialMessage?.text ?? input.title,
+                interactionMode: input.interactionMode,
+                runtimeMode: input.runtimeMode,
+                projectId: input.projectId,
+                requested: input.routing,
+              })
+            : null;
+        const modelSelection = routed?.selection ?? input.modelSelection;
+        if (routed?.decision.group !== undefined) {
+          yield* threads.assertProviderInstanceEnabled({
+            projectId: input.projectId,
+            commandId: input.commandId,
+            instanceId: modelSelection.instanceId,
+          });
+        }
         const workspaceStrategy: ThreadLaunchWorkspaceStrategy =
           input.workspaceStrategy.type === "root" && Option.isNone(launchReceipt)
             ? Option.match(
@@ -1273,19 +1305,6 @@ const make = Effect.gen(function* () {
                 ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
                 ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
               };
-        // Decided once, before the claim: a replay keeps what the accepted launch recorded.
-        const routed =
-          Option.isNone(launchReceipt) &&
-          input.reuseExistingThread !== true &&
-          input.initialMessage !== undefined
-            ? yield* routingPolicy.decide({
-                modelSelection: input.modelSelection,
-                prompt: input.initialMessage.text,
-                interactionMode: input.interactionMode,
-                requested: input.routing?.mode,
-              })
-            : null;
-        const modelSelection = routed?.selection ?? input.modelSelection;
         const claimDispatch =
           input.reuseExistingThread === true
             ? threads.dispatch({

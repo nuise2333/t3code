@@ -42,6 +42,29 @@ export function isReasoningSelect(
   return descriptor.type === "select" && isReasoningControl(descriptor);
 }
 
+/** Why a model's descriptors reject one option selection, or null when they accept it. */
+export function optionSelectionProblem(
+  selection: ProviderOptionSelection,
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+): string | null {
+  const descriptor = descriptors.find((candidate) => candidate.id === selection.id);
+  if (descriptor === undefined) {
+    const known = descriptors.map((candidate) => candidate.id).join(", ");
+    return `Unknown option ${selection.id}; supported options: ${known || "none"}.`;
+  }
+  if (descriptor.type === "boolean" && typeof selection.value !== "boolean") {
+    return `Option ${selection.id} expects a boolean value.`;
+  }
+  if (
+    descriptor.type === "select" &&
+    !descriptor.options.some((choice) => choice.id === selection.value)
+  ) {
+    const choices = descriptor.options.map((choice) => choice.id).join(", ");
+    return `Option ${selection.id} must be one of: ${choices}.`;
+  }
+  return null;
+}
+
 export function modelSelectionCommandType(
   currentInstanceId: ProviderInstanceId,
   selection: ModelSelection,

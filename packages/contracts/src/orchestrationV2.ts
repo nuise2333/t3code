@@ -3547,6 +3547,8 @@ export const OrchestrationV2Command = Schema.Union([
     workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
     // Defaults to settled_only; fire-and-forget wakes require always.
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+    /** Only the server sets this, from the routing group the task asked for. */
+    routing: Schema.optional(RouteDecision),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({
@@ -3907,7 +3909,10 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
-  /** Asks the server to route the effort; it applies only when its auto routing setting is on. */
+  /**
+   * Auto effort (applied only when the server's auto routing setting is on) or a routing group.
+   * With a group, `modelSelection` is a placeholder the server replaces with the member it picks.
+   */
   routing: Schema.optional(LaunchRoutingRequest),
   initialMessage: Schema.optional(
     Schema.Struct({

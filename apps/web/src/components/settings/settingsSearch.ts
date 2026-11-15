@@ -996,6 +996,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "routing-groups",
+    title: "Routing groups",
+    to: "/settings/providers",
+    searchTerms: [
+      "routing group model group fallback failover order first available usage limit auto rules",
+    ],
+    providerSettingsOnly: true,
+  },
+  {
     id: "text-generators",
     title: "Text generators",
     to: "/settings/providers",

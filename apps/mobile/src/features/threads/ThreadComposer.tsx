@@ -1,4 +1,4 @@
-import { routedEffortDisplay } from "@t3tools/client-runtime/routing";
+import { routedEffortDisplay, routedGroupDisplay } from "@t3tools/client-runtime/routing";
 import { useSidebarWorkspaceTabs } from "../layout/workspace/useSystemWorkspaceTabBar";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
@@ -219,6 +219,8 @@ export interface ThreadComposerProps {
   readonly isDraft?: boolean;
   /** A new thread's draft leaves its effort to Auto. */
   readonly draftAutoEffort?: boolean;
+  /** A new thread's draft launches through this routing group. */
+  readonly draftRoutingGroupName?: string | null;
   readonly threadRouting?: RouteDecision | null;
   readonly canOperateThread: boolean;
   readonly placeholder: string;
@@ -763,6 +765,13 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         selection: currentModelSelection,
         descriptors: currentModelOption?.capabilities?.optionDescriptors,
       });
+  const routedGroup = props.isDraft
+    ? null
+    : routedGroupDisplay({
+        routing: props.threadRouting,
+        selection: currentModelSelection,
+        providers: props.serverConfig?.providers ?? [],
+      });
   const reasoningLabel = props.draftAutoEffort
     ? "Auto"
     : routedEffort
@@ -847,6 +856,11 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         provider={selectedProviderStatus?.driver}
         reportedSelection={props.reportedModelSelection}
         reasoningLabel={reasoningLabel}
+        {...(props.draftRoutingGroupName
+          ? { routingGroup: { name: props.draftRoutingGroupName, draft: true } }
+          : routedGroup
+            ? { routingGroup: { name: routedGroup.groupName, draft: false } }
+            : {})}
         prompt={draftMessage}
         surfaceColor={composerPanel}
         iconOnly={!compactEditor.isExpanded}

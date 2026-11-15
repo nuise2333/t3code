@@ -25,6 +25,7 @@ import {
   ProviderInstanceId,
   OrchestrationV2ThreadProjectionJson,
   ScheduledTaskId,
+  type ModelSelection,
   type ServerProvider,
   ThreadId,
   TextGenerationError,
@@ -3338,6 +3339,247 @@ describe("effort routing", () => {
       assert.deepStrictEqual(replayed.thread.routing, first.thread.routing);
       assert.isFalse(replayed.thread.routing?.applied);
     }).pipe(Effect.provide(harness.layer));
+  });
+
+  describe("routing groups", () => {
+    const ready = {
+      enabled: true,
+      installed: true,
+      status: "ready",
+      availability: "available",
+      auth: { status: "authenticated" },
+      showInteractionModeToggle: true,
+    };
+    const exhausted = {
+      usageLimits: {
+        windows: [
+          { id: "primary", label: "5h", usedPercent: 100, resetsAt: "2099-01-01T00:00:00Z" },
+        ],
+      },
+    };
+    const codex = (extra: object = {}) =>
+      ({
+        ...codexProvider(["low", "medium", "high", "xhigh"]),
+        ...ready,
+        ...extra,
+      }) as unknown as ServerProvider;
+    const claude = (extra: object = {}) =>
+      ({
+        instanceId: claudeModelSelection.instanceId,
+        driver: ProviderDriverKind.make("claudeAgent"),
+        models: [{ slug: claudeModelSelection.model, name: "Claude", isCustom: false }],
+        ...ready,
+        ...extra,
+      }) as unknown as ServerProvider;
+    const group = (members: ReadonlyArray<ModelSelection>) => ({
+      id: "fast",
+      name: "Fast",
+      members,
+      strategy: "order" as const,
+    });
+    const groupLaunch = (
+      command: string,
+      overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {},
+    ) => planLaunch(command, { routing: { mode: "group", groupId: "fast" }, ...overrides });
+
+    it.effect("launches the first usable member and records the skipped ones", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(exhausted), claude()],
+        serverSettings: { routingGroups: [group([modelSelection, claudeModelSelection])] },
+      });
+      return Effect.gen(function* () {
+        const { thread, run } = yield* launchedThread(groupLaunch("group-second"));
+        assert.deepStrictEqual(thread.modelSelection, claudeModelSelection);
+        assert.deepStrictEqual(run?.modelSelection, claudeModelSelection);
+        assert.deepStrictEqual(thread.routing?.group, {
+          id: "fast",
+          name: "Fast",
+          via: "picker",
+          chosen: 1,
+          member: {
+            instanceId: claudeModelSelection.instanceId,
+            model: claudeModelSelection.model,
+          },
+          skipped: [
+            {
+              index: 0,
+              instanceId: modelSelection.instanceId,
+              model: modelSelection.model,
+              reason: "usage_exhausted",
+            },
+          ],
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("launches a group without a first message", () => {
+      const harness = makeHarness({
+        providers: [codex()],
+        serverSettings: { routingGroups: [group([modelSelection])] },
+      });
+      return Effect.gen(function* () {
+        const { initialMessage: _initialMessage, ...idle } = groupLaunch("group-idle");
+        const { thread } = yield* launchedThread(idle);
+        assert.deepStrictEqual(thread.modelSelection, modelSelection);
+        assert.include(thread.routing?.group, { id: "fast", chosen: 0 });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("fails with every member's reason and creates no thread when none can run", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(exhausted), claude({ showInteractionModeToggle: false })],
+        serverSettings: { routingGroups: [group([modelSelection, claudeModelSelection])] },
+      });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const input = groupLaunch("group-none");
+        const error = yield* launches.launch(input).pipe(Effect.flip);
+        if (error._tag !== "RoutingGroupUnavailableError") {
+          return assert.fail(`expected RoutingGroupUnavailableError, got ${error._tag}`);
+        }
+        assert.deepStrictEqual(
+          error.skipped.map((skip) => [skip.index, skip.reason]),
+          [
+            [0, "usage_exhausted"],
+            [1, "plan_unsupported"],
+          ],
+        );
+        assert.include(error.message, "Fast");
+        assert.isNull(yield* threads.getThreadShell(input.threadId!));
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("fails clearly for a group that no longer exists", () => {
+      const harness = makeHarness({ providers: [codex()] });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* launches.launch(groupLaunch("group-gone")).pipe(Effect.flip);
+        if (error._tag !== "RoutingGroupUnavailableError") {
+          return assert.fail(`expected RoutingGroupUnavailableError, got ${error._tag}`);
+        }
+        assert.isNull(error.groupName);
+        assert.include(error.message, "no longer exists");
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("launches when the placeholder member is off for the project", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(), claude()],
+        serverSettings: {
+          routingGroups: [group([modelSelection, claudeModelSelection])],
+          projectSettingsOverrides: {
+            [projectId]: { providerInstances: { [modelSelection.instanceId]: { enabled: false } } },
+          },
+        },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(groupLaunch("group-placeholder-off"));
+        assert.deepStrictEqual(thread.modelSelection, claudeModelSelection);
+        assert.deepInclude(thread.routing?.group?.skipped[0], {
+          index: 0,
+          reason: "project_disabled",
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("refuses a group on a reused thread", () => {
+      const harness = makeHarness({
+        providers: [codex()],
+        serverSettings: { routingGroups: [group([modelSelection])] },
+      });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* launches
+          .launch(groupLaunch("group-reuse", { reuseExistingThread: true }))
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "ThreadLaunchError");
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("routes an Auto launch through the group its task class maps to", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(), claude()],
+        serverSettings: {
+          autoRoutingEnabled: true,
+          routingGroups: [group([claudeModelSelection])],
+          routingGroupRules: { hard: "fast" },
+        },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(
+          planLaunch("group-rule", { routing: { mode: "auto" } }),
+        );
+        assert.deepStrictEqual(thread.modelSelection, claudeModelSelection);
+        assert.include(thread.routing, { taskClass: "hard" });
+        assert.include(thread.routing?.group, { id: "fast", via: "rule", chosen: 0 });
+        // An unmapped class keeps the Auto effort path and its own model.
+        const quick = yield* launchedThread({
+          ...planLaunch("group-rule-unmapped", { routing: { mode: "auto" } }),
+          interactionMode: "default",
+          initialMessage: { text: "Rename foo to bar", attachments: [] },
+        });
+        assert.equal(quick.thread.modelSelection.instanceId, modelSelection.instanceId);
+        assert.isUndefined(quick.thread.routing?.group);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("does not resolve a group again when a launch is replayed", () => {
+      let members: ReadonlyArray<ModelSelection> = [modelSelection, claudeModelSelection];
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(), claude()],
+        getLaunchSettings: Effect.sync(() => ({
+          ...DEFAULT_SERVER_SETTINGS,
+          routingGroups: [group(members)],
+        })),
+      });
+      return Effect.gen(function* () {
+        const input = groupLaunch("group-replay");
+        const first = yield* launchedThread(input);
+        // Resolving again would now fail: no member can run.
+        members = [{ instanceId: ProviderInstanceId.make("gone"), model: "gone-model" }];
+        const replayed = yield* launchedThread(input);
+        assert.deepStrictEqual(replayed.thread.modelSelection, modelSelection);
+        assert.deepStrictEqual(replayed.thread.routing, first.thread.routing);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("routes effort only for an Auto rule and keeps a member's own effort", () => {
+      const xhigh = { ...modelSelection, options: [{ id: "reasoningEffort", value: "xhigh" }] };
+      const harness = makeHarness({
+        providers: [codex()],
+        getLaunchSettings: Effect.sync(() => ({
+          ...DEFAULT_SERVER_SETTINGS,
+          autoRoutingEnabled: true,
+          routingGroups: [group([modelSelection]), { ...group([xhigh]), id: "deep", name: "Deep" }],
+          routingGroupRules: { hard: "fast" },
+        })),
+      });
+      return Effect.gen(function* () {
+        const picked = yield* launchedThread(groupLaunch("group-effort-picked"));
+        assert.deepStrictEqual(picked.thread.modelSelection, modelSelection);
+        assert.include(picked.thread.routing, { effort: "high", applied: false });
+        const routed = yield* launchedThread(
+          planLaunch("group-effort-rule", { routing: { mode: "auto" } }),
+        );
+        assert.deepStrictEqual(routed.thread.modelSelection, {
+          ...modelSelection,
+          options: [{ id: "reasoningEffort", value: "high" }],
+        });
+        assert.include(routed.thread.routing, { effort: "high", applied: true });
+        const kept = yield* launchedThread(
+          groupLaunch("group-effort-kept", { routing: { mode: "group", groupId: "deep" } }),
+        );
+        assert.deepStrictEqual(kept.thread.modelSelection, xhigh);
+        assert.include(kept.thread.routing, { effort: null, applied: false });
+        assert.include(kept.thread.routing?.group, { id: "deep", chosen: 0 });
+      }).pipe(Effect.provide(harness.layer));
+    });
   });
 
   it.effect("leaves ACP Registry launches unchanged", () => {

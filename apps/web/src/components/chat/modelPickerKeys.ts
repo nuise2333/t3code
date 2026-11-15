@@ -45,3 +45,15 @@ export function parseModelPickerLegacySectionKey(key: string): ProviderInstanceI
     ? (key.slice(LEGACY_SECTION_KEY_PREFIX.length) as ProviderInstanceId)
     : null;
 }
+
+const ROUTING_GROUP_KEY_PREFIX = "routing-group:";
+
+export function modelPickerRoutingGroupKey(groupId: string): string {
+  return `${ROUTING_GROUP_KEY_PREFIX}${groupId}`;
+}
+
+export function parseModelPickerRoutingGroupKey(key: string): string | null {
+  return key.startsWith(ROUTING_GROUP_KEY_PREFIX)
+    ? key.slice(ROUTING_GROUP_KEY_PREFIX.length)
+    : null;
+}

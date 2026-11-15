@@ -88,6 +88,14 @@ const SETTINGS_SEARCH_TERMS = {
     "login",
     "auth",
   ],
+  SettingsRoutingGroups: [
+    "routing group",
+    "model group",
+    "fallback",
+    "failover",
+    "order",
+    "auto rules",
+  ],
   SettingsEnvironmentSourceControl: [
     "git",
     "pull requests",

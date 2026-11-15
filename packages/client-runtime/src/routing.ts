@@ -1,9 +1,14 @@
 import type {
   LaunchRoutingRequest,
   ModelSelection,
+  ProviderInstanceId,
   ProviderOptionDescriptor,
   RouteDecision,
+  RoutingGroup,
+  RoutingGroupRules,
   RoutingReason,
+  RoutingSkipReason,
+  RoutingTaskClass,
 } from "@t3tools/contracts";
 import { isReasoningSelect } from "@t3tools/shared/model";
 import { effortSetOutsidePicker } from "@t3tools/shared/routing";
@@ -51,13 +56,19 @@ export function autoEffortSupported(input: {
   );
 }
 
-/** A draft is Auto until its user picks a level; multi-model sends keep their own selections. */
+/**
+ * A draft that picked a routing group asks for that group; otherwise it is Auto until its user
+ * picks a level. Multi-model sends keep their own selections.
+ */
 export function launchRoutingRequest(input: {
   readonly offered: boolean;
   readonly effortManual: boolean;
   readonly multiModel: boolean;
+  readonly routingGroupId?: string | null | undefined;
 }): LaunchRoutingRequest | undefined {
-  return input.offered && !input.effortManual && !input.multiModel ? AUTO_REQUEST : undefined;
+  if (input.multiModel) return undefined;
+  if (input.routingGroupId) return { mode: "group", groupId: input.routingGroupId };
+  return input.offered && !input.effortManual ? AUTO_REQUEST : undefined;
 }
 
 export function describeRoutingReasons(reasons: ReadonlyArray<RoutingReason>): string {
@@ -95,4 +106,205 @@ export function routedEffortDisplay(input: {
     reason,
     summary: reason ? `Auto picked ${levelLabel}: ${reason}` : `Auto picked ${levelLabel}`,
   };
+}
+
+/** The groups a new thread may pick: none from a server that cannot resolve them. */
+function offeredRoutingGroups(input: {
+  readonly capability: boolean | undefined;
+  readonly groups: ReadonlyArray<RoutingGroup> | undefined;
+}): ReadonlyArray<RoutingGroup> {
+  return input.capability === true ? (input.groups ?? []) : [];
+}
+
+export const ROUTING_TASK_CLASSES: ReadonlyArray<RoutingTaskClass> = [
+  "readonly",
+  "quick_edit",
+  "implement",
+  "hard",
+];
+
+export const ROUTING_TASK_CLASS_LABELS: Record<RoutingTaskClass, string> = {
+  readonly: "Questions",
+  quick_edit: "Small edits",
+  implement: "Implementation",
+  hard: "Large changes and plans",
+};
+
+const ROUTING_SKIP_REASON_LABELS: Record<RoutingSkipReason, string> = {
+  instance_missing: "provider removed",
+  instance_disabled: "provider off",
+  not_ready: "provider not ready",
+  project_disabled: "off in this project",
+  model_unavailable: "model unavailable",
+  usage_exhausted: "usage limit",
+  runtime_mode: "permissions unsupported",
+  plan_unsupported: "no plan mode",
+};
+
+interface ModelNameSource {
+  readonly instanceId: ProviderInstanceId;
+  readonly models: ReadonlyArray<{
+    readonly slug: string;
+    readonly name: string;
+    readonly shortName?: string | undefined;
+    readonly aliases?: ReadonlyArray<string> | undefined;
+  }>;
+}
+
+export function routingMemberLabel(
+  member: Pick<ModelSelection, "instanceId" | "model">,
+  providers: ReadonlyArray<ModelNameSource>,
+): string {
+  const model = providers
+    .find((provider) => provider.instanceId === member.instanceId)
+    ?.models.find(
+      (candidate) => candidate.slug === member.model || candidate.aliases?.includes(member.model),
+    );
+  return model?.shortName ?? model?.name ?? member.model;
+}
+
+export interface RoutedGroupDisplay {
+  readonly groupName: string;
+  /** Such as "Fast → GPT-6.1". */
+  readonly label: string;
+  /** Such as "Skipped: Opus 5.5 (usage limit)"; null when the first member ran. */
+  readonly skipped: string | null;
+}
+
+/**
+ * The group a thread launched through, as recorded at launch, so later edits to the group do not
+ * relabel it. Once its user picks another model the thread is an ordinary manual one.
+ */
+export function routedGroupDisplay(input: {
+  readonly routing: RouteDecision | null | undefined;
+  readonly selection: Pick<ModelSelection, "instanceId" | "model"> | null | undefined;
+  readonly providers: ReadonlyArray<ModelNameSource>;
+}): RoutedGroupDisplay | null {
+  const decision = input.routing?.group;
+  if (!decision || !input.selection) return null;
+  if (
+    decision.member.instanceId !== input.selection.instanceId ||
+    decision.member.model !== input.selection.model
+  ) {
+    return null;
+  }
+  const skipped = decision.skipped.map(
+    (skip) =>
+      `${routingMemberLabel(skip, input.providers)} (${ROUTING_SKIP_REASON_LABELS[skip.reason]})`,
+  );
+  return {
+    groupName: decision.name,
+    label: `${decision.name} → ${routingMemberLabel(input.selection, input.providers)}`,
+    skipped: skipped.length > 0 ? `Skipped: ${skipped.join(", ")}` : null,
+  };
+}
+
+interface RoutingGroupProblems {
+  /** Task classes whose rule names a group that no longer exists. */
+  readonly missingRuleGroups: ReadonlyArray<RoutingTaskClass>;
+  /** Member indexes, by group id, whose provider instance no longer exists. */
+  readonly missingMembers: ReadonlyMap<string, ReadonlyArray<number>>;
+}
+
+export function routingGroupProblems(input: {
+  readonly groups: ReadonlyArray<RoutingGroup>;
+  readonly rules: RoutingGroupRules;
+  readonly providers: ReadonlyArray<{ readonly instanceId: ProviderInstanceId }>;
+}): RoutingGroupProblems {
+  const groupIds = new Set(input.groups.map((group) => group.id));
+  const instanceIds = new Set(input.providers.map((provider) => provider.instanceId));
+  const missingMembers = new Map<string, ReadonlyArray<number>>();
+  for (const group of input.groups) {
+    const missing = group.members.flatMap((member, index) =>
+      instanceIds.has(member.instanceId) ? [] : [index],
+    );
+    if (missing.length > 0) missingMembers.set(group.id, missing);
+  }
+  return {
+    missingRuleGroups: ROUTING_TASK_CLASSES.filter((taskClass) => {
+      const groupId = input.rules[taskClass];
+      return groupId !== undefined && !groupIds.has(groupId);
+    }),
+    missingMembers,
+  };
+}
+
+export function rulesUsingRoutingGroup(
+  rules: RoutingGroupRules,
+  groupId: string,
+): ReadonlyArray<RoutingTaskClass> {
+  return ROUTING_TASK_CLASSES.filter((taskClass) => rules[taskClass] === groupId);
+}
+
+/** A stable id from the first name; a taken one gets a numeric suffix. */
+export function newRoutingGroupId(name: string, taken: ReadonlyArray<string>): string {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "group";
+  const used = new Set(taken);
+  if (!used.has(base)) return base;
+  let suffix = 2;
+  while (used.has(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
+}
+
+/** Moves one entry by `delta` places; out-of-range moves return the list unchanged. */
+export function moveListItem<T>(items: ReadonlyArray<T>, index: number, delta: number): T[] {
+  const target = index + delta;
+  if (index < 0 || index >= items.length || target < 0 || target >= items.length) {
+    return [...items];
+  }
+  const next = [...items];
+  const [item] = next.splice(index, 1);
+  next.splice(target, 0, item as T);
+  return next;
+}
+
+/** Sets or clears one class's rule; the patch replaces every rule. */
+export function withRoutingGroupRule(
+  rules: RoutingGroupRules,
+  taskClass: RoutingTaskClass,
+  groupId: string | null,
+): RoutingGroupRules {
+  const { [taskClass]: _previous, ...rest } = rules;
+  return groupId ? { ...rest, [taskClass]: groupId } : rest;
+}
+
+export interface PickerRoutingGroup {
+  readonly id: string;
+  readonly name: string;
+  /** Member models in order, such as "Opus 5.5, GPT-6". */
+  readonly summary: string;
+  readonly placeholder: ModelSelection;
+}
+
+/**
+ * Groups resolve once, when a thread launches, so only a new thread's single-model draft offers
+ * them, and only from a server that resolves them.
+ */
+export function pickerRoutingGroups(input: {
+  readonly newThread: boolean;
+  readonly multiModel: boolean;
+  readonly capability: boolean | undefined;
+  readonly groups: ReadonlyArray<RoutingGroup> | undefined;
+  readonly providers: ReadonlyArray<ModelNameSource>;
+}): ReadonlyArray<PickerRoutingGroup> {
+  if (!input.newThread || input.multiModel) return [];
+  return offeredRoutingGroups(input).flatMap((group) => {
+    const placeholder = group.members[0];
+    if (!placeholder) return [];
+    return [
+      {
+        id: group.id,
+        name: group.name,
+        summary: group.members
+          .map((member) => routingMemberLabel(member, input.providers))
+          .join(", "),
+        placeholder,
+      },
+    ];
+  });
 }

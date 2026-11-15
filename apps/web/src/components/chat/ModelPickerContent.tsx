@@ -22,6 +22,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { ListOrderedIcon, CheckIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
@@ -29,9 +30,13 @@ import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBann
 import {
   modelPickerLegacySectionKey,
   modelPickerModelKey,
+  modelPickerRoutingGroupKey,
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
+  parseModelPickerRoutingGroupKey,
 } from "./modelPickerKeys";
+import type { PickerRoutingGroup } from "@t3tools/client-runtime/routing";
+import type { ModelPickerTab } from "./ProviderModelPicker.logic";
 import { rankModelPickerSearch } from "@t3tools/client-runtime/model-search";
 import {
   Combobox,
@@ -139,13 +144,15 @@ function shouldOfferModelPickerSetup(
 
 function adjacentModelPickerProvider(input: {
   entries: ReadonlyArray<ProviderInstanceEntry>;
-  selectedInstanceId: ProviderInstanceId | "favorites";
+  selectedInstanceId: ModelPickerTab;
   direction: 1 | -1;
   disabledInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
   selectableUnavailableInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
+  showRoutingGroups: boolean;
 }) {
-  const providers: Array<ProviderInstanceId | "favorites"> = [
+  const providers: Array<ModelPickerTab> = [
     "favorites",
+    ...(input.showRoutingGroups ? (["groups"] as const) : []),
     ...input.entries
       .filter(
         (entry) =>
@@ -350,6 +357,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onFocusEffort?: () => void;
   /** Closes the list column, inside the popup's fixed height. */
   listFooter?: ReactNode;
+  /** Routing groups a new thread may launch through; shown as their own tab. */
+  routingGroups?: ReadonlyArray<PickerRoutingGroup>;
+  activeRoutingGroupId?: string | null;
+  onRoutingGroupSelect?: (groupId: string) => void;
 }) {
   const {
     searchInputRef,
@@ -391,8 +402,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     });
     return modelPickerModelKey(selection.instanceId, model?.slug ?? selection.model);
   });
+  const routingGroups = props.onRoutingGroupSelect ? (props.routingGroups ?? []) : [];
+  const showRoutingGroups = routingGroups.length > 0;
+  const activeRoutingGroupKey =
+    props.activeRoutingGroupId != null
+      ? modelPickerRoutingGroupKey(props.activeRoutingGroupId)
+      : null;
   const selectedModelKeySet = new Set(
-    selectedModelKeys ?? (activeModelKey ? [activeModelKey] : []),
+    selectedModelKeys ??
+      (activeRoutingGroupKey ? [activeRoutingGroupKey] : activeModelKey ? [activeModelKey] : []),
   );
   const activeInstanceHasSelectableUnavailableModel =
     activeEntry !== undefined &&
@@ -412,38 +430,45 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       activeEntry,
       modelOptionsByInstance.get(props.activeInstanceId) ?? [],
     );
-  const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
-    () => {
-      if (
-        props.lockedProvider !== null ||
-        activeInstanceHasSelectableUnavailableModel ||
-        activeInstanceNeedsSetup
-      ) {
-        return props.activeInstanceId;
-      }
-      const hasPickableFavorite = favorites.some((favorite) => {
-        const entry = instanceEntries.find((entry) => entry.instanceId === favorite.provider);
-        return (
-          entry !== undefined &&
-          (modelOptionsByInstance.get(favorite.provider) ?? []).some(
-            (option) =>
-              option.slug === favorite.model &&
-              shouldIncludeModelPickerOption({
-                entry,
-                option,
-                activeInstanceId: props.activeInstanceId,
-                activeModel: activeModelSlug,
-              }),
-          )
-        );
-      });
-      return hasPickableFavorite ? "favorites" : props.activeInstanceId;
-    },
-  );
+  const [selectedInstanceId, setSelectedInstanceId] = useState<ModelPickerTab>(() => {
+    if (
+      showRoutingGroups &&
+      routingGroups.some((group) => group.id === props.activeRoutingGroupId)
+    ) {
+      return "groups";
+    }
+    if (
+      props.lockedProvider !== null ||
+      activeInstanceHasSelectableUnavailableModel ||
+      activeInstanceNeedsSetup
+    ) {
+      return props.activeInstanceId;
+    }
+    const hasPickableFavorite = favorites.some((favorite) => {
+      const entry = instanceEntries.find((entry) => entry.instanceId === favorite.provider);
+      return (
+        entry !== undefined &&
+        (modelOptionsByInstance.get(favorite.provider) ?? []).some(
+          (option) =>
+            option.slug === favorite.model &&
+            shouldIncludeModelPickerOption({
+              entry,
+              option,
+              activeInstanceId: props.activeInstanceId,
+              activeModel: activeModelSlug,
+            }),
+        )
+      );
+    });
+    return hasPickableFavorite ? "favorites" : props.activeInstanceId;
+  });
   const { scanning: workspaceModelsScanning } = useProviderWorkspaceSnapshotRefresh({
     environmentId: props.environmentId,
     gitCwd: props.workspaceCwd ?? null,
-    instanceId: selectedInstanceId === "favorites" ? undefined : selectedInstanceId,
+    instanceId:
+      selectedInstanceId === "favorites" || selectedInstanceId === "groups"
+        ? undefined
+        : selectedInstanceId,
   });
   const favoritesSet = new Set(favorites.map((fav) => providerModelKey(fav.provider, fav.model)));
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(
@@ -464,7 +489,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     searchInputRef.current?.focus({ preventScroll: true });
   };
 
-  const handleSelectInstance = (instanceId: ProviderInstanceId | "favorites") => {
+  const handleSelectInstance = (instanceId: ModelPickerTab) => {
     setSelectedInstanceId(instanceId);
     // Focusing the search on touch raises the on-screen keyboard on every provider tap.
     if (window.matchMedia("(pointer: coarse)").matches) return;
@@ -592,8 +617,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const isSearching = searchQuery.trim().length > 0;
   // Fit the tallest tab so switching tabs never resizes the popup and moves the rail under the cursor.
   const tallestTabUnits = (() => {
-    const unitsByTab = new Map<ProviderInstanceId | "favorites", number>();
-    const addRow = (tab: ProviderInstanceId | "favorites") => {
+    const unitsByTab = new Map<ModelPickerTab, number>();
+    const addRow = (tab: ModelPickerTab) => {
       const previous = unitsByTab.get(tab);
       unitsByTab.set(
         tab,
@@ -612,6 +637,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }
     }
     for (const instanceId of tabsWithLegacyRow) addRow(instanceId);
+    for (const _group of routingGroups) addRow("groups");
     return Math.max(0, ...unitsByTab.values());
   })();
   const lockedDisabledInstanceIds = (() => {
@@ -682,7 +708,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   })();
 
   const legacySection = (() => {
-    if (isSearching || selectedInstanceId === "favorites") {
+    if (isSearching || selectedInstanceId === "favorites" || selectedInstanceId === "groups") {
       return null;
     }
     const currentModels: ModelPickerItem[] = [];
@@ -714,7 +740,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   })();
 
   const selectedEntry =
-    selectedInstanceId === "favorites" ? undefined : entryByInstanceId.get(selectedInstanceId);
+    selectedInstanceId === "favorites" || selectedInstanceId === "groups"
+      ? undefined
+      : entryByInstanceId.get(selectedInstanceId);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const visibleRoutingGroups = isSearching
+    ? routingGroups.filter((group) => group.name.toLowerCase().includes(normalizedQuery))
+    : selectedInstanceId === "groups"
+      ? routingGroups
+      : [];
+  const routingGroupByKey = new Map(
+    visibleRoutingGroups.map((group) => [modelPickerRoutingGroupKey(group.id), group] as const),
+  );
   const providerSetupEntries =
     !isSearching && canOpenProviderSetup
       ? instanceEntries.filter(
@@ -743,6 +780,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     .slice(0, MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.length)
     .map((model) => modelPickerModelKey(model.instanceId, model.slug));
   const allItemKeys = ((): string[] => [
+    ...routingGroups.map((group) => modelPickerRoutingGroupKey(group.id)),
     ...flatModels.map((model) => modelPickerModelKey(model.instanceId, model.slug)),
     ...new Set(
       flatModels
@@ -754,8 +792,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     const modelKeys = visibleModels.map((model) =>
       modelPickerModelKey(model.instanceId, model.slug),
     );
+    const groupKeys = [...routingGroupByKey.keys()];
     // The toggle trails the list, so expanding it reveals older models above it.
-    return legacySection ? [...modelKeys, legacySection.key] : modelKeys;
+    return legacySection
+      ? [...groupKeys, ...modelKeys, legacySection.key]
+      : [...groupKeys, ...modelKeys];
   })();
   const filteredModelByKey = ((): ReadonlyMap<string, ModelPickerItem> =>
     new Map(
@@ -806,11 +847,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         direction: command === "modelPicker.nextProvider" ? 1 : -1,
         disabledInstanceIds: lockedDisabledInstanceIds,
         selectableUnavailableInstanceIds,
+        showRoutingGroups,
       });
       setSearchQuery("");
       handleSelectInstance(next);
       announce(
-        next === "favorites" ? "Favorites" : (entryByInstanceId.get(next)?.displayName ?? next),
+        next === "favorites"
+          ? "Favorites"
+          : next === "groups"
+            ? "Routing groups"
+            : (entryByInstanceId.get(next)?.displayName ?? next),
         "model-picker",
       );
       return;
@@ -866,6 +912,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onFocusSearch={focusSearchInput}
             instanceEntries={sidebarInstanceEntries}
             showFavorites
+            showRoutingGroups={showRoutingGroups}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds
               ? {
@@ -886,7 +933,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           open
           virtualized
           multiple={onToggleModel !== undefined}
-          value={onToggleModel ? [...selectedModelKeySet] : activeModelKey}
+          value={
+            onToggleModel ? [...selectedModelKeySet] : (activeRoutingGroupKey ?? activeModelKey)
+          }
           onItemHighlighted={(modelKey, eventDetails) => {
             highlightedModelKeyRef.current = typeof modelKey === "string" ? modelKey : null;
             if (eventDetails.reason === "keyboard" && eventDetails.index >= 0) {
@@ -902,6 +951,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 [...selectedModelKeySet].find((key) => !value.includes(key)))
               : value;
             if (typeof modelKey !== "string") {
+              return;
+            }
+            const routingGroupId = parseModelPickerRoutingGroupKey(modelKey);
+            if (routingGroupId !== null) {
+              props.onRoutingGroupSelect?.(routingGroupId);
               return;
             }
             const legacyInstanceId = parseModelPickerLegacySectionKey(modelKey);
@@ -994,6 +1048,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   (e as typeof e & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
                   e.preventDefault();
                   e.stopPropagation();
+                  const routingGroupId = parseModelPickerRoutingGroupKey(
+                    highlightedModelKeyRef.current,
+                  );
+                  if (routingGroupId !== null) {
+                    props.onRoutingGroupSelect?.(routingGroupId);
+                    return;
+                  }
                   const legacyInstanceId = parseModelPickerLegacySectionKey(
                     highlightedModelKeyRef.current,
                   );
@@ -1018,6 +1079,34 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               itemKeys={filteredItemKeys}
               extraData={modelListExtraData}
               renderItem={({ item: modelKey, index }) => {
+                const routingGroup = routingGroupByKey.get(modelKey);
+                if (routingGroup) {
+                  return (
+                    <ComboboxItem
+                      hideIndicator
+                      selectedFill={false}
+                      index={index}
+                      value={modelKey}
+                      className="group relative w-full !min-w-0 max-w-full cursor-pointer"
+                    >
+                      <ListOrderedIcon
+                        className="size-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                      <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <span className="min-w-0 shrink-0 truncate text-sm leading-snug">
+                          {routingGroup.name}
+                        </span>
+                        {modelKey === activeRoutingGroupKey ? (
+                          <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                        ) : null}
+                        <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">
+                          {routingGroup.summary}
+                        </span>
+                      </div>
+                    </ComboboxItem>
+                  );
+                }
                 if (legacySection?.key === modelKey) {
                   return (
                     <ComboboxItem
@@ -1056,7 +1145,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     isSelected={
                       selectedModelKeys !== undefined
                         ? selectedModelKeySet.has(modelKey)
-                        : modelKey === activeModelKey
+                        : activeRoutingGroupKey === null && modelKey === activeModelKey
                     }
                     favoriteStarOnHover={selectedInstanceId === "favorites" && !isSearching}
                     showInstanceBadge={badgedInstanceIds.has(model.instanceId)}
@@ -1075,9 +1164,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               emptyLabel={
                 selectedInstanceId === "favorites" && !isSearching
                   ? "No favorites yet"
-                  : workspaceModelsScanning
-                    ? "Searching project models..."
-                    : "No models found"
+                  : selectedInstanceId === "groups" && !isSearching
+                    ? "No routing groups"
+                    : workspaceModelsScanning
+                      ? "Searching project models..."
+                      : "No models found"
               }
               onRequestClose={onRequestClose}
               onOpenProviderSetup={onOpenProviderSetup}

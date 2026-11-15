@@ -544,6 +544,9 @@ export function applyServerSettingsPatch(
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
       : {}),
+    ...(patch.routingGroupRules !== undefined
+      ? { routingGroupRules: patch.routingGroupRules }
+      : {}),
     ...(patch.worktreesDirectory !== undefined &&
     patch.worktreesDirectory !== current.worktreesDirectory
       ? {

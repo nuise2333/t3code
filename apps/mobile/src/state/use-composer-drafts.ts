@@ -449,6 +449,8 @@ export interface ComposerDraft {
   readonly freshContext?: boolean;
   /** The user picked an effort level, so a new thread keeps it instead of Auto effort. */
   readonly effortManual?: boolean;
+  /** A new thread launches through this routing group; `modelSelection` holds its first member. */
+  readonly routingGroupId?: string;
   readonly workspaceSelection?: ComposerDraftWorkspaceSelection;
   readonly project?: ComposerDraftProject;
 }
@@ -487,6 +489,7 @@ export type ComposerDraftSettingsUpdate = Pick<
   | "interactionMode"
   | "freshContext"
   | "effortManual"
+  | "routingGroupId"
   | "workspaceSelection"
   | "project"
 >;
@@ -522,6 +525,7 @@ const ComposerDraftSchema = Schema.Struct({
   interactionMode: Schema.optional(ProviderInteractionModeSchema),
   freshContext: Schema.optional(Schema.Boolean),
   effortManual: Schema.optional(Schema.Boolean),
+  routingGroupId: Schema.optional(Schema.String),
   workspaceSelection: Schema.optional(ComposerDraftWorkspaceSelectionSchema),
   project: Schema.optional(ComposerDraftProjectSchema),
 });
@@ -1714,6 +1718,7 @@ export function clearComposerDraftContentState(
     context: _context,
     modelSelection,
     effortManual,
+    routingGroupId,
     workspaceSelection,
     project: _project,
     ...retained
@@ -1722,6 +1727,7 @@ export function clearComposerDraftContentState(
     ...retained,
     ...(options?.clearModelSelection || modelSelection === undefined ? {} : { modelSelection }),
     ...(options?.clearModelSelection || effortManual === undefined ? {} : { effortManual }),
+    ...(options?.clearModelSelection || routingGroupId === undefined ? {} : { routingGroupId }),
     ...(options?.clearWorkspaceSelection || workspaceSelection === undefined
       ? {}
       : { workspaceSelection }),
@@ -1883,6 +1889,7 @@ export function sameComposerDraftState(a: ComposerDraft, b: ComposerDraft): bool
     a.interactionMode === b.interactionMode &&
     a.freshContext === b.freshContext &&
     a.effortManual === b.effortManual &&
+    a.routingGroupId === b.routingGroupId &&
     a.workspaceSelection === b.workspaceSelection
   );
 }
@@ -2046,7 +2053,12 @@ export function retargetNewTaskDraft(
     ) {
       return current;
     }
-    const { workspaceSelection, ...retained } = normalizeDraft(existing);
+    const { workspaceSelection, routingGroupId, ...retained } = normalizeDraft(existing);
+    // Group ids are per environment, so another machine's same id may list other models.
+    const keptRoutingGroupId =
+      stamp === undefined || stamp.environmentId === project.environmentId
+        ? routingGroupId
+        : undefined;
     // The PR checkout is recreated on the target machine, so only the old local path is dropped.
     const keptWorkspaceSelection =
       options?.keepPullRequestWorkspace && workspaceSelection?.pullRequestReference !== undefined
@@ -2064,6 +2076,7 @@ export function retargetNewTaskDraft(
       [draftKey]: {
         ...retained,
         ...(keptWorkspaceSelection ? { workspaceSelection: keptWorkspaceSelection } : {}),
+        ...(keptRoutingGroupId === undefined ? {} : { routingGroupId: keptRoutingGroupId }),
         attachments,
         project: {
           environmentId: project.environmentId,

@@ -101,6 +101,25 @@ describe("serverSettings helpers", () => {
     expect([on.idleCompaction, on.compactIdleThreads]).toEqual(["beforeCacheExpires", true]);
   });
 
+  it("replaces routing groups and rules whole, so a cleared rule does not survive", () => {
+    const member = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-fake-1" };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      routingGroups: [
+        { id: "fast", name: "Fast", members: [member], strategy: "order" },
+        { id: "deep", name: "Deep", members: [member, member], strategy: "order" },
+      ],
+      routingGroupRules: { hard: "deep", readonly: "fast" },
+    });
+    const patched = applyServerSettingsPatch(saved, {
+      routingGroups: [{ id: "deep", name: "Deep", members: [member], strategy: "order" }],
+      routingGroupRules: { hard: "deep" },
+    });
+    expect(patched.routingGroups).toEqual([
+      { id: "deep", name: "Deep", members: [member], strategy: "order" },
+    ]);
+    expect(patched.routingGroupRules).toEqual({ hard: "deep" });
+  });
+
   it("changes a cleanup rule without replacing the machine's other rules", () => {
     const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnMerge: true, logsAfterDays: 30 },
