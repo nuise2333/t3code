@@ -665,6 +665,65 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
+it.effect("a routing group task launches through its group until a model replaces it", () =>
+  Effect.gen(function* () {
+    const routings = yield* Ref.make<Array<unknown>>([]);
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          ManagedPolicy.layerTest(),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+            launch: (input) =>
+              Ref.update(routings, (all) => [...all, input.routing]).pipe(
+                Effect.as({ threadId: ThreadId.make("thread:grouped"), resumed: false } as never),
+              ),
+          }),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const input = {
+        id: ScheduledTaskId.make("task:grouped"),
+        title: "Digest",
+        prompt: "Summarize the inbox",
+        enabled: true,
+        schedule: { type: "interval", everyMs: 60_000 },
+        projectId: ProjectId.make("project:test"),
+        workspaceStrategy: { type: "root" },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      } as const;
+      yield* service.upsert({ ...input, routingGroupId: "office" });
+      // A client that predates groups sends none; the same model keeps the group.
+      yield* service.upsert(input);
+      assert.equal((yield* service.list()).tasks[0]?.routingGroupId, "office");
+      yield* service.runNow({ id: input.id });
+
+      const picked = yield* service.upsert({
+        ...input,
+        modelSelection: { instanceId: ProviderInstanceId.make("claude"), model: "opus" },
+      });
+      assert.equal(picked.task.routingGroupId, undefined);
+      yield* service.upsert({ ...input, routingGroupId: "office" });
+      const cleared = yield* service.upsert({ ...input, routingGroupId: null });
+      assert.equal(cleared.task.routingGroupId, undefined);
+      yield* service.runNow({ id: input.id });
+
+      assert.deepEqual(yield* Ref.get(routings), [{ mode: "group", groupId: "office" }, undefined]);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
 it.effect("a refused dispatch records its refusal, and opaque causes stay generic", () =>
   Effect.gen(function* () {
     const refusal = "Thread thread:refused was stopped.";

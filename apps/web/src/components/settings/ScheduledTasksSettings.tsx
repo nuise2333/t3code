@@ -58,6 +58,7 @@ import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useNowMinute } from "../../hooks/useNowMinute";
+import { pickerRoutingGroups, routingProviderSource } from "@t3tools/client-runtime/routing";
 import {
   useEnvironment,
   useEnvironmentHttpBaseUrl,
@@ -184,6 +185,7 @@ const EMPTY_DRAFT: DraftState = {
   startFromOrigin: true,
   existingWorktreePath: "",
   modelKey: "",
+  routingGroupId: "",
   runtimeMode: "full-access",
   interactionMode: "default",
   baseModelSelection: null,
@@ -1441,6 +1443,25 @@ function ScheduledTaskEditorForm({
   const shownSelection = draft.threadId
     ? (boundThread?.modelSelection ?? null)
     : { instanceId: activeInstanceId, model: activeModel };
+  const capabilities = environment?.serverConfig?.environment.capabilities;
+  const nowMs = Date.parse(useNowMinute());
+  const routingGroups = pickerRoutingGroups({
+    // Groups resolve when a run launches a thread, so a task bound to one offers none.
+    newThread: draft.threadId === "",
+    multiModel: false,
+    capability: capabilities?.routingGroups === true && capabilities.scheduledTaskRoutingGroups,
+    groups: settings.routingGroups,
+    providers: instanceEntries.map((entry) => routingProviderSource(entry.snapshot, nowMs)),
+  });
+  const pickedGroup =
+    draft.threadId !== "" || draft.routingGroupId === ""
+      ? null
+      : (routingGroups.find((group) => group.id === draft.routingGroupId) ?? {
+          id: draft.routingGroupId,
+          name: "Missing group",
+          summary: null,
+          placeholder: null,
+        });
   const shownInstanceId = shownSelection?.instanceId ?? activeInstanceId;
   const shownModel = shownSelection?.model ?? "";
   const modelOptionsByInstance = getCustomModelOptionsByInstance(
@@ -1519,11 +1540,12 @@ function ScheduledTaskEditorForm({
       return;
     }
     const modelSelection =
-      draft.baseModelSelection !== null &&
+      pickedGroup?.placeholder ??
+      (draft.baseModelSelection !== null &&
       draft.baseModelSelection.instanceId === selection.instanceId &&
       draft.baseModelSelection.model === selection.model
         ? draft.baseModelSelection
-        : selection;
+        : selection);
     const workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy =
       draft.workspaceMode === "root"
         ? { type: "root" }
@@ -1545,6 +1567,9 @@ function ScheduledTaskEditorForm({
       ...(offersThreadModes ? { threadMode: draft.threadMode } : {}),
       workspaceStrategy,
       modelSelection,
+      ...(capabilities?.scheduledTaskRoutingGroups === true
+        ? { routingGroupId: pickedGroup?.id ?? null }
+        : {}),
       // Tasks have no mode picker; a mode above the administrator's ceiling would fail every run.
       runtimeMode:
         clampManagedRuntimeMode(environment?.serverConfig?.managedPolicy, draft.runtimeMode) ??
@@ -1595,6 +1620,7 @@ function ScheduledTaskEditorForm({
                   ...unbindDraftFromThread(current),
                   projectId: defaultScheduledTaskProjectId(projectsOn(next.environmentId), scope),
                   modelKey: "",
+                  routingGroupId: "",
                   baseModelSelection: null,
                   baseRef: "main",
                   startFromOrigin: true,
@@ -1801,8 +1827,18 @@ function ScheduledTaskEditorForm({
                 modelOptionsByInstance={modelOptionsByInstance}
                 isComposerOwned={false}
                 triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                {...(pickedGroup ? { triggerLabel: pickedGroup.name } : {})}
+                routingGroups={routingGroups}
+                activeRoutingGroupId={pickedGroup?.id ?? null}
+                onRoutingGroupSelect={(groupId) =>
+                  setDraft((current) => ({ ...current, routingGroupId: groupId }))
+                }
                 onInstanceModelChange={(instanceId, model) =>
-                  setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
+                  setDraft((current) => ({
+                    ...current,
+                    modelKey: `${instanceId}:${model}`,
+                    routingGroupId: "",
+                  }))
                 }
               />
             </div>

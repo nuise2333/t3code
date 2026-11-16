@@ -128,6 +128,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   routingGroups: Schema.optionalKey(Schema.Boolean),
   /** Keeps a routing group's `rank`; older servers strip it, so clients offer quota ranking only when set. */
   routingGroupQuota: Schema.optionalKey(Schema.Boolean),
+  /** Stores a scheduled task's `routingGroupId`; older servers drop it, so clients offer groups there only when set. */
+  scheduledTaskRoutingGroups: Schema.optionalKey(Schema.Boolean),
   /** Serves `server.crossVendorModel`; clients hide "Find the cause" where it is absent. */
   crossVendorModel: Schema.optionalKey(Schema.Boolean),
   /** Serves `orchestration.forceStopThread`; hide Force stop where it is absent. */

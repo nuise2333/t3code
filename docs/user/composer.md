@@ -190,6 +190,11 @@ research, or office work from reviewers' picks, using the models your providers
 offer. It is an ordinary group: nothing uses it until you pick it, and you can
 edit or delete it like any other.
 
+On web and desktop, a scheduled task that starts new threads can also run
+through a group: pick it from the task's model picker. Each run that starts a
+thread chooses again, so a run skips a model that is out of usage. If the group
+is deleted, the task's runs fail until you pick another model or group.
+
 With Auto effort on, a group can also be chosen by the kind of first message:
 set **Auto rules** under the groups, and a new thread left on Auto starts through
 that kind's group instead of only picking an effort.
