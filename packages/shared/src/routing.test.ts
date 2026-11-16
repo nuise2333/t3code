@@ -1995,12 +1995,18 @@ describe("chooseAutoModel", () => {
       picks: on(codexId, "model-sol"),
     },
     {
-      name: "a routing-group alias or an opaque router is never offered",
-      providers: [
-        claude(),
-        provider(codexId, "codex", ["model-luna-group"]),
-        provider(cursorId, "cursor", ["auto"]),
+      name: "an opaque router is never offered, even free at S",
+      providers: [claude(), provider(cursorId, "cursor", ["auto"])],
+      rows: [
+        ...ROWS.filter((entry) => entry.driver !== "cursor"),
+        row("cursor", "auto", every("S"), 0),
       ],
+      picks: null,
+    },
+    {
+      name: "a routing-group alias without its own row is never offered, even under a wildcard",
+      providers: [claude(), provider(codexId, "codex", ["model-luna-group"])],
+      rows: [...ROWS, row("codex", "*", every("S"), 0)],
       picks: null,
     },
     {

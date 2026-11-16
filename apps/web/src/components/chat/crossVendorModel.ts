@@ -9,7 +9,7 @@ import type {
 import * as Effect from "effect/Effect";
 import { AsyncResult, Atom } from "effect/reactivity";
 
-import { serverEnvironment } from "../../state/server";
+import { providersIgnoringCheckedAtAtom, serverEnvironment } from "../../state/server";
 
 type CrossVendorKey = readonly [
   environmentId: EnvironmentId,
@@ -20,16 +20,18 @@ type CrossVendorKey = readonly [
 
 const crossVendorModelAtom = Atom.family((key: string) => {
   const [environmentId, instanceId, model, projectId] = JSON.parse(key) as CrossVendorKey;
-  return Atom.make((get) =>
-    Effect.promise(() =>
+  return Atom.make((get) => {
+    // Asks again when readiness, auth or quota changes; the last pick stays shown meanwhile.
+    get(providersIgnoringCheckedAtAtom(environmentId));
+    return Effect.promise(() =>
       runAtomCommand(
         get.registry,
         serverEnvironment.crossVendorModel,
         { environmentId, input: { failing: { instanceId, model }, projectId } },
         { reportFailure: false },
       ),
-    ).pipe(Effect.map((result) => (result._tag === "Success" ? result.value : null))),
-  ).pipe(Atom.setIdleTTL(5 * 60_000), Atom.withLabel(`cross-vendor-model:${key}`));
+    ).pipe(Effect.map((result) => (result._tag === "Success" ? result.value : null)));
+  }).pipe(Atom.setIdleTTL(5 * 60_000), Atom.withLabel(`cross-vendor-model:${key}`));
 });
 
 const NO_CROSS_VENDOR_MODEL = Atom.make(AsyncResult.success<CrossVendorModelResult>(null));
