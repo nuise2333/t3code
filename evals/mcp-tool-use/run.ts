@@ -2638,7 +2638,8 @@ const main = Effect.gen(function* () {
   }
   const apiKey = yield* Config.String("ANTHROPIC_API_KEY").pipe(Config.withDefault(""));
   // A gateway that also speaks the Messages API, such as magpie, can stand in for the key.
-  const claudeProxy = !apiKey && Boolean(process.env.EVAL_PROXY_PROVIDER);
+  const proxyProvider = yield* Config.String("EVAL_PROXY_PROVIDER").pipe(Config.withDefault(""));
+  const claudeProxy = !apiKey && proxyProvider !== "";
   const out = flags.out;
   if ((!apiKey && !codex && !claudeProxy) || out === undefined) {
     const message =

@@ -163,8 +163,9 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
     /** Set by a linked environment launching its agent's delegated task here; ignored otherwise. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
-    /** Set with `delegatedFrom` when that task is a review. */
-    delegatedRole: Schema.optional(Schema.Literal("review")),
+    delegatedRole: Schema.optional(Schema.Literal("review")).annotate({
+      description: "Linked environments only, with delegatedFrom. Leave unset.",
+    }),
   }),
   success: Schema.Struct({
     threadId: ThreadId,
