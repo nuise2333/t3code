@@ -39,9 +39,16 @@ const REFACTOR_SPAN = /\bacross\b|跨(?!域|平台|端)/i;
 const DEBUG_KEYWORD =
   /\bwhy\b[^.?!\n]*(?:\b(?:fail\w*|broken|crash\w*)|(?:\bnot\b|n't)[^.?!\n]*\bwork\w*)|\b(?:root cause|debug(?:ging)?|flaky|race conditions?|regressions?(?! tests?)|stack ?traces?)\b|报错|崩溃|失败|排查|根因|调试|为什么[^。？?！!\n]*不(?!用|选|采用|使用|直接)/i;
 const QUICK_KEYWORD =
-  /\b(?:renam\w*|typos?|bump\w*|tweak\w*|one[- ]line\w*)\b|\bchange\b[^.?!\n]*\bto\b|改名|重命名|拼写|错别字|把[^。；;\n]*改成/i;
-const WRITE_VERB =
-  /\b(?:fix|add|implement|change|update|remove|delete|write|create|make|build|edit|replace)\w*\b|修复|实现|添加|删除|更新|修改|新增|创建|编写|写一|写个/i;
+  /\b(?:renam\w*|typos?|bump\w*|tweak\w*|one[- ]liners?|one[- ]line (?:fix|change|edit)\w*)\b|\bchange\b[^.?!\n]*\bto\b|改名|重命名|拼写|错别字|把[^。；;\n]*改成/i;
+const WRITE_VERBS_EN =
+  "fix|add|implement|change|update|remove|delete|write|create|make|build|edit|replace";
+const WRITE_VERBS_ZH = "修复|实现|添加|删除|更新|修改|新增|创建|编写|写一|写个";
+const WRITE_VERB = new RegExp(`\\b(?:${WRITE_VERBS_EN})\\w*\\b|${WRITE_VERBS_ZH}`, "i");
+// "Don't change anything" and 不要修改 forbid a write, so they leave a question a question.
+const NEGATED_WRITE = new RegExp(
+  `\\b(?:don't|do not|never|without)\\s+(?:\\w+\\s+)?(?:${WRITE_VERBS_EN})\\w*|(?:不要|别|不用|无需|请勿|不得|不必)(?:${WRITE_VERBS_ZH})`,
+  "gi",
+);
 const QUESTION =
   /\b(?:why|explain|what|where|how|find|which)\b|[?？]|为什么|怎么|解释|说明|在哪|是什么|查找/i;
 const CODE_FENCE = /```[\s\S]*?(?:```|$)/g;
@@ -85,7 +92,11 @@ export function classifyTask(input: {
   if (prompt.length <= 300 && paths <= 1 && QUICK_KEYWORD.test(words)) {
     return classed("quick_edit", "quick_keyword");
   }
-  if (prompt.length <= 400 && !WRITE_VERB.test(words) && QUESTION.test(words)) {
+  if (
+    prompt.length <= 400 &&
+    !WRITE_VERB.test(words.replace(NEGATED_WRITE, " ")) &&
+    QUESTION.test(words)
+  ) {
     return classed("readonly", "question");
   }
   return classed("implement", "default_class");
