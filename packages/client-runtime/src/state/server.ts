@@ -1831,6 +1831,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:list-text-generator-models",
       tag: WS_METHODS.serverListTextGeneratorModels,
     }),
+    crossVendorModel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:cross-vendor-model",
+      tag: WS_METHODS.serverCrossVendorModel,
+    }),
     retryResourceTelemetry: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:retry-resource-telemetry",
       tag: WS_METHODS.serverRetryResourceTelemetry,

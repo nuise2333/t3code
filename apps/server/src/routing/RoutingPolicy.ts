@@ -1,4 +1,6 @@
 import {
+  type CrossVendorModelInput,
+  type CrossVendorModelResult,
   type LaunchRoutingRequest,
   type ModelSelection,
   type ProjectId,
@@ -12,17 +14,18 @@ import {
   type RoutingEffort,
   type RoutingTaskClass,
   type RuntimeMode,
-  type ServerProvider,
 } from "@t3tools/contracts";
 import { isReasoningSelect } from "@t3tools/shared/model";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   chooseAutoModel,
   classifyTask,
+  crossVendorModel,
   isFrontendPrompt,
   isSecurityPrompt,
-  modelVendor,
   resolveRoutingGroup,
   routeFor,
+  selectionVendor,
 } from "@t3tools/shared/routing";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -34,6 +37,7 @@ import {
   normalizeClaudeCatalogEffort,
   resolveClaudeModelCatalog,
 } from "../provider/ClaudeModelCatalog.ts";
+import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -41,16 +45,6 @@ import * as ServerSettings from "../serverSettings.ts";
 const CLAUDE = ProviderDriverKind.make("claudeAgent");
 
 const BELOW_HIGH: ReadonlySet<string> = new Set(["none", "off", "minimal", "low", "medium"]);
-
-const vendorOf = (providers: ReadonlyArray<ServerProvider>, selection: ModelSelection) => {
-  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
-  if (provider === undefined) return null;
-  const model = provider.models.find(
-    (candidate) =>
-      candidate.slug === selection.model || candidate.aliases?.includes(selection.model) === true,
-  );
-  return modelVendor(provider.driver, model?.slug ?? selection.model);
-};
 
 const SKIP_REASON_TEXT: Record<RoutingSkipReason, string> = {
   instance_missing: "provider instance not found",
@@ -143,6 +137,10 @@ export class RoutingPolicy extends Context.Service<
     readonly routeDelegation: (
       input: RoutingDelegationInput,
     ) => Effect.Effect<RoutedSelection | null>;
+    /** A user's own ask, so Auto's switches do not apply; null when nothing qualifies or it fails. */
+    readonly crossVendorModel: (
+      input: CrossVendorModelInput,
+    ) => Effect.Effect<CrossVendorModelResult>;
   }
 >()("t3/routing/RoutingPolicy") {}
 
@@ -150,6 +148,7 @@ const make = Effect.gen(function* () {
   const manifest = yield* ModelManifest.ModelManifest;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const providerAdapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
 
   const routeEffort = Effect.fn("RoutingPolicy.routeEffort")(
     function* (input: {
@@ -301,7 +300,7 @@ const make = Effect.gen(function* () {
       const providers = yield* providerRegistry.getProviders;
       const review =
         delegation?.role === "review"
-          ? { parentVendor: vendorOf(providers, input.modelSelection) }
+          ? { parentVendor: selectionVendor(providers, input.modelSelection) }
           : undefined;
       // A review always changes vendor, so only the cross-provider switch lets it move.
       const { allowModelSwitch, allowProviderSwitch } =
@@ -478,7 +477,39 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  return RoutingPolicy.of({ decide, resolveGroup, routeDelegation });
+  const crossVendor = Effect.fn("RoutingPolicy.crossVendorModel")(
+    function* (input: CrossVendorModelInput) {
+      const settings = yield* serverSettings.getSettings;
+      const providers = yield* providerRegistry.getProviders;
+      const selection = crossVendorModel({
+        table: ModelManifest.resolveRoutingTable(yield* manifest.current),
+        failing: input.failing,
+        providers,
+        settings,
+        projectId: input.projectId,
+        runtimeMode: resolveProjectSettings(settings, input.projectId).settings.defaultRuntimeMode,
+        runnableInstanceIds: new Set(yield* providerAdapters.list()),
+        now: DateTime.toEpochMillis(yield* DateTime.now),
+      });
+      if (selection === null) return null;
+      const model = providers
+        .find((provider) => provider.instanceId === selection.instanceId)
+        ?.models.find((candidate) => candidate.slug === selection.model);
+      return { selection, modelName: model?.shortName ?? model?.name ?? selection.model };
+    },
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Cross-vendor model lookup failed; none is offered.", cause).pipe(
+        Effect.as(null),
+      ),
+    ),
+  );
+
+  return RoutingPolicy.of({
+    decide,
+    resolveGroup,
+    routeDelegation,
+    crossVendorModel: crossVendor,
+  });
 });
 
 export const layer = Layer.effect(RoutingPolicy, make);

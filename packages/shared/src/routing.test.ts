@@ -19,6 +19,7 @@ import {
 
 import {
   chooseAutoModel,
+  crossVendorModel,
   classifyTask,
   isFrontendPrompt,
   isSecurityPrompt,
@@ -1961,6 +1962,71 @@ describe("chooseAutoModel", () => {
     expect(choice.tier).toBe(row.tier);
     if (row.skipped !== undefined) expect(choice.skipped).toBe(row.skipped);
     expect(choice.reason).toBe(row.reason);
+  });
+
+  it.each<{
+    readonly name: string;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly rows?: RoutingTable["rows"];
+    readonly runnable?: ReadonlyArray<ProviderInstanceId>;
+    readonly picks: ModelSelection | null;
+  }>([
+    {
+      name: "an Opus failure goes to Sol at Opus's read-only tier",
+      providers: [claude(), codex()],
+      rows: [
+        row("claudeAgent", "model-opus", { ...every("S"), readonly: "A" }, 4),
+        ...ROWS.filter((entry) => entry.model !== "model-opus"),
+      ],
+      picks: on(codexId, "model-sol"),
+    },
+    {
+      name: "a background-only Gemini is never offered",
+      providers: [
+        claude(),
+        codex(),
+        provider(ProviderInstanceId.make("antigravity_fake"), "antigravity", ["gemini-fake-pro"]),
+      ],
+      rows: [
+        row("claudeAgent", "model-opus", { ...every("S"), readonly: "A" }, 4),
+        ...ROWS.filter((entry) => entry.model !== "model-opus"),
+        { ...row("antigravity", "gemini-fake-pro", every("S"), 0), backgroundOnly: true },
+      ],
+      picks: on(codexId, "model-sol"),
+    },
+    {
+      name: "a routing-group alias or an opaque router is never offered",
+      providers: [
+        claude(),
+        provider(codexId, "codex", ["model-luna-group"]),
+        provider(cursorId, "cursor", ["auto"]),
+      ],
+      picks: null,
+    },
+    {
+      name: "only the failing vendor is ready",
+      providers: [claude(), provider(claudeTwoId, "claudeAgent", CLAUDE_MODELS)],
+      picks: null,
+    },
+    {
+      name: "another vendor without an orchestration adapter is no candidate",
+      providers: [claude(), codex()],
+      runnable: [claudeId],
+      picks: null,
+    },
+  ])("crossVendorModel: $name", ({ providers, rows, runnable, picks }) => {
+    expect(
+      crossVendorModel({
+        table: tableOf(rows ?? ROWS),
+        failing: on(claudeId, "model-opus"),
+        providers,
+        settings: settingsFor(providers),
+        projectId: null,
+        runtimeMode: "full-access",
+        runnableInstanceIds: new Set(runnable ?? providers.map((entry) => entry.instanceId)),
+        now: NOW,
+      }),
+    ).toEqual(picks);
   });
 
   it("drops the old selection's options and keeps them when it stays", () => {

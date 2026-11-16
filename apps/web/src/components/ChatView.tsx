@@ -50,13 +50,9 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { ScopedProjectRef, UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
-import {
-  higherEffortRetry,
-  rootCausePrompt,
-  rootCauseTarget,
-  type RootCauseTarget,
-} from "@t3tools/client-runtime/routing";
+import { higherEffortRetry, rootCausePrompt } from "@t3tools/client-runtime/routing";
 import { effortRetryBannerItem } from "./chat/ComposerEffortRetry";
+import { useCrossVendorModel } from "./chat/crossVendorModel";
 import { freshSessionBannerItem } from "./chat/ComposerFreshSession";
 import { armFreshSession, disarmFreshSession, useFreshSessionArmed } from "./chat/freshSessionArms";
 import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
@@ -1162,7 +1158,7 @@ export default function ChatView(props: ChatViewProps) {
   const handleNewThreadInActiveProjectStable = useStableCallback(handleNewThreadInActiveProject);
   const openRootCauseThread = async (
     projectRef: ScopedProjectRef,
-    target: RootCauseTarget,
+    selection: ModelSelection,
     commands: ReadonlyArray<string>,
   ) => {
     // The other model has to read the failing worktree, uncommitted changes included.
@@ -1175,8 +1171,11 @@ export default function ChatView(props: ChatViewProps) {
     });
     if (opened === null) return;
     const { setModelSelection, setInteractionMode } = useComposerDraftStore.getState();
-    setModelSelection(opened.draftId, target.selection, { explicit: true, replaceOptions: true });
-    setInteractionMode(opened.draftId, target.interactionMode);
+    setModelSelection(opened.draftId, selection, { explicit: true, replaceOptions: true });
+    const planMode = providerStatuses.find(
+      (provider) => provider.instanceId === selection.instanceId,
+    )?.showInteractionModeToggle;
+    setInteractionMode(opened.draftId, planMode === true ? "plan" : "default");
   };
   const projectGroupingSettings = selectProjectGroupingSettings(settings);
   const activeDraftLogicalProjectKey =
@@ -2640,13 +2639,11 @@ export default function ChatView(props: ChatViewProps) {
     null,
     DismissedKeySchema,
   );
-  const effortRetryItems = ((): ComposerBannerStackItem[] => {
+  const effortRetryScan = (() => {
     const nextSelection =
       (composerModelSelectionApplies ? composerSelectedModelSelection : null) ??
       serverProjection?.thread.modelSelection;
-    if (!serverProjection || !nextSelection || isWorking || phase === "running") {
-      return [];
-    }
+    if (!serverProjection || !nextSelection || isWorking || phase === "running") return null;
     const provider = providerStatuses.find(
       (status) => status.instanceId === nextSelection.instanceId,
     );
@@ -2661,7 +2658,23 @@ export default function ChatView(props: ChatViewProps) {
       descriptors,
       selection: nextSelection,
     });
-    if (!provider || !retry || dismissedEffortRetryKey === retry.key) return [];
+    if (!provider || !retry || dismissedEffortRetryKey === retry.key) return null;
+    return { nextSelection, provider, retry };
+  })();
+  const rootCause = useCrossVendorModel(
+    effortRetryScan !== null &&
+      activeProjectRef !== null &&
+      serverConfig?.environment.capabilities.crossVendorModel === true
+      ? {
+          environmentId: activeProjectRef.environmentId,
+          failing: effortRetryScan.nextSelection,
+          projectId: activeProjectRef.projectId,
+        }
+      : null,
+  );
+  const effortRetryItems = ((): ComposerBannerStackItem[] => {
+    if (effortRetryScan === null) return [];
+    const { nextSelection, provider, retry } = effortRetryScan;
     const { effort } = retry;
     const turnCount =
       effort !== null && supportsConversationRollback
@@ -2672,16 +2685,6 @@ export default function ChatView(props: ChatViewProps) {
             availableRevertTurnCounts,
           }).get(retry.messageId)
         : undefined;
-    const rootCause =
-      activeProjectRef === null
-        ? null
-        : rootCauseTarget({
-            failing: nextSelection,
-            providers: providerStatuses,
-            settings,
-            projectId: activeProjectRef.projectId,
-            now: Date.parse(`${nowMinute}:00Z`),
-          });
     if ((effort === null || turnCount === undefined) && rootCause === null) return [];
     return [
       effortRetryBannerItem({
@@ -2702,7 +2705,8 @@ export default function ChatView(props: ChatViewProps) {
             ? null
             : {
                 modelName: rootCause.modelName,
-                onOpen: () => void openRootCauseThread(activeProjectRef, rootCause, retry.commands),
+                onOpen: () =>
+                  void openRootCauseThread(activeProjectRef, rootCause.selection, retry.commands),
               },
         onDismiss: () => setDismissedEffortRetryKey(retry.key),
       }),

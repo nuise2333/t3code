@@ -258,7 +258,14 @@ function makeHarness(options: HarnessOptions = {}) {
         });
   const layerRouting = RoutingPolicy.layer.pipe(
     Layer.provide(
-      Layer.mergeAll(ModelManifest.layerTest, layerExternalServices, layerLaunchSettings),
+      Layer.mergeAll(
+        ModelManifest.layerTest,
+        layerExternalServices,
+        layerLaunchSettings,
+        Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+          list: () => Effect.succeed([]),
+        }),
+      ),
     ),
   );
   const layerLaunch = ThreadLaunch.layer.pipe(

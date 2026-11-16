@@ -164,10 +164,11 @@ When the same command fails in your last two turns, the composer offers **Retry
 with** the next higher level. It rewinds to your earlier message, like
 [Edit from here](#edit-an-earlier-prompt), and raises the composer's level,
 which stays until you change it. Auto never does this on its own. **Find the
-cause on** opens a new thread in the same project on a ready model from another
-vendor, in plan mode where that provider has it, with a draft that asks for a
-read-only root-cause analysis of the failing command; nothing sends until you
-do.
+cause on** opens a new thread in the same project on a model from another
+vendor that reads code at least as well as the failing one, whether or not
+Auto is on, in plan mode where that provider has it, with a draft that asks
+for a read-only root-cause analysis of the failing command; nothing sends until
+you do. It shows only when such a model is ready.
 
 ## Routing groups
 

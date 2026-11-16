@@ -252,6 +252,7 @@ export const make = Effect.gen(function* () {
       autoModelRouting: true,
       routingGroups: true,
       routingGroupQuota: true,
+      crossVendorModel: true,
       threadForceStop: true,
       environmentThemes: true,
       usageLimitSources: true,

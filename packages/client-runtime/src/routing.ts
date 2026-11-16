@@ -9,11 +9,8 @@ import {
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
-  type ProjectId,
   type ProviderInstanceId,
-  type ProviderInteractionMode,
   type ProviderOptionDescriptor,
-  resolveProjectProviderInstanceEnabled,
   type RouteDecision,
   type RoutingGroup,
   type RoutingGroupRules,
@@ -21,15 +18,12 @@ import {
   type RoutingSkipReason,
   type RoutingTaskClass,
   type ServerProvider,
-  type ServerSettings,
 } from "@t3tools/contracts";
 import { isClaudeUltrathinkPrompt, isReasoningSelect } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   effortSetOutsidePicker,
   type HigherEffort,
-  type ModelVendor,
-  modelVendor,
   nextHigherEffort,
 } from "@t3tools/shared/routing";
 import { exhaustedUsageWindow } from "@t3tools/shared/usageLimits";
@@ -283,82 +277,6 @@ export function higherEffortRetry(input: {
   return { key: newer.id, messageId: older.userMessageId, effort, commands };
 }
 
-const providerReady = (snapshot: ServerProvider): boolean =>
-  snapshot.enabled &&
-  snapshot.installed &&
-  snapshot.status !== "error" &&
-  snapshot.status !== "disabled" &&
-  snapshot.auth.status !== "unauthenticated" &&
-  isProviderAvailable(snapshot);
-
-export interface RootCauseTarget {
-  readonly selection: ModelSelection;
-  readonly modelName: string;
-  readonly interactionMode: ProviderInteractionMode;
-}
-
-const VENDOR_ORDER: ReadonlyArray<ModelVendor> = ["anthropic", "openai", "google", "xai"];
-const COUNTERPART_VENDOR: Partial<Record<ModelVendor, ModelVendor>> = {
-  anthropic: "openai",
-  openai: "anthropic",
-};
-
-/**
- * Another vendor's model for a read-only look at a repeated failure, since more effort on the same
- * model keeps its blind spots. Claude and OpenAI models check each other first; instance defaults
- * win within a vendor. Null when the failing model's vendor is unknown or no other is ready.
- */
-export function rootCauseTarget(input: {
-  readonly failing: Pick<ModelSelection, "instanceId" | "model">;
-  readonly providers: ReadonlyArray<ServerProvider>;
-  readonly settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
-  readonly projectId: ProjectId | null;
-  readonly now: number;
-}): RootCauseTarget | null {
-  const failingProvider = input.providers.find(
-    (provider) => provider.instanceId === input.failing.instanceId,
-  );
-  if (failingProvider === undefined) return null;
-  const failingVendor = modelVendor(
-    failingProvider.driver,
-    failingProvider.models.find(
-      (model) =>
-        model.slug === input.failing.model || model.aliases?.includes(input.failing.model) === true,
-    )?.slug ?? input.failing.model,
-  );
-  if (failingVendor === null) return null;
-  const counterpart = COUNTERPART_VENDOR[failingVendor];
-  const vendors = [
-    ...(counterpart === undefined ? [] : [counterpart]),
-    ...VENDOR_ORDER.filter((vendor) => vendor !== failingVendor && vendor !== counterpart),
-  ];
-  const ready = input.providers.filter(
-    (provider) =>
-      providerReady(provider) &&
-      resolveProjectProviderInstanceEnabled(input.settings, input.projectId, provider.instanceId),
-  );
-  for (const vendor of vendors) {
-    for (const defaultOnly of [true, false]) {
-      for (const provider of ready) {
-        const model = provider.models.find(
-          (candidate) =>
-            (!defaultOnly || candidate.isDefault === true) &&
-            modelVendor(provider.driver, candidate.slug) === vendor &&
-            exhaustedUsageWindow(provider, input.now, candidate.slug) === undefined,
-        );
-        if (model !== undefined) {
-          return {
-            selection: { instanceId: provider.instanceId, model: model.slug },
-            modelName: model.shortName ?? model.name,
-            interactionMode: provider.showInteractionModeToggle === true ? "plan" : "default",
-          };
-        }
-      }
-    }
-  }
-  return null;
-}
-
 /** The new thread's draft: the user reads it over and sends it. */
 export function rootCausePrompt(commands: ReadonlyArray<string>): string {
   const ticks = commands.flatMap((command) => command.match(/`+/g) ?? []);
@@ -433,7 +351,13 @@ export function subscriptionLabel(snapshot: ServerProvider): string | undefined 
 
 /** A provider snapshot as a group member source, with the server's cheap launch checks. */
 export function routingProviderSource(snapshot: ServerProvider, now: number): ModelNameSource {
-  const ready = providerReady(snapshot);
+  const ready =
+    snapshot.enabled &&
+    snapshot.installed &&
+    snapshot.status !== "error" &&
+    snapshot.status !== "disabled" &&
+    snapshot.auth.status !== "unauthenticated" &&
+    isProviderAvailable(snapshot);
   return {
     instanceId: snapshot.instanceId,
     models: snapshot.models,

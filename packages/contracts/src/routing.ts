@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
@@ -217,3 +217,15 @@ export const LaunchRoutingRequest = Schema.Union([
   Schema.Struct({ mode: Schema.Literal("group"), groupId: RoutingGroupId }),
 ]);
 export type LaunchRoutingRequest = typeof LaunchRoutingRequest.Type;
+
+export const CrossVendorModelInput = Schema.Struct({
+  failing: ModelSelection,
+  projectId: Schema.NullOr(ProjectId),
+});
+export type CrossVendorModelInput = typeof CrossVendorModelInput.Type;
+
+/** Null when no other vendor's model qualifies. */
+export const CrossVendorModelResult = Schema.NullOr(
+  Schema.Struct({ selection: ModelSelection, modelName: Schema.String }),
+);
+export type CrossVendorModelResult = typeof CrossVendorModelResult.Type;

@@ -601,6 +601,19 @@ export function modelVendor(driver: string, slug: string): ModelVendor | null {
   return null;
 }
 
+/** The vendor of a selection's model, resolving an alias through its instance's model list. */
+export function selectionVendor(
+  providers: ReadonlyArray<ServerProvider>,
+  selection: Pick<ModelSelection, "instanceId" | "model">,
+): ModelVendor | null {
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  if (provider === undefined) return null;
+  return modelVendor(
+    provider.driver,
+    findModel(provider, selection.model)?.slug ?? selection.model,
+  );
+}
+
 type AutoModelSkipReason = RoutingSkipReason | "premium_default" | "image_frontend";
 
 interface AutoModelChoice {
@@ -802,4 +815,30 @@ export function chooseAutoModel(input: {
     skipped,
     skippedByReason,
   };
+}
+
+/**
+ * Another vendor's model for a read-only look at a failure, on a delegated review's rules, so it
+ * never depends on Auto's switches. Null when no other vendor's model qualifies.
+ */
+export function crossVendorModel(input: {
+  readonly table: RoutingTable;
+  readonly failing: ModelSelection;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+  readonly projectId: ProjectId | null;
+  readonly runtimeMode: RuntimeMode;
+  readonly runnableInstanceIds: ReadonlySet<ProviderInstanceId>;
+  readonly now: number;
+}): ModelSelection | null {
+  const choice = chooseAutoModel({
+    ...input,
+    taskClass: "readonly",
+    current: input.failing,
+    scope: "any",
+    interactionMode: "default",
+    imageFrontend: false,
+    review: { parentVendor: selectionVendor(input.providers, input.failing) },
+  });
+  return choice.switched === "none" ? null : choice.selection;
 }
