@@ -90,11 +90,11 @@ export const ROUTING_GROUP_PRESETS: ReadonlyArray<RoutingGroupPreset> = [
     id: "office-knowledge",
     name: "Office and knowledge work",
     description:
-      "Documents, spreadsheets, cross-system office tasks and finance analysis. Qwen4-Max first where you have it, at high effort; its independent scores were measured at xhigh, which you can set by editing the group. Opus 5.5 and GPT-6.1 Sol follow, since Qwen4-Max has a single upstream. Avoid a Token Plan personal key for scheduled or automated runs.",
+      "Documents, spreadsheets, cross-system office tasks and finance analysis. Qwen4-Max first where you have it, at high effort; its independent scores were measured at xhigh, which you can set by editing the group. Opus 5.5 and GPT-6.1 Sol follow at medium, since Qwen4-Max has a single upstream. Avoid a Token Plan personal key for scheduled or automated runs.",
     members: [
       { label: "Qwen4-Max", slugs: ["qwen4-max"], effort: "high" },
-      { label: "Opus 5.5", slugs: OPUS },
-      { label: "GPT-6.1 Sol", slugs: ["gpt-6.1-sol"] },
+      { label: "Opus 5.5", slugs: OPUS, effort: "medium" },
+      { label: "GPT-6.1 Sol", slugs: ["gpt-6.1-sol"], effort: "medium" },
     ],
   },
 ];
