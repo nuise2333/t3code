@@ -116,6 +116,14 @@ export function describeRoutingReasons(reasons: ReadonlyArray<RoutingReason>): s
   return reasons.flatMap((reason) => REASON_LABELS[reason] ?? []).join(", ");
 }
 
+/** The decision's reasons, with the security keep that rides on `model.kept` for older clients. */
+const routingReasons = (routing: RouteDecision): ReadonlyArray<RoutingReason> => {
+  const kept = routing.model?.kept;
+  return kept === undefined || routing.reasons.includes(kept)
+    ? routing.reasons
+    : [...routing.reasons, kept];
+};
+
 export interface RoutedEffortDisplay {
   readonly levelLabel: string;
   readonly reason: string;
@@ -141,7 +149,7 @@ export function routedEffortDisplay(input: {
     (descriptor?.type === "select"
       ? descriptor.options.find((option) => option.id === routing.effort)?.label
       : undefined) ?? routing.effort.charAt(0).toUpperCase() + routing.effort.slice(1);
-  const reason = describeRoutingReasons(routing.reasons);
+  const reason = describeRoutingReasons(routingReasons(routing));
   return {
     levelLabel,
     reason,
@@ -433,7 +441,9 @@ export function routedModelDisplay(input: {
   )?.subscription;
   const name = `${routingMemberLabel(decision, input.providers)}${subscription ? ` on ${subscription}` : ""}`;
   const reason = describeRoutingReasons(
-    input.routing?.reasons.filter((code) => !EFFORT_ONLY_REASONS.has(code)) ?? [],
+    input.routing
+      ? routingReasons(input.routing).filter((code) => !EFFORT_ONLY_REASONS.has(code))
+      : [],
   );
   const why = reason ? ` (${reason})` : "";
   const picker = input.routing?.role ? ROLE_LABELS[input.routing.role] : "Auto";

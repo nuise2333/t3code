@@ -3353,7 +3353,7 @@ describe("effort routing", () => {
     }).pipe(Effect.provide(harness.layer));
   });
 
-  it.effect("records a security prompt on top of every effort reason", () => {
+  it.effect("records a security prompt beside the effort reasons, not among them", () => {
     const luna = { ...modelSelection, model: "gpt-6-luna" };
     const provider = codexProvider(["low", "medium"]);
     const harness = makeHarness({
@@ -3377,8 +3377,8 @@ describe("effort routing", () => {
         "question",
         "model_row",
         "nearest_level",
-        "security_prompt",
       ]);
+      assert.strictEqual(thread.routing?.model?.kept, "security_prompt");
     }).pipe(Effect.provide(harness.layer));
   });
 

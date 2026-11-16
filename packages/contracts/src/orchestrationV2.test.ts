@@ -1,8 +1,15 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { NodeId, RunAttemptId, TrimmedNonEmptyString } from "./index.ts";
+import {
+  NodeId,
+  ProviderInstanceId,
+  RouteDecision,
+  RunAttemptId,
+  TrimmedNonEmptyString,
+} from "./index.ts";
 import {
   latestProviderTurnForAttempt,
   OrchestrationV2CheckpointFileSummary,
@@ -679,5 +686,69 @@ describe("thread routing decision", () => {
     expect(decode({ ...thread, routing }).routing).toEqual(routing);
     expect(decode({ ...thread, routing: { ...routing, effort: "xhigh" } }).routing).toBeNull();
     expect(decode(thread).routing).toBeUndefined();
+  });
+
+  it("keeps a security keep readable by a client from before security_prompt", () => {
+    // RouteDecision as clients built before security_prompt read a thread's, leniently.
+    const before = Schema.NullOr(
+      Schema.Struct({
+        taskClass: Schema.String,
+        effort: Schema.NullOr(Schema.String),
+        applied: Schema.Boolean,
+        reasons: Schema.Array(
+          Schema.Literals([
+            "plan_mode",
+            "many_paths",
+            "hard_keyword",
+            "debug_keyword",
+            "question",
+            "quick_keyword",
+            "default_class",
+            "model_row",
+            "nearest_level",
+            "no_effort_control",
+            "no_row",
+            "user_choice",
+          ]),
+        ).check(Schema.isMaxLength(4)),
+        model: Schema.optionalKey(
+          Schema.Struct({
+            model: Schema.String,
+            switched: Schema.Literals(["none", "model", "provider"]),
+            reason: Schema.optionalKey(Schema.Literal("image_frontend")),
+          }),
+        ),
+      }),
+    ).pipe(Schema.catchDecoding(() => Effect.succeedSome(null)));
+    const decodeBefore = Schema.decodeUnknownSync(before);
+    const reasons = ["many_paths", "question", "model_row", "nearest_level"] as const;
+    const model = {
+      instanceId: "codex",
+      model: "gpt-6-luna",
+      tier: null,
+      switched: "none",
+      applied: true,
+      skipped: 0,
+    } as const;
+    const decision = { taskClass: "readonly", effort: "medium", applied: true, model } as const;
+    // Each other place for the keep loses the whole decision there, and its label.
+    expect(decodeBefore({ ...decision, reasons: [...reasons, "security_prompt"] })).toBeNull();
+    expect(decodeBefore({ ...decision, reasons: ["question", "security_prompt"] })).toBeNull();
+    expect(
+      decodeBefore({ ...decision, reasons, model: { ...model, reason: "security_prompt" } }),
+    ).toBeNull();
+    const encode = Schema.encodeSync(RouteDecision);
+    const written = encode({
+      ...decision,
+      reasons,
+      model: { ...model, instanceId: ProviderInstanceId.make("codex"), kept: "security_prompt" },
+    });
+    expect(decodeBefore(written)).toEqual({
+      taskClass: "readonly",
+      effort: "medium",
+      applied: true,
+      reasons,
+      model: { model: "gpt-6-luna", switched: "none" },
+    });
   });
 });

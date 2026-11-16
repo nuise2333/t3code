@@ -25,6 +25,7 @@ export const RoutingReason = Schema.Literals([
   "no_effort_control",
   "no_row",
   "user_choice",
+  /** Read only: an earlier build wrote it here; decisions now carry it on `model.kept`. */
   "security_prompt",
 ]);
 export type RoutingReason = typeof RoutingReason.Type;
@@ -187,6 +188,12 @@ export const RouteModelDecision = Schema.Struct({
   from: Schema.optionalKey(RouteGroupMember),
   /** Set when a screenshot of UI work kept GPT models and other instances out of the candidates. */
   reason: Schema.optionalKey(Schema.Literal("image_frontend")),
+  /**
+   * Set when a security prompt kept the thread's model. A key of its own, not a `reasons` code
+   * or a `reason` value: older clients drop an unknown key but lose the whole decision, and its
+   * label, on an unknown literal or a fifth reason.
+   */
+  kept: Schema.optionalKey(Schema.Literal("security_prompt")),
 });
 export type RouteModelDecision = typeof RouteModelDecision.Type;
 
@@ -201,6 +208,7 @@ export const RouteDecision = Schema.Struct({
   baseline: Schema.optionalKey(TrimmedNonEmptyString),
   /** False for a shadow decision: recorded, but the launch kept its own selection. */
   applied: Schema.Boolean,
+  /** Routing writes at most four; five reads what an earlier build wrote with security_prompt. */
   reasons: Schema.Array(RoutingReason).check(Schema.isMaxLength(5)),
   tableUpdatedAt: Schema.optionalKey(Schema.String),
   group: Schema.optionalKey(RouteGroupDecision),

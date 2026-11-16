@@ -357,6 +357,7 @@ const make = Effect.gen(function* () {
         ...(choice.skippedByReason.image_frontend === undefined
           ? {}
           : { reason: "image_frontend" as const }),
+        ...(choice.reason === undefined ? {} : { kept: choice.reason }),
         ...(switching
           ? {
               from: {
@@ -381,7 +382,6 @@ const make = Effect.gen(function* () {
             }),
       });
       const role = delegation === undefined ? {} : { role: delegation.role };
-      const kept = choice.reason === undefined ? [] : [choice.reason];
       // A review on the parent's own model only lifts an effort below high, never lowers one.
       const keepsEffort =
         review !== undefined &&
@@ -394,7 +394,6 @@ const make = Effect.gen(function* () {
           decision: {
             ...routed.decision,
             ...(keepsEffort ? { applied: false } : {}),
-            reasons: [...routed.decision.reasons, ...kept],
             ...role,
             model: modelDecision,
           },
@@ -407,7 +406,7 @@ const make = Effect.gen(function* () {
           ...role,
           effort: null,
           applied: false,
-          reasons: [...classified.reasons, ...kept],
+          reasons: [...classified.reasons],
           model: modelDecision,
         },
       } satisfies RoutedSelection;

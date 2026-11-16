@@ -216,6 +216,25 @@ describe("routedEffortDisplay", () => {
     });
   });
 
+  it("names a security prompt that kept the model", () => {
+    const kept: RouteDecision = {
+      ...routed,
+      reasons: ["debug_keyword"],
+      model: {
+        instanceId,
+        model: "gpt-6",
+        tier: null,
+        switched: "none",
+        applied: true,
+        skipped: 0,
+        kept: "security_prompt",
+      },
+    };
+    expect(routedEffortDisplay({ routing: kept, selection: selection("high") })?.summary).toBe(
+      "Auto picked High: Debugging, Security prompt, model kept",
+    );
+  });
+
   it.each([
     { name: "a manual pick replaced the level", routing: routed, effort: "medium" },
     {
