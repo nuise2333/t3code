@@ -681,14 +681,46 @@ describe("nextHigherEffort", () => {
       options: undefined,
       expected: null,
     },
+    {
+      name: "skipping a prompt-injected level the ladder ranks",
+      descriptors: [
+        effortSelect("effort", ["low", "medium", "high", "xhigh"], {
+          promptInjectedValues: ["high"],
+        }),
+      ],
+      options: [{ id: "effort", value: "medium" }],
+      expected: "xhigh",
+    },
+    {
+      name: "the explicit level over the model default",
+      descriptors: [
+        effortSelect("effort", ["low", "medium", "high", "xhigh"], { currentValue: "low" }),
+      ],
+      options: [{ id: "effort", value: "high" }],
+      expected: "xhigh",
+    },
+    {
+      name: "nothing when the prompt asked for Ultrathink",
+      descriptors: [
+        effortSelect("effort", CLAUDE_LEVELS, { promptInjectedValues: ["ultrathink"] }),
+      ],
+      options: [{ id: "effort", value: "medium" }],
+      ultrathinkPrompt: true,
+      expected: null,
+    },
   ] satisfies ReadonlyArray<{
     name: string;
     descriptors: ReadonlyArray<ProviderOptionDescriptor>;
     options: ModelSelection["options"];
+    ultrathinkPrompt?: boolean;
     expected: string | null;
-  }>)("$name", ({ descriptors, options, expected }) => {
+  }>)("$name", ({ descriptors, options, expected, ...row }) => {
     expect(
-      nextHigherEffort({ descriptors, selection: selection("model-any", options) })?.value ?? null,
+      nextHigherEffort({
+        descriptors,
+        selection: selection("model-any", options),
+        ultrathinkPrompt: "ultrathinkPrompt" in row && row.ultrathinkPrompt === true,
+      })?.value ?? null,
     ).toBe(expected);
   });
 });

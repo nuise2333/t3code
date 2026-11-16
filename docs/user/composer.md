@@ -152,8 +152,8 @@ what Auto would have picked.
 
 When the same command fails in your last two turns, the composer offers **Retry
 with** the next higher level. It rewinds to your earlier message, like
-[Edit from here](#edit-an-earlier-prompt), and raises the level for that send.
-Auto never does this on its own.
+[Edit from here](#edit-an-earlier-prompt), and raises the composer's level,
+which stays until you change it. Auto never does this on its own.
 
 ## Routing groups
 

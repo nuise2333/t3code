@@ -146,8 +146,10 @@ export interface HigherEffort {
 export function nextHigherEffort(input: {
   readonly descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined;
   readonly selection: ModelSelection | null | undefined;
+  /** Ultrathink in a prompt being retried already set its level. */
+  readonly ultrathinkPrompt: boolean;
 }): HigherEffort | null {
-  if (effortSetOutsidePicker({ ...input, ultrathinkPrompt: false })) return null;
+  if (effortSetOutsidePicker(input)) return null;
   const descriptor = input.descriptors?.find(isReasoningSelect);
   if (descriptor === undefined) return null;
   const explicit = input.selection?.options?.find((option) => option.id === descriptor.id)?.value;

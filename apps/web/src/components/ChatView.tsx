@@ -439,7 +439,7 @@ type ChatViewProps =
       draftId: DraftId;
     };
 
-const DismissedFallbackWindowSchema = Schema.NullOr(Schema.String);
+const DismissedKeySchema = Schema.NullOr(Schema.String);
 
 const ignoreComposerFocus = () => {};
 
@@ -1740,7 +1740,7 @@ export default function ChatView(props: ChatViewProps) {
   const [dismissedFallbackWindow, setDismissedFallbackWindow] = useLocalStorage(
     `t3code:fallback-notice-dismissed:${environmentId}`,
     null,
-    DismissedFallbackWindowSchema,
+    DismissedKeySchema,
   );
   const providerStatusDismissalKey = getProviderStatusDismissalKey(
     providerEnvironmentId,
@@ -2611,14 +2611,19 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
-  const [dismissedEffortRetryKeys, setDismissedEffortRetryKeys] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  // One key per thread: a newer repeated failure replaces the dismissed run.
+  const [dismissedEffortRetryKey, setDismissedEffortRetryKey] = useLocalStorage(
+    `t3code:effort-retry-dismissed:${routeThreadKey}`,
+    null,
+    DismissedKeySchema,
   );
   const effortRetryItems = ((): ComposerBannerStackItem[] => {
-    const threadSelection = serverProjection?.thread.modelSelection;
+    const nextSelection =
+      (composerModelSelectionApplies ? composerSelectedModelSelection : null) ??
+      serverProjection?.thread.modelSelection;
     if (
       !serverProjection ||
-      !threadSelection ||
+      !nextSelection ||
       !supportsConversationRollback ||
       isWorking ||
       phase === "running"
@@ -2626,25 +2631,20 @@ export default function ChatView(props: ChatViewProps) {
       return [];
     }
     const provider = providerStatuses.find(
-      (status) => status.instanceId === threadSelection.instanceId,
+      (status) => status.instanceId === nextSelection.instanceId,
     );
     const descriptors = provider?.models.find(
-      (model) =>
-        model.slug === threadSelection.model || model.aliases?.includes(threadSelection.model),
+      (model) => model.slug === nextSelection.model || model.aliases?.includes(nextSelection.model),
     )?.capabilities?.optionDescriptors;
     const retry = higherEffortRetry({
       runs: serverProjection.runs,
       turnItems: serverProjection.turnItems,
+      nodes: serverProjection.nodes,
+      messages: serverProjection.messages,
       descriptors,
+      selection: nextSelection,
     });
-    if (!provider || !retry || dismissedEffortRetryKeys.has(retry.key)) return [];
-    const newer = serverProjection.runs.find((run) => run.id === retry.key);
-    if (
-      newer?.modelSelection.instanceId !== threadSelection.instanceId ||
-      newer.modelSelection.model !== threadSelection.model
-    ) {
-      return [];
-    }
+    if (!provider || !retry || dismissedEffortRetryKey === retry.key) return [];
     const turnCount = deriveRevertTurnCountByUserMessageId({
       timelineEntries,
       checkpoints: turnDiffSummaries,
@@ -2659,9 +2659,9 @@ export default function ChatView(props: ChatViewProps) {
           onRetryWithEffortStable(turnCount, retry.messageId, {
             ...retry.effort,
             provider: provider.driver,
-            selection: newer.modelSelection,
+            selection: nextSelection,
           }),
-        onDismiss: () => setDismissedEffortRetryKeys((keys) => new Set(keys).add(retry.key)),
+        onDismiss: () => setDismissedEffortRetryKey(retry.key),
       }),
     ];
   })();

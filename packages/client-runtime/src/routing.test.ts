@@ -431,19 +431,33 @@ describe("higherEffortRetry", () => {
       id: "reasoningEffort",
       label: "Reasoning",
       type: "select",
-      options: ["low", "medium", "high"].map((id) => ({ id, label: id.toUpperCase() })),
+      options: ["low", "medium", "high", "xhigh", "ultrathink"].map((id) => ({
+        id,
+        label: id.toUpperCase(),
+      })),
+      promptInjectedValues: ["ultrathink"],
     },
   ];
   const at = (minute: number) => DateTime.makeUnsafe(Date.UTC(2026, 0, 1, 0, minute));
-  const run = (n: number, status: OrchestrationV2RunStatus = "completed", model = "gpt-6") => ({
+  const run = (
+    n: number,
+    status: OrchestrationV2RunStatus = "completed",
+    extra: { readonly model?: string; readonly instance?: string; readonly unstarted?: true } = {},
+  ) => ({
     id: RunId.make(`run-${n}`),
     ordinal: n,
     status,
-    startedAt: at(n),
+    startedAt: extra.unstarted ? null : at(n),
     completedAt: at(n),
     rootNodeId: NodeId.make(`root-${n}`),
     userMessageId: MessageId.make(`msg-${n}`),
-    modelSelection: { ...selection("medium"), model },
+    modelSelection: {
+      ...selection("medium"),
+      model: extra.model ?? "gpt-6",
+      ...(extra.instance === undefined
+        ? {}
+        : { instanceId: ProviderInstanceId.make(extra.instance) }),
+    },
   });
   const command = (
     n: number,
@@ -459,6 +473,11 @@ describe("higherEffortRetry", () => {
     ...(exitCode === undefined ? {} : { exitCode }),
     ...(extra.flagged ? { outputIndicatesFailure: true } : {}),
   });
+  const node = (id: string, parent: string, kind: "tool_call" | "subagent") => ({
+    id: NodeId.make(id),
+    parentNodeId: NodeId.make(parent),
+    kind,
+  });
   const offered = { key: "run-2", messageId: "msg-1", effort: "high" };
 
   it.each([
@@ -466,6 +485,16 @@ describe("higherEffortRetry", () => {
       name: "the same command failed in both runs",
       runs: [run(1), run(2)],
       turnItems: [command(1, "vp test", 1), command(2, " vp test ", 2)],
+      expected: offered,
+    },
+    {
+      name: "Claude commands in tool call nodes under the root",
+      runs: [run(1), run(2)],
+      nodes: [node("tool-1", "root-1", "tool_call"), node("tool-2", "root-2", "tool_call")],
+      turnItems: [
+        command(1, "vp test", 1, { node: "tool-1" }),
+        command(2, "vp test", 1, { node: "tool-2" }),
+      ],
       expected: offered,
     },
     {
@@ -518,17 +547,46 @@ describe("higherEffortRetry", () => {
       expected: null,
     },
     {
+      name: "the earlier run failed",
+      runs: [run(1, "failed"), run(2)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: null,
+    },
+    {
+      name: "only the last two runs count",
+      runs: [run(1), run(2), run(3)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 0), command(3, "vp test", 1)],
+      expected: null,
+    },
+    {
+      name: "runs listed out of order",
+      runs: [run(2), run(1)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: offered,
+    },
+    {
       name: "different models",
-      runs: [run(1, "completed", "gpt-6-mini"), run(2)],
+      runs: [run(1, "completed", { model: "gpt-6-mini" }), run(2)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: null,
+    },
+    {
+      name: "the same model on another instance",
+      runs: [run(1, "completed", { instance: "codex_work" }), run(2)],
       turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
       expected: null,
     },
     {
       name: "only subagent failures",
       runs: [run(1), run(2)],
+      nodes: [
+        node("sub-1", "root-1", "subagent"),
+        node("sub-2", "root-2", "subagent"),
+        node("sub-tool-2", "sub-2", "tool_call"),
+      ],
       turnItems: [
         command(1, "vp test", 1, { node: "sub-1" }),
-        command(2, "vp test", 1, { node: "sub-2" }),
+        command(2, "vp test", 1, { node: "sub-tool-2" }),
       ],
       expected: null,
     },
@@ -538,8 +596,48 @@ describe("higherEffortRetry", () => {
       turnItems: [command(1, "vp test", 1), command(2, "vp test", 0), command(3, "vp test", 1)],
       expected: { ...offered, key: "run-3" },
     },
-  ])("$name", ({ runs, turnItems, expected }) => {
-    const result = higherEffortRetry({ runs, turnItems, descriptors });
+    {
+      name: "an intervening run that never started",
+      runs: [run(1), run(2, "failed", { unstarted: true }), run(3)],
+      turnItems: [command(1, "vp test", 1), command(3, "vp test", 1)],
+      expected: { ...offered, key: "run-3" },
+    },
+    {
+      name: "a requeued run after the failures",
+      runs: [run(1), run(2), run(3, "queued")],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: offered,
+    },
+    {
+      name: "an Ultrathink prompt",
+      runs: [run(1), run(2)],
+      messages: [{ id: MessageId.make("msg-1"), text: "ultrathink about this" }],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: null,
+    },
+    {
+      name: "the level after one the composer already raised",
+      runs: [run(1), run(2)],
+      composer: selection("high"),
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: { ...offered, effort: "xhigh" },
+    },
+    {
+      name: "a composer on another model",
+      runs: [run(1), run(2)],
+      composer: { ...selection("medium"), model: "gpt-6-mini" },
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: null,
+    },
+  ])("$name", ({ runs, turnItems, expected, ...row }) => {
+    const result = higherEffortRetry({
+      runs,
+      turnItems,
+      nodes: "nodes" in row ? row.nodes : [],
+      messages: "messages" in row ? row.messages : [],
+      descriptors,
+      selection: "composer" in row ? row.composer : selection("medium"),
+    });
     expect(
       result && { key: result.key, messageId: result.messageId, effort: result.effort.value },
     ).toStrictEqual(expected);

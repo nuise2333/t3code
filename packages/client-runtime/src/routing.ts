@@ -4,6 +4,9 @@ import {
   type LaunchRoutingRequest,
   type MessageId,
   type ModelSelection,
+  type NodeId,
+  type OrchestrationV2ConversationMessage,
+  type OrchestrationV2ExecutionNode,
   type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
   type ProviderInstanceId,
@@ -16,7 +19,7 @@ import {
   type RoutingTaskClass,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { isReasoningSelect } from "@t3tools/shared/model";
+import { isClaudeUltrathinkPrompt, isReasoningSelect } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   effortSetOutsidePicker,
@@ -163,6 +166,7 @@ type RetryScanRun = Pick<
   | "userMessageId"
   | "modelSelection"
 >;
+type RetryScanNode = Pick<OrchestrationV2ExecutionNode, "id" | "parentNodeId" | "kind">;
 
 export interface HigherEffortRetry {
   /** The newer run, so dismissing the offer lasts until another run repeats the failure. */
@@ -172,18 +176,39 @@ export interface HigherEffortRetry {
   readonly effort: HigherEffort;
 }
 
-/** Whether each command's last run in the root node failed, by trimmed command text. */
-function lastRootFailures(
+/** The run's own work: its root and nodes below it, but nothing a subagent ran. */
+function inRunOwnWork(
+  nodeId: NodeId,
+  rootNodeId: NodeId,
+  nodesById: ReadonlyMap<NodeId, RetryScanNode>,
+): boolean {
+  const seen = new Set<NodeId>();
+  let current: NodeId | null = nodeId;
+  while (current !== null && !seen.has(current)) {
+    if (current === rootNodeId) return true;
+    seen.add(current);
+    const node = nodesById.get(current);
+    if (node === undefined || node.kind === "subagent") return false;
+    current = node.parentNodeId;
+  }
+  return false;
+}
+
+/** Whether each command's last run in the run's own work failed, by trimmed command text. */
+function lastOwnFailures(
   run: RetryScanRun,
   turnItems: ReadonlyArray<RetryScanTurnItem>,
+  nodesById: ReadonlyMap<NodeId, RetryScanNode>,
 ): Map<string, boolean> {
   const latest = new Map<
     string,
     Pick<CommandTurnItem, "ordinal" | "exitCode" | "outputIndicatesFailure">
   >();
+  const rootNodeId = run.rootNodeId;
+  if (rootNodeId === null) return new Map();
   for (const item of turnItems) {
     if (item.type !== "command_execution" || item.runId !== run.id) continue;
-    if (run.rootNodeId === null || item.nodeId !== run.rootNodeId) continue;
+    if (item.nodeId === null || !inRunOwnWork(item.nodeId, rootNodeId, nodesById)) continue;
     const command = item.input.trim();
     const previous = latest.get(command);
     if (command.length > 0 && (previous === undefined || item.ordinal >= previous.ordinal)) {
@@ -199,21 +224,25 @@ function lastRootFailures(
   );
 }
 
+const sameModel = (left: ModelSelection, right: ModelSelection) =>
+  left.instanceId === right.instanceId && left.model === right.model;
+
 /**
- * Offers a retry one level higher when a command failed at the end of both of the last two
- * completed runs on the same model. Auto never acts on this; its user decides.
+ * Offers a retry one level above the composer's current one when a command failed at the end of
+ * both of the last two completed runs on that model. Auto never acts on this; its user decides.
  */
 export function higherEffortRetry(input: {
   readonly runs: ReadonlyArray<RetryScanRun>;
   readonly turnItems: ReadonlyArray<RetryScanTurnItem>;
+  readonly nodes: ReadonlyArray<RetryScanNode>;
+  readonly messages: ReadonlyArray<Pick<OrchestrationV2ConversationMessage, "id" | "text">>;
   readonly descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined;
+  /** What the composer would send next. */
+  readonly selection: ModelSelection;
 }): HigherEffortRetry | null {
   const executed = input.runs
     .filter(
-      (run) =>
-        run.status !== "queued" &&
-        run.status !== "rolled_back" &&
-        !(run.status === "cancelled" && run.startedAt === null),
+      (run) => run.status !== "queued" && run.status !== "rolled_back" && run.startedAt !== null,
     )
     .sort((left, right) => (runRanAfter(left, right) ? 1 : runRanAfter(right, left) ? -1 : 0));
   const newer = executed.at(-1);
@@ -221,19 +250,25 @@ export function higherEffortRetry(input: {
   if (newer === undefined || older === undefined) return null;
   if (newer.status !== "completed" || older.status !== "completed") return null;
   if (
-    newer.modelSelection.instanceId !== older.modelSelection.instanceId ||
-    newer.modelSelection.model !== older.modelSelection.model
+    !sameModel(newer.modelSelection, older.modelSelection) ||
+    !sameModel(newer.modelSelection, input.selection)
   ) {
     return null;
   }
-  const olderFailures = lastRootFailures(older, input.turnItems);
-  const repeated = [...lastRootFailures(newer, input.turnItems)].some(
+  const nodesById = new Map(input.nodes.map((node) => [node.id, node]));
+  const olderFailures = lastOwnFailures(older, input.turnItems, nodesById);
+  const repeated = [...lastOwnFailures(newer, input.turnItems, nodesById)].some(
     ([command, failed]) => failed && olderFailures.get(command) === true,
   );
   if (!repeated) return null;
   const effort = nextHigherEffort({
     descriptors: input.descriptors,
-    selection: newer.modelSelection,
+    selection: input.selection,
+    ultrathinkPrompt: input.messages.some(
+      (message) =>
+        (message.id === older.userMessageId || message.id === newer.userMessageId) &&
+        isClaudeUltrathinkPrompt(message.text),
+    ),
   });
   return effort === null ? null : { key: newer.id, messageId: older.userMessageId, effort };
 }
