@@ -150,6 +150,11 @@ larger context, or other paid extras. A started thread shows the model Auto
 picked and the provider account that pays for it; with switching off, it shows
 what Auto would have picked.
 
+When the same command fails in your last two turns, the composer offers **Retry
+with** the next higher level. It rewinds to your earlier message, like
+[Edit from here](#edit-an-earlier-prompt), and raises the level for that send.
+Auto never does this on its own.
+
 ## Routing groups
 
 A routing group is an ordered list of models, each with its own options. Create

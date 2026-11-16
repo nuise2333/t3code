@@ -133,6 +133,38 @@ function nearestOfferedLevel(
   return lower ?? higher ?? null;
 }
 
+export interface HigherEffort {
+  readonly optionId: string;
+  readonly value: string;
+  readonly label: string;
+}
+
+/**
+ * The lowest offered level above the current one. Its user asks for it, so it may pass High,
+ * unlike Auto.
+ */
+export function nextHigherEffort(input: {
+  readonly descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined;
+  readonly selection: ModelSelection | null | undefined;
+}): HigherEffort | null {
+  if (effortSetOutsidePicker({ ...input, ultrathinkPrompt: false })) return null;
+  const descriptor = input.descriptors?.find(isReasoningSelect);
+  if (descriptor === undefined) return null;
+  const explicit = input.selection?.options?.find((option) => option.id === descriptor.id)?.value;
+  const current =
+    typeof explicit === "string" ? explicit : getProviderOptionCurrentValue(descriptor);
+  const currentRank = typeof current === "string" ? LEVEL_RANK[current] : undefined;
+  if (currentRank === undefined) return null;
+  const injected = new Set(descriptor.promptInjectedValues ?? []);
+  let next: { readonly id: string; readonly label: string; readonly rank: number } | null = null;
+  for (const option of descriptor.options) {
+    const rank: number | undefined = LEVEL_RANK[option.id];
+    if (rank === undefined || rank <= currentRank || injected.has(option.id)) continue;
+    if (next === null || rank < next.rank) next = { id: option.id, label: option.label, rank };
+  }
+  return next === null ? null : { optionId: descriptor.id, value: next.id, label: next.label };
+}
+
 /** Ultrathink in the prompt or Ultracode on sets the level outside the effort picker. */
 export function effortSetOutsidePicker(input: {
   readonly descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined;

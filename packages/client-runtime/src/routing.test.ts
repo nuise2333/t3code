@@ -1,9 +1,15 @@
 import {
+  MessageId,
+  NodeId,
   ProviderInstanceId,
+  RunId,
+  type OrchestrationV2RunStatus,
+  type ProviderOptionDescriptor,
   type RouteDecision,
   type RoutingGroup,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -11,6 +17,7 @@ import {
   autoEffortSupported,
   autoRoutingNote,
   describeRoutingReasons,
+  higherEffortRetry,
   launchRoutingRequest,
   moveListItem,
   newRoutingGroupId,
@@ -417,3 +424,108 @@ it.each([
     ).toBe(supported);
   },
 );
+
+describe("higherEffortRetry", () => {
+  const descriptors: ReadonlyArray<ProviderOptionDescriptor> = [
+    {
+      id: "reasoningEffort",
+      label: "Reasoning",
+      type: "select",
+      options: ["low", "medium", "high"].map((id) => ({ id, label: id.toUpperCase() })),
+    },
+  ];
+  const at = (minute: number) => DateTime.makeUnsafe(Date.UTC(2026, 0, 1, 0, minute));
+  const run = (n: number, status: OrchestrationV2RunStatus = "completed", model = "gpt-6") => ({
+    id: RunId.make(`run-${n}`),
+    ordinal: n,
+    status,
+    startedAt: at(n),
+    completedAt: at(n),
+    rootNodeId: NodeId.make(`root-${n}`),
+    userMessageId: MessageId.make(`msg-${n}`),
+    modelSelection: { ...selection("medium"), model },
+  });
+  const command = (
+    n: number,
+    input: string,
+    exitCode: number | undefined,
+    extra: { readonly ordinal?: number; readonly node?: string } = {},
+  ) => ({
+    type: "command_execution" as const,
+    runId: RunId.make(`run-${n}`),
+    nodeId: NodeId.make(extra.node ?? `root-${n}`),
+    ordinal: extra.ordinal ?? 0,
+    input,
+    ...(exitCode === undefined ? {} : { exitCode }),
+  });
+  const offered = { key: "run-2", messageId: "msg-1", effort: "high" };
+
+  it.each([
+    {
+      name: "the same command failed in both runs",
+      runs: [run(1), run(2)],
+      turnItems: [command(1, "vp test", 1), command(2, " vp test ", 2)],
+      expected: offered,
+    },
+    {
+      name: "different commands failed",
+      runs: [run(1), run(2)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp lint", 1)],
+      expected: null,
+    },
+    {
+      name: "a later pass in the same run",
+      runs: [run(1), run(2)],
+      turnItems: [
+        command(1, "vp test", 1),
+        command(2, "vp test", 1, { ordinal: 1 }),
+        command(2, "vp test", 0, { ordinal: 2 }),
+      ],
+      expected: null,
+    },
+    {
+      name: "a missing exit code",
+      runs: [run(1), run(2)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", undefined)],
+      expected: null,
+    },
+    {
+      name: "a single run",
+      runs: [run(2)],
+      turnItems: [command(2, "vp test", 1)],
+      expected: null,
+    },
+    {
+      name: "the latest run failed",
+      runs: [run(1), run(2, "failed")],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: null,
+    },
+    {
+      name: "different models",
+      runs: [run(1, "completed", "gpt-6-mini"), run(2)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
+      expected: null,
+    },
+    {
+      name: "only subagent failures",
+      runs: [run(1), run(2)],
+      turnItems: [
+        command(1, "vp test", 1, { node: "sub-1" }),
+        command(2, "vp test", 1, { node: "sub-2" }),
+      ],
+      expected: null,
+    },
+    {
+      name: "an intervening rolled back run",
+      runs: [run(1), run(2, "rolled_back"), run(3)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 0), command(3, "vp test", 1)],
+      expected: { ...offered, key: "run-3" },
+    },
+  ])("$name", ({ runs, turnItems, expected }) => {
+    const result = higherEffortRetry({ runs, turnItems, descriptors });
+    expect(
+      result && { key: result.key, messageId: result.messageId, effort: result.effort.value },
+    ).toStrictEqual(expected);
+  });
+});

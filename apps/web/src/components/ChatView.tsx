@@ -50,6 +50,8 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
+import { higherEffortRetry } from "@t3tools/client-runtime/routing";
+import { effortRetryBannerItem } from "./chat/ComposerEffortRetry";
 import { freshSessionBannerItem } from "./chat/ComposerFreshSession";
 import { armFreshSession, disarmFreshSession, useFreshSessionArmed } from "./chat/freshSessionArms";
 import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
@@ -157,6 +159,7 @@ import {
   derivePhase,
   deriveActiveWorkStartedAt,
   deriveCanInterruptRunningThread,
+  deriveRevertTurnCountByUserMessageId,
   findRevertCheckpoint,
   isLatestRunSettled,
 } from "../session-logic";
@@ -2608,6 +2611,60 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
+  const [dismissedEffortRetryKeys, setDismissedEffortRetryKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const effortRetryItems = ((): ComposerBannerStackItem[] => {
+    const threadSelection = serverProjection?.thread.modelSelection;
+    if (
+      !serverProjection ||
+      !threadSelection ||
+      !supportsConversationRollback ||
+      isWorking ||
+      phase === "running"
+    ) {
+      return [];
+    }
+    const provider = providerStatuses.find(
+      (status) => status.instanceId === threadSelection.instanceId,
+    );
+    const descriptors = provider?.models.find(
+      (model) =>
+        model.slug === threadSelection.model || model.aliases?.includes(threadSelection.model),
+    )?.capabilities?.optionDescriptors;
+    const retry = higherEffortRetry({
+      runs: serverProjection.runs,
+      turnItems: serverProjection.turnItems,
+      descriptors,
+    });
+    if (!provider || !retry || dismissedEffortRetryKeys.has(retry.key)) return [];
+    const newer = serverProjection.runs.find((run) => run.id === retry.key);
+    if (
+      newer?.modelSelection.instanceId !== threadSelection.instanceId ||
+      newer.modelSelection.model !== threadSelection.model
+    ) {
+      return [];
+    }
+    const turnCount = deriveRevertTurnCountByUserMessageId({
+      timelineEntries,
+      checkpoints: turnDiffSummaries,
+      threadStartCheckpointAvailable,
+      availableRevertTurnCounts,
+    }).get(retry.messageId);
+    if (turnCount === undefined) return [];
+    return [
+      effortRetryBannerItem({
+        levelLabel: retry.effort.label,
+        onRetry: () =>
+          onRetryWithEffortStable(turnCount, retry.messageId, {
+            ...retry.effort,
+            provider: provider.driver,
+            selection: newer.modelSelection,
+          }),
+        onDismiss: () => setDismissedEffortRetryKeys((keys) => new Set(keys).add(retry.key)),
+      }),
+    ];
+  })();
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2675,6 +2732,7 @@ export default function ChatView(props: ChatViewProps) {
         ...usageLimitsItems,
         ...projectCloneItems,
         ...freshSessionItems,
+        ...effortRetryItems,
         ...systemComposerBannerItems,
       ];
     }
@@ -2686,6 +2744,7 @@ export default function ChatView(props: ChatViewProps) {
       ...usageLimitsItems,
       ...projectCloneItems,
       ...freshSessionItems,
+      ...effortRetryItems,
       ...systemComposerBannerItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,
@@ -2856,26 +2915,30 @@ export default function ChatView(props: ChatViewProps) {
                 : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
   const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
-  const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =
-    useTimelineRewind({
-      environmentId,
-      routeThreadRef,
-      routeThreadKey,
-      currentRouteThreadKeyRef,
-      serverProjection,
-      activeThread,
-      timelineMessages,
-      phase,
-      isSendBusy,
-      isRevertingCheckpoint,
-      supportsConversationRollback,
-      activeEnvironmentUnavailable,
-      activeEnvironmentUnavailableLabel,
-      promptRef,
-      composerRef,
-      composerDraftTarget,
-      setThreadError,
-    });
+  const {
+    onConfirmRevertStable,
+    onForkFromRunStable,
+    onRetryWithEffortStable,
+    onRevertTimelineTurnStable,
+  } = useTimelineRewind({
+    environmentId,
+    routeThreadRef,
+    routeThreadKey,
+    currentRouteThreadKeyRef,
+    serverProjection,
+    activeThread,
+    timelineMessages,
+    phase,
+    isSendBusy,
+    isRevertingCheckpoint,
+    supportsConversationRollback,
+    activeEnvironmentUnavailable,
+    activeEnvironmentUnavailableLabel,
+    promptRef,
+    composerRef,
+    composerDraftTarget,
+    setThreadError,
+  });
   const onCompactContext = () => {
     if (compactDisabled) return;
     void sendStandaloneCommand("/compact", "Failed to compact context.");

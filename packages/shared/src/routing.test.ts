@@ -21,6 +21,7 @@ import {
   chooseAutoModel,
   classifyTask,
   isFrontendPrompt,
+  nextHigherEffort,
   resolveRoutingGroup,
   routeFor,
 } from "./routing.ts";
@@ -613,6 +614,82 @@ describe("routeFor", () => {
       applied: false,
       reasons: ["plan_mode", "no_effort_control"],
     });
+  });
+});
+
+describe("nextHigherEffort", () => {
+  const ULTRACODE: ProviderOptionDescriptor = {
+    id: "ultracode",
+    label: "Ultracode",
+    type: "boolean",
+  };
+  it.each([
+    {
+      name: "medium to high",
+      descriptors: [effortSelect("effort", ["low", "medium", "high"])],
+      options: [{ id: "effort", value: "medium" }],
+      expected: "high",
+    },
+    {
+      name: "high to xhigh when offered",
+      descriptors: [effortSelect("effort", ["low", "medium", "high", "xhigh", "max"])],
+      options: [{ id: "effort", value: "high" }],
+      expected: "xhigh",
+    },
+    {
+      name: "nothing above high when xhigh is not offered",
+      descriptors: [effortSelect("effort", ["low", "medium", "high"])],
+      options: [{ id: "effort", value: "high" }],
+      expected: null,
+    },
+    {
+      name: "the model default when nothing is explicit",
+      descriptors: [effortSelect("effort", ["low", "medium", "high"], { currentValue: "medium" })],
+      options: undefined,
+      expected: "high",
+    },
+    {
+      name: "skipping Ultrathink and Ultracode levels",
+      descriptors: [
+        effortSelect("effort", ["low", "medium", "high", "ultracode", "ultrathink"], {
+          promptInjectedValues: ["ultrathink"],
+        }),
+      ],
+      options: [{ id: "effort", value: "high" }],
+      expected: null,
+    },
+    {
+      name: "nothing above max",
+      descriptors: [
+        effortSelect("effort", CLAUDE_LEVELS, { promptInjectedValues: ["ultrathink"] }),
+      ],
+      options: [{ id: "effort", value: "max" }],
+      expected: null,
+    },
+    {
+      name: "nothing while Ultracode is on",
+      descriptors: [effortSelect("effort", ["low", "medium", "high"]), ULTRACODE],
+      options: [
+        { id: "effort", value: "medium" },
+        { id: "ultracode", value: true },
+      ],
+      expected: null,
+    },
+    {
+      name: "nothing without a reasoning option",
+      descriptors: [{ id: "fastMode", label: "Fast", type: "boolean" } as const],
+      options: undefined,
+      expected: null,
+    },
+  ] satisfies ReadonlyArray<{
+    name: string;
+    descriptors: ReadonlyArray<ProviderOptionDescriptor>;
+    options: ModelSelection["options"];
+    expected: string | null;
+  }>)("$name", ({ descriptors, options, expected }) => {
+    expect(
+      nextHigherEffort({ descriptors, selection: selection("model-any", options) })?.value ?? null,
+    ).toBe(expected);
   });
 });
 

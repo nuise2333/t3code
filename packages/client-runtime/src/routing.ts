@@ -2,7 +2,10 @@ import {
   type AutoRoutingSettings,
   isProviderAvailable,
   type LaunchRoutingRequest,
+  type MessageId,
   type ModelSelection,
+  type OrchestrationV2Run,
+  type OrchestrationV2TurnItem,
   type ProviderInstanceId,
   type ProviderOptionDescriptor,
   type RouteDecision,
@@ -14,7 +17,12 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import { isReasoningSelect } from "@t3tools/shared/model";
-import { effortSetOutsidePicker } from "@t3tools/shared/routing";
+import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+import {
+  effortSetOutsidePicker,
+  type HigherEffort,
+  nextHigherEffort,
+} from "@t3tools/shared/routing";
 import { exhaustedUsageWindow } from "@t3tools/shared/usageLimits";
 
 const REASON_LABELS: Partial<Record<RoutingReason, string>> = {
@@ -135,6 +143,89 @@ export function routedEffortDisplay(input: {
     reason,
     summary: reason ? `Auto picked ${levelLabel}: ${reason}` : `Auto picked ${levelLabel}`,
   };
+}
+
+type CommandTurnItem = Extract<OrchestrationV2TurnItem, { type: "command_execution" }>;
+type RetryScanTurnItem =
+  | Pick<CommandTurnItem, "type" | "runId" | "nodeId" | "ordinal" | "input" | "exitCode">
+  | { readonly type: Exclude<OrchestrationV2TurnItem["type"], "command_execution"> };
+type RetryScanRun = Pick<
+  OrchestrationV2Run,
+  | "id"
+  | "ordinal"
+  | "status"
+  | "startedAt"
+  | "completedAt"
+  | "rootNodeId"
+  | "userMessageId"
+  | "modelSelection"
+>;
+
+export interface HigherEffortRetry {
+  /** The newer run, so dismissing the offer lasts until another run repeats the failure. */
+  readonly key: string;
+  /** The older run's message, which the retry rewinds to. */
+  readonly messageId: MessageId;
+  readonly effort: HigherEffort;
+}
+
+/** Each command's last exit in the run's root node, by trimmed command text. */
+function lastRootExitCodes(
+  run: RetryScanRun,
+  turnItems: ReadonlyArray<RetryScanTurnItem>,
+): Map<string, number | undefined> {
+  const latest = new Map<string, Pick<CommandTurnItem, "ordinal" | "exitCode">>();
+  for (const item of turnItems) {
+    if (item.type !== "command_execution" || item.runId !== run.id) continue;
+    if (run.rootNodeId === null || item.nodeId !== run.rootNodeId) continue;
+    const command = item.input.trim();
+    const previous = latest.get(command);
+    if (command.length > 0 && (previous === undefined || item.ordinal >= previous.ordinal)) {
+      latest.set(command, item);
+    }
+  }
+  return new Map([...latest].map(([command, item]) => [command, item.exitCode]));
+}
+
+const failedExit = (exitCode: number | undefined) => exitCode !== undefined && exitCode !== 0;
+
+/**
+ * Offers a retry one level higher when a command failed at the end of both of the last two
+ * completed runs on the same model. Auto never acts on this; its user decides.
+ */
+export function higherEffortRetry(input: {
+  readonly runs: ReadonlyArray<RetryScanRun>;
+  readonly turnItems: ReadonlyArray<RetryScanTurnItem>;
+  readonly descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined;
+}): HigherEffortRetry | null {
+  const executed = input.runs
+    .filter(
+      (run) =>
+        run.status !== "queued" &&
+        run.status !== "rolled_back" &&
+        !(run.status === "cancelled" && run.startedAt === null),
+    )
+    .sort((left, right) => (runRanAfter(left, right) ? 1 : runRanAfter(right, left) ? -1 : 0));
+  const newer = executed.at(-1);
+  const older = executed.at(-2);
+  if (newer === undefined || older === undefined) return null;
+  if (newer.status !== "completed" || older.status !== "completed") return null;
+  if (
+    newer.modelSelection.instanceId !== older.modelSelection.instanceId ||
+    newer.modelSelection.model !== older.modelSelection.model
+  ) {
+    return null;
+  }
+  const olderExits = lastRootExitCodes(older, input.turnItems);
+  const repeated = [...lastRootExitCodes(newer, input.turnItems)].some(
+    ([command, exitCode]) => failedExit(exitCode) && failedExit(olderExits.get(command)),
+  );
+  if (!repeated) return null;
+  const effort = nextHigherEffort({
+    descriptors: input.descriptors,
+    selection: newer.modelSelection,
+  });
+  return effort === null ? null : { key: newer.id, messageId: older.userMessageId, effort };
 }
 
 /** The groups a new thread may pick: none from a server that cannot resolve them. */
