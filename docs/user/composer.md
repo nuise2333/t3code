@@ -154,6 +154,11 @@ larger context, or other paid extras. A started thread shows the model Auto
 picked and the provider account that pays for it; with switching off, it shows
 what Auto would have picked.
 
+The **Routing** section of the Usage page counts, for threads started in the
+chosen window, how often Auto set a level, switched the model or launched through
+a group, by kind of task, and how many it would have changed with its switches
+on. These are decisions, not a measure of what they saved.
+
 With Auto effort on, a subtask an agent delegates as a review prefers a model
 from another vendor at High effort; with provider switching off it stays on the
 current model and is raised to at least High. A research subtask

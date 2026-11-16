@@ -1835,6 +1835,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:cross-vendor-model",
       tag: WS_METHODS.serverCrossVendorModel,
     }),
+    routingSummary: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:routing-summary",
+      tag: WS_METHODS.serverRoutingSummary,
+    }),
     retryResourceTelemetry: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:retry-resource-telemetry",
       tag: WS_METHODS.serverRetryResourceTelemetry,

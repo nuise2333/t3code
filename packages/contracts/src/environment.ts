@@ -132,6 +132,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   scheduledTaskRoutingGroups: Schema.optionalKey(Schema.Boolean),
   /** Serves `server.crossVendorModel`; clients hide "Find the cause" where it is absent. */
   crossVendorModel: Schema.optionalKey(Schema.Boolean),
+  /** Serves `server.routingSummary`; the Usage page shows its Routing section only when set. */
+  routingSummary: Schema.optionalKey(Schema.Boolean),
   /** Serves `orchestration.forceStopThread`; hide Force stop where it is absent. */
   threadForceStop: Schema.optionalKey(Schema.Boolean),
   /** Every protocol-2 server sends this; older mobile builds still read it. */

@@ -254,6 +254,7 @@ export const make = Effect.gen(function* () {
       routingGroupQuota: true,
       scheduledTaskRoutingGroups: true,
       crossVendorModel: true,
+      routingSummary: true,
       threadForceStop: true,
       environmentThemes: true,
       usageLimitSources: true,

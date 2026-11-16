@@ -28,6 +28,7 @@ import { useId, useState } from "react";
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance, selectsPlanAgent } from "../../modelSelection";
 import { isProviderInstancePickerReady, providerInstanceEntriesFor } from "../../providerInstances";
+import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
@@ -93,6 +94,12 @@ export function RoutingGroupsSettings({
   const quotaSupported = capabilities?.routingGroupQuota === true;
   const [editing, setEditing] = useState<Editing | null>(null);
   const [deleting, setDeleting] = useState<RoutingGroup | null>(null);
+  // Read only while confirming, so the section holds no live subscription otherwise.
+  const deletingTasks = useEnvironmentQuery(
+    deleting !== null && capabilities?.scheduledTaskRoutingGroups === true
+      ? serverEnvironment.scheduledTasksLive({ environmentId, input: {} })
+      : null,
+  ).data?.tasks.filter((task) => task.routingGroupId === deleting?.id).length;
   if (!supported) return null;
 
   const groups = settings.routingGroups;
@@ -345,6 +352,9 @@ export function RoutingGroupsSettings({
               Threads that already started through it keep their model.
               {deletingRules.length > 0
                 ? ` ${deletingRules.length === 1 ? "One Auto rule uses" : `${deletingRules.length} Auto rules use`} it; those launches fail until you change the rule.`
+                : ""}
+              {deletingTasks
+                ? ` ${deletingTasks === 1 ? "One scheduled task runs through it; its" : `${deletingTasks} scheduled tasks run through it; their`} runs fail until you pick another model or group.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>

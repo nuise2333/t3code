@@ -234,3 +234,26 @@ export const CrossVendorModelResult = Schema.NullOr(
   Schema.Struct({ selection: ModelSelection, modelName: Schema.String }),
 );
 export type CrossVendorModelResult = typeof CrossVendorModelResult.Type;
+
+export const RoutingSummaryInput = Schema.Struct({
+  days: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 90 })),
+});
+export type RoutingSummaryInput = typeof RoutingSummaryInput.Type;
+
+/** Launch decisions by task class. Counts what Auto decided, not what it saved. */
+export const RoutingSummaryRow = Schema.Struct({
+  taskClass: RoutingTaskClass,
+  threads: NonNegativeInt,
+  /** Auto set a level other than the one the thread would have used. */
+  effortChanged: NonNegativeInt,
+  /** Auto was off, and would have set another level. */
+  effortShadow: NonNegativeInt,
+  modelSwitched: NonNegativeInt,
+  /** Switching was off, and Auto would have launched another model. */
+  modelShadow: NonNegativeInt,
+  groupLaunches: NonNegativeInt,
+});
+export type RoutingSummaryRow = typeof RoutingSummaryRow.Type;
+
+export const RoutingSummaryResult = Schema.Struct({ rows: Schema.Array(RoutingSummaryRow) });
+export type RoutingSummaryResult = typeof RoutingSummaryResult.Type;
