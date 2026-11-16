@@ -3795,7 +3795,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // Only stamped work names a remote parent, so a client cannot claim one.
       ...(command.linkOrigin === undefined || command.delegatedFrom === undefined
         ? {}
-        : { delegatedFrom: command.delegatedFrom }),
+        : {
+            delegatedFrom: command.delegatedFrom,
+            ...(command.delegatedRole === undefined
+              ? {}
+              : { delegatedRole: command.delegatedRole }),
+          }),
       ...(command.routing === undefined ? {} : { routing: command.routing }),
       lineage: {
         parentThreadId: null,

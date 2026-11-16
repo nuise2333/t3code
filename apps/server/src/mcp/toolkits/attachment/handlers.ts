@@ -12,7 +12,12 @@ import * as Upload from "../../../assets/AttachmentUpload.ts";
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
 import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { newCommandId, readThread, unavailable } from "../../threadAccess.ts";
+import {
+  assertReviewRoundLeft,
+  newCommandId,
+  readThread,
+  unavailable,
+} from "../../threadAccess.ts";
 import { AttachmentToolkit } from "./tools.ts";
 
 export function resolveAttachmentReferences(
@@ -100,6 +105,7 @@ export const layer = McpToolAccess.toLayer(
             );
             const commandId = yield* newCommandId();
             const messageId = MessageId.make(commandId);
+            yield* assertReviewRoundLeft(projection.thread, projection.messages, messageId);
             const result = yield* ThreadMessageIntake.sendToThread({
               projectId: projection.thread.projectId,
               threadId: projection.thread.id,

@@ -201,7 +201,7 @@ export const RouteDecision = Schema.Struct({
   baseline: Schema.optionalKey(TrimmedNonEmptyString),
   /** False for a shadow decision: recorded, but the launch kept its own selection. */
   applied: Schema.Boolean,
-  reasons: Schema.Array(RoutingReason).check(Schema.isMaxLength(4)),
+  reasons: Schema.Array(RoutingReason).check(Schema.isMaxLength(5)),
   tableUpdatedAt: Schema.optionalKey(Schema.String),
   group: Schema.optionalKey(RouteGroupDecision),
   model: Schema.optionalKey(RouteModelDecision),

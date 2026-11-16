@@ -362,6 +362,7 @@ const make = Effect.gen(function* () {
             threadId: parent.thread.id,
             title: parent.thread.title,
           },
+          ...(input.role === "review" ? { delegatedRole: "review" as const } : {}),
         },
       );
       const link = yield* links.get(target.environmentId).pipe(

@@ -85,7 +85,7 @@ const modelSelection = { instanceId, model: "gpt-5.4" };
 
 type LaunchedWith = Pick<
   ThreadLaunch.ThreadLaunchInput,
-  "modelSelection" | "runtimeMode" | "interactionMode"
+  "modelSelection" | "runtimeMode" | "interactionMode" | "delegatedRole"
 >;
 
 /** The thread the box launches for the task, which the test finishes. */
@@ -514,6 +514,9 @@ const boxToolkitLayer = (thread: BoxThread) => {
                 modelSelection: input.modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
+                ...(input.delegatedRole === undefined
+                  ? {}
+                  : { delegatedRole: input.delegatedRole }),
               }),
             ),
             Effect.andThen(Effect.flatten(Ref.get(thread.afterLaunch))),
@@ -1233,15 +1236,18 @@ it.effect("a task named only by environment inherits the parent's model, within 
       yield* seedParent(a, parentModelSelection);
 
       const result = yield* a.call("delegate_task", {
-        task: "Run the suite on the box.",
+        task: "Review the suite's failures on the box.",
         target: { environmentId: box.environmentId },
+        role: "review",
       });
       expect(result.isError, JSON.stringify(result.content)).toBe(false);
       // The parent's model and options, and the link's modes rather than the parent's.
+      // The role goes along, so the box caps the review's rounds too.
       expect(yield* Ref.get(thread.launchedWith)).toEqual({
         modelSelection: parentModelSelection,
         runtimeMode: "auto-accept-edits",
         interactionMode: "default",
+        delegatedRole: "review",
       });
 
       // Asking for more than the link allows is still refused there.

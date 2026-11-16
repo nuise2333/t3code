@@ -496,7 +496,12 @@ it.effect("leaves a task delegated from a linked environment out of the top-leve
         threadId: ThreadId.make("thread:remote-parent"),
         title: "Remote parent",
       },
+      delegatedRole: "review",
     });
+    assert.equal(
+      (yield* threads.getThreadProjection(delegated.threadId)).thread.delegatedRole,
+      "review",
+    );
     const listed = yield* threads.listProjectThreads({ projectId, includeSubagents: false });
     assert.deepEqual(
       listed.map((thread) => thread.id),
@@ -3338,6 +3343,35 @@ describe("effort routing", () => {
       assert.deepStrictEqual(replayed.thread.modelSelection, modelSelection);
       assert.deepStrictEqual(replayed.thread.routing, first.thread.routing);
       assert.isFalse(replayed.thread.routing?.applied);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("records a security prompt on top of every effort reason", () => {
+    const luna = { ...modelSelection, model: "gpt-6-luna" };
+    const provider = codexProvider(["low", "medium"]);
+    const harness = makeHarness({
+      providers: [
+        { ...provider, models: provider.models.map((model) => ({ ...model, slug: luna.model })) },
+      ],
+      serverSettings: { autoRouting: { enabled: true } },
+    });
+    return Effect.gen(function* () {
+      const { thread } = yield* launchedThread({
+        ...launchInput({
+          command: "routing-security",
+          thread: "routing-security:thread",
+          message: "Explain how a.ts, b.ts and c.ts handle the CVE-2026-1 exploit",
+        }),
+        modelSelection: luna,
+        routing: { mode: "auto", model: "auto" },
+      });
+      assert.deepStrictEqual(thread.routing?.reasons, [
+        "many_paths",
+        "question",
+        "model_row",
+        "nearest_level",
+        "security_prompt",
+      ]);
     }).pipe(Effect.provide(harness.layer));
   });
 

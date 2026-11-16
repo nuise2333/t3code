@@ -3109,6 +3109,8 @@ export const OrchestrationV2Command = Schema.Union([
     linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
     /** Only the server sets this, with `linkOrigin`, for a linked environment's delegated task. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+    /** Kept only with `delegatedFrom`: that environment's agent delegated a review. */
+    delegatedRole: Schema.optional(Schema.Literal("review")),
     /** Only the server sets this, from its launch routing decision. */
     routing: Schema.optional(RouteDecision),
     importedNativeThread: Schema.optional(

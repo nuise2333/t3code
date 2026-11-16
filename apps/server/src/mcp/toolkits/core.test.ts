@@ -1421,6 +1421,68 @@ it.effect("only the caller that prepared a pending upload can discard it", () =>
   ),
 );
 
+it.effect("an attachment send cannot start a review's fourth round", () => {
+  const shell = McpToolAccessTestkit.liveThreadShell(threadId);
+  const projection = McpToolAccessTestkit.idleThreadProjection(shell);
+  const stored = ChatImageAttachment.make({
+    type: "image",
+    id: "review-shot",
+    name: "shot.png",
+    mimeType: "image/png",
+    sizeBytes: 4,
+  });
+  const messages = Array.from({ length: 3 }, (_, index) => ({
+    id: `message:agent-${index}`,
+    role: "user",
+    createdBy: "agent",
+    attachments: index === 0 ? [stored] : [],
+  }));
+  let sent = 0;
+  return Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const result = yield* server
+      .callTool({
+        name: "t3_thread_send_attachments",
+        arguments: { threadId, message: "Look again.", attachments: [stored] },
+      })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(declaredFailure(result)).toMatchObject({ code: "thread_not_sendable" });
+    expect(sent).toBe(0);
+  }).pipe(
+    Effect.provide(
+      McpHttpServer.layerAttachmentToolkit.pipe(
+        Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: (id) => Effect.succeed(McpToolAccessTestkit.liveThreadShell(id)),
+            getProjectThreadRecords: () =>
+              Effect.succeed({
+                ...projection,
+                thread: { ...projection.thread, delegatedRole: "review" as const },
+                messages,
+              } as never),
+            sendToThread: () =>
+              Effect.sync(() => {
+                sent += 1;
+              }).pipe(Effect.andThen(Effect.die("the send should be refused"))),
+          }),
+        ),
+        Layer.provide(AssetSigner.layer.pipe(Layer.provideMerge(ServerSecretStore.layer))),
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-attachment-" })),
+        Layer.provide(
+          DocumentText.layer.pipe(
+            Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+          ),
+        ),
+        Layer.provide(NodeCrypto.layer),
+      ),
+    ),
+  );
+});
+
 it.effect(
   "t3_thread_list settled:false with an empty statuses list lists the unsettled threads",
   () => {

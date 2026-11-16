@@ -1165,7 +1165,14 @@ export default function ChatView(props: ChatViewProps) {
     target: RootCauseTarget,
     commands: ReadonlyArray<string>,
   ) => {
-    const opened = await handleNewThread(projectRef, { prompt: rootCausePrompt(commands) });
+    // The other model has to read the failing worktree, uncommitted changes included.
+    const opened = await handleNewThread(projectRef, {
+      prompt: rootCausePrompt(commands),
+      branch: activeThread?.branch ?? null,
+      worktreePath: activeThread?.worktreePath ?? null,
+      envMode: activeThread?.worktreePath ? "worktree" : "local",
+      startFromOrigin: false,
+    });
     if (opened === null) return;
     const { setModelSelection, setInteractionMode } = useComposerDraftStore.getState();
     setModelSelection(opened.draftId, target.selection, { explicit: true, replaceOptions: true });
@@ -2673,7 +2680,7 @@ export default function ChatView(props: ChatViewProps) {
             providers: providerStatuses,
             settings,
             projectId: activeProjectRef.projectId,
-            now: Date.parse(nowMinute),
+            now: Date.parse(`${nowMinute}:00Z`),
           });
     if ((effort === null || turnCount === undefined) && rootCause === null) return [];
     return [

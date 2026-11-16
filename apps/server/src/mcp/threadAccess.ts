@@ -142,6 +142,33 @@ export const loadCaller = Effect.fn("mcp.loadCaller")(function* () {
   } satisfies Caller;
 });
 
+// Reviewer reports (2026-11): only about 21% of re-reviews pass, so a fourth round rarely helps.
+const MAX_REVIEW_ROUNDS = 3;
+
+/** Every agent send to a review child counts as a round; a replay of an accepted one does not. */
+export const assertReviewRoundLeft = (
+  thread: { readonly delegatedRole?: "review" | undefined },
+  messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly createdBy?: string;
+  }>,
+  messageId: string,
+) => {
+  if (thread.delegatedRole !== "review") return Effect.void;
+  const rounds = messages.filter(
+    (message) => message.role === "user" && message.createdBy === "agent",
+  );
+  return rounds.length >= MAX_REVIEW_ROUNDS && !rounds.some((message) => message.id === messageId)
+    ? Effect.fail(
+        new OrchestratorMcpFailure({
+          code: "thread_not_sendable",
+          message: `This review has had its ${MAX_REVIEW_ROUNDS} rounds. Give the user the remaining findings instead of reviewing again.`,
+        }),
+      )
+    : Effect.void;
+};
+
 export const assertTargetWithinLimits = (
   limits: CallerLimits,
   target: Pick<OrchestrationV2ThreadShell, "id" | "runtimeMode" | "interactionMode">,
