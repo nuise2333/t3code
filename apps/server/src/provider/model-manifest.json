@@ -23,6 +23,10 @@
         "url": "https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels",
         "dataDate": "2026-11-15"
       },
+      "claude-cache-effort": {
+        "url": "https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level",
+        "dataDate": "2026-11-15"
+      },
       "vals-tb4": {
         "url": "https://www.vals.ai/benchmarks/terminal-bench-4",
         "dataDate": "2026-11-11"
@@ -102,6 +106,7 @@
         "effortByClass": { "readonly": "medium" },
         "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
         "relativeCost": 4,
+        "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
         "verified": true,
         "sourceIds": [
           "vals-tb4",
@@ -110,7 +115,8 @@
           "aa-index",
           "frontier-code-2",
           "scale-swe-atlas",
-          "vals-programbench"
+          "vals-programbench",
+          "claude-cache-effort"
         ]
       },
       {
@@ -118,13 +124,15 @@
         "model": "claude-fable-5-2",
         "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
         "relativeCost": 6,
+        "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
         "verified": true,
         "sourceIds": [
           "aa-coding",
           "aa-index",
           "frontier-code-2",
           "scale-swe-atlas",
-          "vals-programbench"
+          "vals-programbench",
+          "claude-cache-effort"
         ]
       },
       {
@@ -133,13 +141,15 @@
         "effortByClass": { "implement": "high" },
         "tierByClass": { "readonly": "A", "quick_edit": "A", "hard": "B" },
         "relativeCost": 3,
+        "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
         "verified": true,
         "sourceIds": [
           "aa-index",
           "aa-coding",
           "frontier-code-2",
           "scale-swe-atlas",
-          "vals-programbench"
+          "vals-programbench",
+          "claude-cache-effort"
         ]
       },
       {
@@ -148,8 +158,15 @@
         "effortByClass": { "readonly": "medium" },
         "tierByClass": { "readonly": "C", "quick_edit": "B", "implement": "C", "hard": "C" },
         "relativeCost": 0,
+        "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
         "verified": true,
-        "sourceIds": ["claude-effort-levels", "aa-index", "aa-coding", "frontier-code-2"]
+        "sourceIds": [
+          "claude-effort-levels",
+          "aa-index",
+          "aa-coding",
+          "frontier-code-2",
+          "claude-cache-effort"
+        ]
       },
       {
         "driver": "antigravity",

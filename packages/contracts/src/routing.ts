@@ -62,6 +62,14 @@ const RoutingTableRow = Schema.Struct({
   tierByClass: Schema.optionalKey(PartialTierByClass),
   /** Cheaper is lower; each step is about double the cost of a task. */
   relativeCost: Schema.optionalKey(NonNegativeInt),
+  /** Whether changing effort keeps the prompt cache, per channel; a missing key is unknown. */
+  effortChangeKeepsCache: Schema.optionalKey(
+    Schema.Struct({
+      direct: Schema.optionalKey(Schema.Boolean),
+      bedrock: Schema.optionalKey(Schema.Boolean),
+      customEndpoint: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
   /** Only verified rows with an exact model, a relative cost and a class's tier are candidates. */
   verified: Schema.optionalKey(Schema.Boolean),
   sourceIds: Schema.Array(Schema.String).check(Schema.isMinLength(1)),

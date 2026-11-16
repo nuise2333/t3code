@@ -348,6 +348,20 @@ describe("resolveRoutingTable", () => {
       },
     },
     {
+      name: "a row with a non-boolean cache flag",
+      routing: {
+        ...remoteRouting,
+        rows: [
+          {
+            driver: "codex",
+            model: "gpt-x",
+            effortChangeKeepsCache: { direct: "yes" },
+            sourceIds: ["bench"],
+          },
+        ],
+      },
+    },
+    {
       name: "duplicate rows",
       routing: { ...remoteRouting, rows: [remoteRouting.rows[0], remoteRouting.rows[0]] },
     },

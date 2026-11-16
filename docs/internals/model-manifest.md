@@ -43,6 +43,10 @@ disagree; vendor-only or single-source data stays unverified or out of the table
 `relativeCost` is `round(log2(cost per run at high / $0.12))` from FrontierCode 2.0,
 so each step is about double; Auto orders a tier by it and never moves a task short
 of hard to a model that costs more than the thread's.
+`effortChangeKeepsCache` is a per-channel marker that nothing reads yet; the
+channel comes from `ServerProvider.auth.type` (`bedrock`, `customEndpoint`, otherwise
+direct). A Vertex user with an API key would read as direct, so map `apiProvider`
+explicitly before using it.
 
 Model data is schema-validated configuration. Tests should cover resolver, cache,
 and adapter semantics with synthetic model names, so adding a model never requires
