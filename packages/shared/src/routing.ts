@@ -485,8 +485,6 @@ const FRONTEND =
 /** UI work a screenshot shows; GPT models score with Haiku on screenshot-driven frontend bugs. */
 export const isFrontendPrompt = (prompt: string): boolean => FRONTEND.test(prompt);
 
-const isGptModel = (driver: string, slug: string) => driver === "codex" || slug.startsWith("gpt-");
-
 // Claude 5.5 models and Fable 5.2 reroute these to Opus 4.8 (HN 49901375, 2026-09-29; Theo, 2026-11-11).
 const SECURITY =
   /\b(?:security|vulnerab\w*|exploit\w*|CVEs?)\b|\bCVE-\d|漏洞|(?<!类型|线程|并发|内存)安全(?!地)/i;
@@ -767,7 +765,7 @@ export function chooseAutoModel(input: {
           : premiumByDefault(model.capabilities?.optionDescriptors ?? [])
             ? "premium_default"
             : input.imageFrontend &&
-                (isGptModel(provider.driver, model.slug) ||
+                (modelVendor(provider.driver, model.slug) === "openai" ||
                   (review === undefined && provider.instanceId !== current.instanceId))
               ? "image_frontend"
               : null);

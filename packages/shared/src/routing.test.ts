@@ -1700,6 +1700,23 @@ describe("chooseAutoModel", () => {
       skipped: 1,
     },
     {
+      name: "a screenshot of UI work does not skip a gateway Claude model on a codex instance",
+      current: on(codexId, "auto/claude-fake-opus"),
+      taskClass: "quick_edit",
+      imageFrontend: true,
+      scope: "instance",
+      providers: [provider(codexId, "codex", ["auto/claude-fake-opus", "auto/claude-fake-haiku"])],
+      rows: [
+        row("claudeAgent", "claude-fake-opus", every("S"), 4),
+        row("claudeAgent", "claude-fake-haiku", SMALL, 0),
+        ...ROWS,
+      ],
+      picks: on(codexId, "auto/claude-fake-haiku"),
+      switched: "model",
+      tier: "B",
+      skipped: 0,
+    },
+    {
       name: "a screenshot of UI work keeps the thread's own GPT model",
       current: on(codexId, "model-sol"),
       taskClass: "quick_edit",
