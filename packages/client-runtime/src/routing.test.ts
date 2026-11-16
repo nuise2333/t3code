@@ -449,7 +449,7 @@ describe("higherEffortRetry", () => {
     n: number,
     input: string,
     exitCode: number | undefined,
-    extra: { readonly ordinal?: number; readonly node?: string } = {},
+    extra: { readonly ordinal?: number; readonly node?: string; readonly flagged?: true } = {},
   ) => ({
     type: "command_execution" as const,
     runId: RunId.make(`run-${n}`),
@@ -457,6 +457,7 @@ describe("higherEffortRetry", () => {
     ordinal: extra.ordinal ?? 0,
     input,
     ...(exitCode === undefined ? {} : { exitCode }),
+    ...(extra.flagged ? { outputIndicatesFailure: true } : {}),
   });
   const offered = { key: "run-2", messageId: "msg-1", effort: "high" };
 
@@ -487,6 +488,21 @@ describe("higherEffortRetry", () => {
       name: "a missing exit code",
       runs: [run(1), run(2)],
       turnItems: [command(1, "vp test", 1), command(2, "vp test", undefined)],
+      expected: null,
+    },
+    {
+      name: "failed output from a provider with no exit codes",
+      runs: [run(1), run(2)],
+      turnItems: [
+        command(1, "vp test", undefined, { flagged: true }),
+        command(2, "vp test", undefined, { flagged: true }),
+      ],
+      expected: offered,
+    },
+    {
+      name: "an exit code of 0 outranks failed-looking output",
+      runs: [run(1), run(2)],
+      turnItems: [command(1, "vp test", 1), command(2, "vp test", 0, { flagged: true })],
       expected: null,
     },
     {

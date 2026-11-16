@@ -147,7 +147,10 @@ export function routedEffortDisplay(input: {
 
 type CommandTurnItem = Extract<OrchestrationV2TurnItem, { type: "command_execution" }>;
 type RetryScanTurnItem =
-  | Pick<CommandTurnItem, "type" | "runId" | "nodeId" | "ordinal" | "input" | "exitCode">
+  | Pick<
+      CommandTurnItem,
+      "type" | "runId" | "nodeId" | "ordinal" | "input" | "exitCode" | "outputIndicatesFailure"
+    >
   | { readonly type: Exclude<OrchestrationV2TurnItem["type"], "command_execution"> };
 type RetryScanRun = Pick<
   OrchestrationV2Run,
@@ -169,12 +172,15 @@ export interface HigherEffortRetry {
   readonly effort: HigherEffort;
 }
 
-/** Each command's last exit in the run's root node, by trimmed command text. */
-function lastRootExitCodes(
+/** Whether each command's last run in the root node failed, by trimmed command text. */
+function lastRootFailures(
   run: RetryScanRun,
   turnItems: ReadonlyArray<RetryScanTurnItem>,
-): Map<string, number | undefined> {
-  const latest = new Map<string, Pick<CommandTurnItem, "ordinal" | "exitCode">>();
+): Map<string, boolean> {
+  const latest = new Map<
+    string,
+    Pick<CommandTurnItem, "ordinal" | "exitCode" | "outputIndicatesFailure">
+  >();
   for (const item of turnItems) {
     if (item.type !== "command_execution" || item.runId !== run.id) continue;
     if (run.rootNodeId === null || item.nodeId !== run.rootNodeId) continue;
@@ -184,10 +190,14 @@ function lastRootExitCodes(
       latest.set(command, item);
     }
   }
-  return new Map([...latest].map(([command, item]) => [command, item.exitCode]));
+  // The exit code outranks the server's output check, which covers providers that report none.
+  return new Map(
+    [...latest].map(([command, item]) => [
+      command,
+      item.exitCode === undefined ? item.outputIndicatesFailure === true : item.exitCode !== 0,
+    ]),
+  );
 }
-
-const failedExit = (exitCode: number | undefined) => exitCode !== undefined && exitCode !== 0;
 
 /**
  * Offers a retry one level higher when a command failed at the end of both of the last two
@@ -216,9 +226,9 @@ export function higherEffortRetry(input: {
   ) {
     return null;
   }
-  const olderExits = lastRootExitCodes(older, input.turnItems);
-  const repeated = [...lastRootExitCodes(newer, input.turnItems)].some(
-    ([command, exitCode]) => failedExit(exitCode) && failedExit(olderExits.get(command)),
+  const olderFailures = lastRootFailures(older, input.turnItems);
+  const repeated = [...lastRootFailures(newer, input.turnItems)].some(
+    ([command, failed]) => failed && olderFailures.get(command) === true,
   );
   if (!repeated) return null;
   const effort = nextHigherEffort({
