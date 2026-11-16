@@ -138,6 +138,7 @@ import {
   taskPrompt,
 } from "./delegatedTaskModes.ts";
 import {
+  assertReviewDelegationLeft,
   assertReviewRoundLeft,
   assertTargetWithinLimits,
   isLiveCallerShell,
@@ -2680,6 +2681,9 @@ const make = Effect.gen(function* () {
         operation: "delegate-task",
       });
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
+      if (input.role === "review" && !isRetryOfAcceptedDelegation) {
+        yield* assertReviewDelegationLeft(threadManagement, scope.thread.threadId);
+      }
       const target =
         groupId === undefined
           ? yield* resolveTargetRechecking({

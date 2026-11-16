@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import type { OrchestratorV2Error } from "../orchestration-v2/Orchestrator.ts";
@@ -168,6 +169,45 @@ export const assertReviewRoundLeft = (
       )
     : Effect.void;
 };
+
+/** Review delegations from one thread count until the user writes there again; callers skip replays. */
+export const assertReviewDelegationLeft = Effect.fn(
+  "OrchestratorMcpService.assertReviewDelegationLeft",
+)(function* (
+  threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadRecords">,
+  parentThreadId: ThreadId,
+) {
+  const { messages, subagents } = yield* threads
+    .getThreadRecords(parentThreadId, ["messages", "subagents"], { messageRoles: ["user"] })
+    .pipe(
+      Effect.mapError(
+        () =>
+          new OrchestratorMcpFailure({
+            code: "orchestration_error",
+            message: `Unable to read thread ${parentThreadId}.`,
+          }),
+      ),
+    );
+  const lastReply = messages.reduce(
+    (latest, message) =>
+      message.createdBy === "user"
+        ? Math.max(latest, DateTime.toEpochMillis(message.createdAt))
+        : latest,
+    Number.NEGATIVE_INFINITY,
+  );
+  const rounds = subagents.filter(
+    (task) =>
+      task.origin === "app_owned" &&
+      task.delegatedRole === "review" &&
+      DateTime.toEpochMillis(task.startedAt ?? task.updatedAt) > lastReply,
+  );
+  if (rounds.length >= MAX_REVIEW_ROUNDS) {
+    return yield* new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message: `This review has had its ${MAX_REVIEW_ROUNDS} rounds since the user last replied. Give the user the remaining findings instead of reviewing again.`,
+    });
+  }
+});
 
 export const assertTargetWithinLimits = (
   limits: CallerLimits,

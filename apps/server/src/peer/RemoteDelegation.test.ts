@@ -1262,6 +1262,41 @@ it.effect("a task named only by environment inherits the parent's model, within 
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+it.effect("reviews delegated there count toward the parent's review rounds", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread);
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const a = yield* makeLaptop(database, offers);
+      yield* linkTo(a.links, b, "full-access");
+      yield* seedParent(a);
+
+      const review = (round: number) =>
+        a.call("delegate_task", {
+          task: "Review the diff.",
+          role: "review",
+          target: { environmentId: box.environmentId },
+          clientRequestId: `review-round-${round}`,
+        });
+      for (const round of [1, 2, 3]) {
+        const result = yield* review(round);
+        expect(result.isError, JSON.stringify(result.content)).toBe(false);
+      }
+      const fourth = yield* review(4);
+      expect(fourth.isError).toBe(true);
+      expect(JSON.stringify(fourth.content)).toContain("Give the user the remaining findings");
+      // A retry of an accepted review is the same round.
+      expect((yield* review(3)).isError).toBe(false);
+      const { subagents } = yield* a.orchestrator.getThreadProjection(parentThreadId);
+      expect(subagents.filter((task) => task.delegatedRole === "review")).toHaveLength(3);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("a task naming another driver there never runs its model on the parent's instance", () =>
   Effect.scoped(
     Effect.gen(function* () {
