@@ -40,7 +40,7 @@ export const ROUTING_GROUP_PRESETS: ReadonlyArray<RoutingGroupPreset> = [
       { label: "GPT-6 Astra", slugs: ["gpt-6-astra"], effort: "medium" },
     ],
   },
-  // Reviewer consensus on bulk translation (Every, Bilibili), 2026-11-15.
+  // Reviewer majority view on bulk translation, no single named test behind it, 2026-11-15.
   {
     id: "batch-translation",
     name: "Batch translation",
@@ -182,13 +182,7 @@ export function resolveRoutingGroupPreset(
   for (const member of preset.members) {
     const selection = findMember(member, providers);
     if (selection === null) skipped.push(member.label);
-    else if (
-      !members.some(
-        (entry) => entry.instanceId === selection.instanceId && entry.model === selection.model,
-      )
-    ) {
-      members.push(selection);
-    }
+    else members.push(selection);
   }
   if (members.length === 0) {
     return {

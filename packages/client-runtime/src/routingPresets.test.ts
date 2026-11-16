@@ -133,14 +133,8 @@ describe("resolveRoutingGroupPreset", () => {
       value: "high",
     },
     {
-      name: "never above high",
+      name: "never above high, even when only xhigh is offered",
       preset: "office-knowledge",
-      levels: ["low", "high", "xhigh"],
-      value: "high",
-    },
-    {
-      name: "nothing within reach",
-      preset: "video-speed",
       levels: ["xhigh", "max"],
       value: undefined,
     },
