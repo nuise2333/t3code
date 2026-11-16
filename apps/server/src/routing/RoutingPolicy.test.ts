@@ -62,6 +62,21 @@ describe("RoutingPolicy.crossVendorModel", () => {
       },
     },
     {
+      name: "an Opus failure gets a gateway-prefixed Sol under the gateway's id and name",
+      providers: [
+        provider(codexId, "codex", [
+          { slug: "group/gpt-6.1-sol-high", name: "GPT-6.1 Sol High" },
+          { slug: "auto/gpt-6.1-sol", name: "GPT-6.1 Sol · routing group" },
+        ]),
+        claude,
+      ],
+      failing: { instanceId: claudeId, model: "claude-opus-5-5" },
+      expected: {
+        selection: { instanceId: codexId, model: "auto/gpt-6.1-sol" },
+        modelName: "GPT-6.1 Sol · routing group",
+      },
+    },
+    {
       name: "a Sol failure gets nothing when Gemini 4 is the only other vendor",
       providers: [codex, antigravity],
       failing: { instanceId: codexId, model: "gpt-6.1-sol" },

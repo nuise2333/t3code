@@ -555,6 +555,43 @@ describe("routeFor", () => {
   });
 
   it.each([
+    {
+      name: "a gateway-prefixed id reads its model's row",
+      model: "auto/model-steady",
+      driver: "codex",
+      effort: "high",
+      modelRow: true,
+    },
+    {
+      name: "an effort-pinned gateway variant keeps the wildcard row",
+      model: "group/model-steady-high",
+      driver: "codex",
+      effort: "low",
+      modelRow: false,
+    },
+    {
+      name: "another driver's row never sets the effort",
+      model: "auto/model-steady",
+      driver: "claudeAgent",
+      effort: "low",
+      modelRow: false,
+    },
+  ])("$name", ({ model, driver, effort, modelRow }) => {
+    const result = routeFor({
+      table,
+      driver: ProviderDriverKind.make(driver),
+      selection: selection(model),
+      descriptors: [effortSelect("reasoningEffort", ["low", "medium", "high"])],
+      prompt: QUESTION,
+      interactionMode: "default",
+      apply: true,
+    });
+    expect(result.decision.effort).toBe(effort);
+    expect(result.decision.reasons.includes("model_row")).toBe(modelRow);
+    expect(result.selection.model).toBe(model);
+  });
+
+  it.each([
     { name: "Ultrathink in the prompt", prompt: "ultrathink: why is login slow?", options: [] },
     {
       name: "Ultracode turned on",
@@ -1946,6 +1983,16 @@ describe("chooseAutoModel", () => {
       tier: "S",
     },
     {
+      name: "a gateway-prefixed id reads another driver's row for its tier and cost",
+      current: on(codexId, "auto/model-opus"),
+      taskClass: "quick_edit",
+      scope: "instance",
+      providers: [provider(codexId, "codex", ["auto/model-opus", "auto/model-haiku"])],
+      picks: on(codexId, "auto/model-haiku"),
+      switched: "model",
+      tier: "B",
+    },
+    {
       name: "review from a parent of unknown vendor takes any known vendor",
       current: on(cursorId, "auto"),
       taskClass: "readonly",
@@ -2007,6 +2054,44 @@ describe("chooseAutoModel", () => {
       name: "a routing-group alias without its own row is never offered, even under a wildcard",
       providers: [claude(), provider(codexId, "codex", ["model-luna-group"])],
       rows: [...ROWS, row("codex", "*", every("S"), 0)],
+      picks: null,
+    },
+    {
+      name: "a gateway-prefixed Sol is offered under the id the gateway accepts",
+      providers: [claude(), provider(codexId, "codex", ["group/model-sol-high", "auto/model-sol"])],
+      rows: [
+        row("claudeAgent", "model-opus", { ...every("S"), readonly: "A" }, 4),
+        ...ROWS.filter((entry) => entry.model !== "model-opus"),
+      ],
+      picks: on(codexId, "auto/model-sol"),
+    },
+    {
+      name: "effort-pinned and user-made gateway groups stay unknown",
+      providers: [claude(), provider(codexId, "codex", ["group/model-sol-high", "group/group"])],
+      rows: [
+        row("claudeAgent", "model-opus", { ...every("S"), readonly: "A" }, 4),
+        ...ROWS.filter((entry) => entry.model !== "model-opus"),
+      ],
+      picks: null,
+    },
+    {
+      name: "an exact row beats a gateway-prefixed match",
+      providers: [claude(), provider(codexId, "codex", ["auto/model-sol"])],
+      rows: [
+        row("claudeAgent", "model-opus", { ...every("S"), readonly: "A" }, 4),
+        ...ROWS.filter((entry) => entry.model !== "model-opus"),
+        row("codex", "auto/model-sol", SMALL, 0),
+      ],
+      picks: null,
+    },
+    {
+      name: "a gateway-prefixed background-only Gemini is never offered",
+      providers: [claude(), provider(codexId, "codex", ["auto/gemini-fake-pro"])],
+      rows: [
+        row("claudeAgent", "model-opus", { ...every("S"), readonly: "A" }, 4),
+        ...ROWS.filter((entry) => entry.model !== "model-opus" && entry.driver !== "codex"),
+        { ...row("antigravity", "gemini-fake-pro", every("S"), 0), backgroundOnly: true },
+      ],
       picks: null,
     },
     {

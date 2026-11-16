@@ -231,10 +231,9 @@ export function routeFor(input: {
   ) {
     return unchanged("user_choice");
   }
-  const rows = table.rows.filter((row) => row.driver === input.driver);
-  const model = input.modelSlug ?? selection.model;
-  const exactRow = rows.find((row) => row.model === model);
-  const row = exactRow ?? rows.find((row) => row.model === "*");
+  const exactRow = modelRow(table, input.driver, [input.modelSlug ?? selection.model]);
+  const row =
+    exactRow ?? table.rows.find((row) => row.driver === input.driver && row.model === "*");
   if (row === undefined) return unchanged("no_row");
 
   const rowEffort = row.effortByClass?.[classified.taskClass];
@@ -502,6 +501,39 @@ const isTierRow = (row: RoutingTable["rows"][number]) =>
   !UNROUTED_DRIVERS.has(row.driver) &&
   !isOpaqueRouter(row.driver, row.model);
 
+type RoutingRow = RoutingTable["rows"][number];
+
+/**
+ * The driver's row for a model's ids. Gateways like magpie prefix ids (`auto/<slug>`), so a
+ * prefixed id falls back to the row of its last segment, never stripping an effort suffix.
+ * `otherDrivers` also takes that slug's tier row on another driver, for tier and cost only.
+ */
+function modelRow(
+  table: RoutingTable,
+  driver: string,
+  ids: ReadonlyArray<string>,
+  otherDrivers = false,
+): RoutingRow | undefined {
+  const own = (row: RoutingRow) => row.driver === driver && row.model !== "*";
+  const exact = table.rows.find((row) => own(row) && ids.includes(row.model));
+  if (exact !== undefined) return exact;
+  const segments = ids.flatMap((id) =>
+    id.includes("/") ? [id.slice(id.lastIndexOf("/") + 1)] : [],
+  );
+  if (segments.length === 0) return undefined;
+  return (
+    table.rows.find((row) => own(row) && segments.includes(row.model)) ??
+    (otherDrivers && !UNROUTED_DRIVERS.has(driver)
+      ? table.rows.find((row) => isTierRow(row) && segments.includes(row.model))
+      : undefined)
+  );
+}
+
+type ProviderModel = Pick<ServerProvider["models"][number], "slug" | "aliases">;
+
+const tierRowFor = (table: RoutingTable, driver: string, model: ProviderModel) =>
+  modelRow(table, driver, [model.slug, ...(model.aliases ?? [])], true);
+
 /** Every Auto launch has someone waiting on it, so background-only rows are no candidates yet. */
 const isCandidateRow = (row: RoutingTable["rows"][number]) =>
   isTierRow(row) && row.backgroundOnly !== true;
@@ -666,13 +698,15 @@ export function chooseAutoModel(input: {
   const currentProvider = input.providers.find(
     (provider) => provider.instanceId === current.instanceId,
   );
-  const currentSlug =
+  const currentModel =
+    currentProvider === undefined ? undefined : findModel(currentProvider, current.model);
+  const currentSlug = currentModel?.slug ?? current.model;
+  const currentLookup =
     currentProvider === undefined
-      ? current.model
-      : (findModel(currentProvider, current.model)?.slug ?? current.model);
-  const currentRow = input.table.rows.find(
-    (row) => isTierRow(row) && row.driver === currentProvider?.driver && row.model === currentSlug,
-  );
+      ? undefined
+      : tierRowFor(input.table, currentProvider.driver, currentModel ?? { slug: current.model });
+  const currentRow =
+    currentLookup !== undefined && isTierRow(currentLookup) ? currentLookup : undefined;
   const currentTier = currentRow?.tierByClass?.[input.taskClass] ?? null;
   const skippedByReason: Partial<Record<AutoModelSkipReason, number>> = {};
   let skipped = 0;
@@ -707,9 +741,11 @@ export function chooseAutoModel(input: {
     const tier = row.tierByClass?.[input.taskClass];
     if (!isCandidateRow(row) || tier === undefined || row.relativeCost === undefined) continue;
     for (const provider of input.providers) {
-      if (provider.driver !== row.driver) continue;
       if (input.scope === "instance" && provider.instanceId !== current.instanceId) continue;
-      const model = findModel(provider, row.model);
+      const resolves = (candidate: ProviderModel) =>
+        tierRowFor(input.table, provider.driver, candidate) === row;
+      const exact = findModel(provider, row.model);
+      const model = exact !== undefined && resolves(exact) ? exact : provider.models.find(resolves);
       if (model === undefined) continue;
       const isCurrent = provider.instanceId === current.instanceId && model.slug === currentSlug;
       if (input.scope === "provider" && provider.instanceId === current.instanceId && !isCurrent) {
