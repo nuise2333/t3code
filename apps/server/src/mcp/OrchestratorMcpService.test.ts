@@ -3600,10 +3600,10 @@ describe("OrchestratorMcpService provider resolution", () => {
       allowModelSwitch: provider,
       allowProviderSwitch: provider,
     });
-    const sonnetMedium = {
+    const sonnetHigh = {
       instanceId: claudeInstanceId,
       model: "claude-sonnet-5-5",
-      options: [{ id: "effort", value: "medium" }],
+      options: [{ id: "effort", value: "high" }],
     };
 
     it.effect.each<{
@@ -3635,37 +3635,37 @@ describe("OrchestratorMcpService provider resolution", () => {
         modelSelection: sol("xhigh"),
       },
       {
-        name: "review moves to another vendor at medium",
+        name: "review moves to another vendor at high",
         autoRouting: auto(true),
         parentEffort: "xhigh",
         input: { role: "review" },
-        modelSelection: sonnetMedium,
-        routing: { role: "review", effort: "medium", switched: "provider" },
+        modelSelection: sonnetHigh,
+        routing: { role: "review", effort: "high", switched: "provider" },
       },
       {
-        name: "review in place raises low to medium",
+        name: "review in place raises low to high",
         autoRouting: auto(false),
         parentEffort: "low",
-        input: { role: "review" },
-        modelSelection: sol("medium"),
-        routing: { role: "review", effort: "medium", switched: "provider" },
-      },
-      {
-        name: "review in place raises low to medium, not to the model's readonly effort",
-        autoRouting: auto(false),
-        parentEffort: "low",
-        parentModel: "gpt-6-luna",
-        input: { role: "review" },
-        modelSelection: sol("medium", "gpt-6-luna"),
-        routing: { role: "review", effort: "medium", switched: "provider" },
-      },
-      {
-        name: "review in place keeps high",
-        autoRouting: auto(false),
-        parentEffort: "high",
         input: { role: "review" },
         modelSelection: sol("high"),
-        routing: { role: "review", effort: "medium", switched: "provider" },
+        routing: { role: "review", effort: "high", switched: "provider" },
+      },
+      {
+        name: "review in place raises medium to high",
+        autoRouting: auto(false),
+        parentEffort: "medium",
+        parentModel: "gpt-6-luna",
+        input: { role: "review" },
+        modelSelection: sol("high", "gpt-6-luna"),
+        routing: { role: "review", effort: "high", switched: "provider" },
+      },
+      {
+        name: "review in place keeps xhigh",
+        autoRouting: auto(false),
+        parentEffort: "xhigh",
+        input: { role: "review" },
+        modelSelection: sol("xhigh"),
+        routing: { role: "review", effort: "high", switched: "provider" },
       },
       {
         name: "research runs at the readonly effort",

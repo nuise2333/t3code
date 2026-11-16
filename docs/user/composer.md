@@ -151,8 +151,8 @@ picked and the provider account that pays for it; with switching off, it shows
 what Auto would have picked.
 
 With Auto effort on, a subtask an agent delegates as a review prefers a model
-from another vendor at Medium effort or higher; with provider switching off it
-stays on the current model and is raised to at least Medium. A research subtask
+from another vendor at High effort; with provider switching off it stays on the
+current model and is raised to at least High. A research subtask
 may run on a cheaper model or level. Other subtasks, and any the agent names a
 model for, keep their model. This applies only to subtasks run on this machine.
 

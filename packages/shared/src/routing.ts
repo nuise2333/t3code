@@ -203,8 +203,6 @@ export function routeFor(input: {
   readonly taskClass?: RoutingTaskClass | undefined;
   /** The lowest level to pick; a missing level then rises, still never past high. */
   readonly minEffort?: RoutingEffort | undefined;
-  /** Targets minEffort itself, ignoring the class effort. */
-  readonly exactMinEffort?: boolean | undefined;
 }): { readonly selection: ModelSelection; readonly decision: RouteDecision } {
   const { table, selection } = input;
   const classified =
@@ -239,8 +237,7 @@ export function routeFor(input: {
   const row = exactRow ?? rows.find((row) => row.model === "*");
   if (row === undefined) return unchanged("no_row");
 
-  const rowEffort =
-    input.exactMinEffort === true ? undefined : row.effortByClass?.[classified.taskClass];
+  const rowEffort = row.effortByClass?.[classified.taskClass];
   const classTarget = rowEffort ?? table.defaultEffortByClass[classified.taskClass];
   const descriptor = input.descriptors?.find(isReasoningSelect);
   if (descriptor === undefined) return unchanged("no_effort_control");
@@ -262,8 +259,7 @@ export function routeFor(input: {
   const minEffort = input.minEffort;
   const target =
     minEffort !== undefined &&
-    (input.exactMinEffort === true ||
-      EFFORT_LADDER.indexOf(minEffort) > EFFORT_LADDER.indexOf(signalTarget))
+    EFFORT_LADDER.indexOf(minEffort) > EFFORT_LADDER.indexOf(signalTarget)
       ? minEffort
       : signalTarget;
   const effort =

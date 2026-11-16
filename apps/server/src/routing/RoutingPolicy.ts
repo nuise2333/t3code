@@ -39,7 +39,7 @@ import * as ServerSettings from "../serverSettings.ts";
 
 const CLAUDE = ProviderDriverKind.make("claudeAgent");
 
-const BELOW_MEDIUM: ReadonlySet<string> = new Set(["none", "off", "minimal", "low"]);
+const BELOW_HIGH: ReadonlySet<string> = new Set(["none", "off", "minimal", "low", "medium"]);
 
 const vendorOf = (providers: ReadonlyArray<ServerProvider>, selection: ModelSelection) => {
   const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
@@ -160,7 +160,6 @@ const make = Effect.gen(function* () {
       readonly keepExplicitEffort: boolean;
       readonly taskClass?: RoutingTaskClass | undefined;
       readonly minEffort?: RoutingEffort | undefined;
-      readonly exactMinEffort?: boolean | undefined;
     }) {
       const providers = yield* providerRegistry.getProviders;
       const provider = providers.find(
@@ -217,7 +216,6 @@ const make = Effect.gen(function* () {
         apply: input.apply,
         taskClass: input.taskClass,
         minEffort: input.minEffort,
-        exactMinEffort: input.exactMinEffort,
       });
     },
     Effect.catchCause((cause) =>
@@ -378,17 +376,16 @@ const make = Effect.gen(function* () {
           ? {}
           : {
               taskClass: classified.taskClass,
-              minEffort: review === undefined ? undefined : "medium",
-              exactMinEffort: review !== undefined && !switching,
+              minEffort: review === undefined ? undefined : "high",
             }),
       });
       const role = delegation === undefined ? {} : { role: delegation.role };
-      // A review on the parent's own model only lifts an effort below medium, never lowers one.
+      // A review on the parent's own model only lifts an effort below high, never lowers one.
       const keepsEffort =
         review !== undefined &&
         !switching &&
         routed?.decision.baseline !== undefined &&
-        !BELOW_MEDIUM.has(routed.decision.baseline);
+        !BELOW_HIGH.has(routed.decision.baseline);
       if (routed !== null) {
         return {
           selection: keepsEffort ? selection : routed.selection,
