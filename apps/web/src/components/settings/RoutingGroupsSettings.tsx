@@ -145,7 +145,7 @@ export function RoutingGroupsSettings({
                           group,
                           note:
                             skipped.length > 0
-                              ? `${preset.description} Left out, as none of your providers offer it: ${skipped.join(", ")}.`
+                              ? `${preset.description} Left out, as none of your ready providers offer it right now: ${skipped.join(", ")}.`
                               : preset.description,
                         });
                       }}

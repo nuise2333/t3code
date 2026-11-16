@@ -110,7 +110,9 @@ describe("resolveRoutingGroupPreset", () => {
       source("codex", "codex", ["gpt-6.1-sol"]),
     ]);
     expect(resolved.group).toBeNull();
-    expect(resolved.disabledReason).toBe("None of your providers offer Opus 5.5, GPT-6 Astra");
+    expect(resolved.disabledReason).toBe(
+      "None of your ready providers offer Opus 5.5, GPT-6 Astra",
+    );
   });
 
   it.each([

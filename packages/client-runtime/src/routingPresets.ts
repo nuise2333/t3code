@@ -182,7 +182,7 @@ export function resolveRoutingGroupPreset(
       preset,
       group: null,
       skipped,
-      disabledReason: `None of your providers offer ${preset.members.map((member) => member.label).join(", ")}`,
+      disabledReason: `None of your ready providers offer ${preset.members.map((member) => member.label).join(", ")}`,
     };
   }
   return {
