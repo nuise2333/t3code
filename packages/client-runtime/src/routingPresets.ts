@@ -100,20 +100,22 @@ export const ROUTING_GROUP_PRESETS: ReadonlyArray<RoutingGroupPreset> = [
 ];
 
 /**
- * Whether a provider's model id names this slug: exactly, or as the last segment of a gateway
- * id such as magpie's `auto/<slug>`. User-made `group/...` ids are never one model.
+ * How closely a provider's model id names this slug, lower is closer, null when it doesn't.
+ * Qwen Code reports ids as `<id>(<auth type>)`; gateways prefix them (`auto/<slug>`), and a
+ * `group/<slug>` named exactly after the model ranks last since a user group may mix models.
  */
-export function modelIdMatchesSlug(id: string, slug: string): boolean {
-  if (id === slug) return true;
-  if (!id.includes("/") || id.startsWith("group/")) return false;
-  return id.slice(id.lastIndexOf("/") + 1) === slug;
+export function modelIdMatchRank(id: string, slug: string): number | null {
+  const bare = id.replace(/\([^()]*\)$/, "");
+  if (bare === slug) return 0;
+  if (!bare.includes("/") || bare.slice(bare.lastIndexOf("/") + 1) !== slug) return null;
+  return bare.startsWith("group/") ? 2 : 1;
 }
 
 export interface PresetProviderSource {
   readonly instanceId: ProviderInstanceId;
   readonly driver: string;
   readonly models: ReadonlyArray<
-    Pick<ServerProviderModel, "slug" | "capabilities"> & {
+    Pick<ServerProviderModel, "slug" | "capabilities" | "isDefault"> & {
       readonly aliases?: ReadonlyArray<string> | undefined;
     }
   >;
@@ -141,12 +143,21 @@ function findMember(
 ): ModelSelection | null {
   for (const provider of providers) {
     if (member.driver !== undefined && provider.driver !== member.driver) continue;
-    const ids = (model: SourceModel) => [model.slug, ...(model.aliases ?? [])];
-    const model =
-      provider.models.find((candidate) => ids(candidate).some((id) => member.slugs.includes(id))) ??
-      provider.models.find((candidate) =>
-        ids(candidate).some((id) => member.slugs.some((slug) => modelIdMatchesSlug(id, slug))),
+    const rank = (model: SourceModel) => {
+      const ranks = [model.slug, ...(model.aliases ?? [])].flatMap((id) =>
+        member.slugs.flatMap((slug) => modelIdMatchRank(id, slug) ?? []),
       );
+      return ranks.length === 0 ? null : Math.min(...ranks);
+    };
+    // The instance's own default wins among matches: it is the route its user already chose.
+    const model = provider.models
+      .flatMap((candidate) => {
+        const found = rank(candidate);
+        return found === null
+          ? []
+          : [{ candidate, order: candidate.isDefault === true ? -1 : found }];
+      })
+      .sort((left, right) => left.order - right.order)[0]?.candidate;
     if (model === undefined) continue;
     const options = effortOptions(model, member.effort);
     return options === undefined

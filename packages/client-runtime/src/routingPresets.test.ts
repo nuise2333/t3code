@@ -2,7 +2,7 @@ import { ProviderInstanceId, type ProviderOptionDescriptor } from "@t3tools/cont
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  modelIdMatchesSlug,
+  modelIdMatchRank,
   type PresetProviderSource,
   resolveRoutingGroupPreset,
   ROUTING_GROUP_PRESETS,
@@ -19,7 +19,9 @@ const effort = (levels: ReadonlyArray<string>): ProviderOptionDescriptor => ({
 const source = (
   instanceId: string,
   driver: string,
-  models: ReadonlyArray<string | { slug: string; levels?: ReadonlyArray<string> }>,
+  models: ReadonlyArray<
+    string | { slug: string; levels?: ReadonlyArray<string>; isDefault?: true }
+  >,
 ): PresetProviderSource => ({
   instanceId: ProviderInstanceId.make(instanceId),
   driver,
@@ -27,6 +29,7 @@ const source = (
     const entry = typeof model === "string" ? { slug: model } : model;
     return {
       slug: entry.slug,
+      ...("isDefault" in entry ? { isDefault: entry.isDefault } : {}),
       capabilities: entry.levels ? { optionDescriptors: [effort(entry.levels)] } : null,
     };
   }),
@@ -38,16 +41,17 @@ const preset = (id: string): RoutingGroupPreset => {
   return found;
 };
 
-describe("modelIdMatchesSlug", () => {
+describe("modelIdMatchRank", () => {
   it.each([
-    ["gpt-6-astra", "gpt-6-astra", true],
-    ["auto/gpt-6-astra", "gpt-6-astra", true],
-    ["bailian-token-plan/qwen4-max", "qwen4-max", true],
-    ["group/gpt-6-astra-high", "gpt-6-astra", false],
-    ["group/gpt-6-astra", "gpt-6-astra", false],
-    ["gpt-6-astra-mini", "gpt-6-astra", false],
-  ])("%s names %s: %s", (id, slug, expected) => {
-    expect(modelIdMatchesSlug(id, slug)).toBe(expected);
+    ["gpt-6-astra", "gpt-6-astra", 0],
+    ["qwen4-max(openai)", "qwen4-max", 0],
+    ["auto/gpt-6-astra", "gpt-6-astra", 1],
+    ["bailian-token-plan/qwen4-max", "qwen4-max", 1],
+    ["group/qwen4-max(openai)", "qwen4-max", 2],
+    ["group/gpt-6-astra-high", "gpt-6-astra", null],
+    ["gpt-6-astra-mini", "gpt-6-astra", null],
+  ])("%s names %s at %s", (id, slug, expected) => {
+    expect(modelIdMatchRank(id, slug)).toBe(expected);
   });
 });
 
@@ -85,6 +89,25 @@ describe("resolveRoutingGroupPreset", () => {
       ],
       members: ["work:gpt-6-luna"],
       skipped: ["DeepSeek V4.1 Flash", "Haiku 5.5"],
+    },
+    {
+      name: "Qwen Code ids, preferring the instance's default route",
+      preset: "office-knowledge",
+      providers: [
+        source("qwen", "acpRegistry", [
+          "qwen4-max(openai)",
+          { slug: "group/qwen4-max(openai)", isDefault: true },
+        ]),
+      ],
+      members: ["qwen:group/qwen4-max(openai)"],
+      skipped: ["Opus 5.5", "GPT-6.1 Sol"],
+    },
+    {
+      name: "an exact id before a group named after the model",
+      preset: "office-knowledge",
+      providers: [source("qwen", "acpRegistry", ["group/qwen4-max(openai)", "qwen4-max(openai)"])],
+      members: ["qwen:qwen4-max(openai)"],
+      skipped: ["Opus 5.5", "GPT-6.1 Sol"],
     },
     {
       name: "a member restricted to its driver",
