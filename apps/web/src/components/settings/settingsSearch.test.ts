@@ -229,6 +229,7 @@ describe("searchSettings", () => {
       ["Auto can switch provider", "auto-provider-switch-beta"],
       ["model group", "routing-groups"],
       ["failover", "routing-groups"],
+      ["group preset", "routing-groups"],
     ] as const) {
       expect(searchSettings(title)[0]?.id, title).toBe(id);
     }

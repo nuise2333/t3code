@@ -185,6 +185,11 @@ thread starts; later turns stay on that model, and the thread names the group an
 any model it skipped. If no model qualifies, the thread does not start and the
 error lists why each one was skipped.
 
+**Add from preset** starts a group for Chinese writing, batch translation, video,
+research, or office work from reviewers' picks, using the models your providers
+offer. It is an ordinary group: nothing uses it until you pick it, and you can
+edit or delete it like any other.
+
 With Auto effort on, a group can also be chosen by the kind of first message:
 set **Auto rules** under the groups, and a new thread left on Auto starts through
 that kind's group instead of only picking an effort.

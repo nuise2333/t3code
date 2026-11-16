@@ -16,6 +16,10 @@ import {
   rulesUsingRoutingGroup,
   withRoutingGroupRule,
 } from "@t3tools/client-runtime/routing";
+import {
+  resolveRoutingGroupPreset,
+  ROUTING_GROUP_PRESETS,
+} from "@t3tools/client-runtime/routing-presets";
 import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { ArrowDownIcon, ArrowUpIcon, MoreVertical, PlusIcon, XIcon } from "lucide-react";
@@ -48,7 +52,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuItemDetail, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { searchableSetting } from "./settingsSearch";
 import { SETTINGS_PICKER_TRIGGER_CLASSNAME, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -61,7 +65,12 @@ const RANK_LABELS: Record<RoutingGroupRank, string> = {
   quota: "Most quota left",
 };
 
-type Editing = { readonly index: number | null; readonly group: RoutingGroup };
+type Editing = {
+  readonly index: number | null;
+  readonly group: RoutingGroup;
+  /** A preset's description and the members none of the providers offer. */
+  readonly note?: string;
+};
 
 /**
  * Ordered model lists a new thread can launch through, and the task classes that use one when a
@@ -99,6 +108,16 @@ export function RoutingGroupsSettings({
           "",
       )
     : null;
+  const presets = ROUTING_GROUP_PRESETS.map((preset) =>
+    resolveRoutingGroupPreset(
+      preset,
+      entries.filter(isProviderInstancePickerReady).map((entry) => ({
+        instanceId: entry.instanceId,
+        driver: entry.driverKind,
+        models: entry.models,
+      })),
+    ),
+  );
   const saveGroups = (next: ReadonlyArray<RoutingGroup>) => updateSettings({ routingGroups: next });
   const deletingRules = deleting ? rulesUsingRoutingGroup(rules, deleting.id) : [];
 
@@ -108,19 +127,49 @@ export function RoutingGroupsSettings({
         {...searchableSetting("routing-groups")}
         headerAction={
           !readOnly && seedMember && groups.length < MAX_ROUTING_GROUPS ? (
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() =>
-                setEditing({
-                  index: null,
-                  group: { id: "", name: "", strategy: "order", members: [seedMember] },
-                })
-              }
-            >
-              <PlusIcon className="size-3" aria-hidden />
-              Add group
-            </Button>
+            <div className="flex items-center gap-2">
+              <Menu>
+                <MenuTrigger render={<Button size="xs" variant="outline" />}>
+                  Add from preset
+                </MenuTrigger>
+                <MenuPopup align="end">
+                  {presets.map(({ preset, group, skipped, disabledReason }) => (
+                    <MenuItem
+                      key={preset.id}
+                      disabled={group === null}
+                      title={preset.description}
+                      onClick={() => {
+                        if (group === null) return;
+                        setEditing({
+                          index: null,
+                          group,
+                          note:
+                            skipped.length > 0
+                              ? `${preset.description} Left out, as none of your providers offer it: ${skipped.join(", ")}.`
+                              : preset.description,
+                        });
+                      }}
+                    >
+                      {preset.name}
+                      {disabledReason ? <MenuItemDetail>No models set up</MenuItemDetail> : null}
+                    </MenuItem>
+                  ))}
+                </MenuPopup>
+              </Menu>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() =>
+                  setEditing({
+                    index: null,
+                    group: { id: "", name: "", strategy: "order", members: [seedMember] },
+                  })
+                }
+              >
+                <PlusIcon className="size-3" aria-hidden />
+                Add group
+              </Button>
+            </div>
           ) : null
         }
       >
@@ -366,6 +415,9 @@ function RoutingGroupDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
+          {editing.note ? (
+            <p className="mb-4 text-muted-foreground text-sm">{editing.note}</p>
+          ) : null}
           <form
             id={formId}
             className="grid gap-4"
