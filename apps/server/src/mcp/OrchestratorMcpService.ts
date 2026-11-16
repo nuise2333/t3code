@@ -138,7 +138,7 @@ import {
   taskPrompt,
 } from "./delegatedTaskModes.ts";
 import {
-  assertReviewDelegationLeft,
+  withReviewDelegationLeft,
   assertReviewRoundLeft,
   assertTargetWithinLimits,
   isLiveCallerShell,
@@ -2681,9 +2681,6 @@ const make = Effect.gen(function* () {
         operation: "delegate-task",
       });
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
-      if (input.role === "review" && !isRetryOfAcceptedDelegation) {
-        yield* assertReviewDelegationLeft(threadManagement, scope.thread.threadId);
-      }
       const target =
         groupId === undefined
           ? yield* resolveTargetRechecking({
@@ -2767,7 +2764,7 @@ const make = Effect.gen(function* () {
       // ThreadManagementService.dispatch is the chokepoint for this command
       // type's own enablement check, using the same command id and its
       // receipt-replay exemption, so no separate assert runs here.
-      const result = yield* threadManagement
+      const dispatchTask = threadManagement
         .dispatch({
           type: "delegated_task.request",
           createdBy: "agent",
@@ -2799,6 +2796,12 @@ const make = Effect.gen(function* () {
                 ),
           ),
         );
+      const result = yield* withReviewDelegationLeft(
+        threadManagement,
+        scope.thread.threadId,
+        input.role === "review" && !isRetryOfAcceptedDelegation,
+        dispatchTask,
+      );
       const taskEvent = result.storedEvents.find(
         (stored) =>
           stored.event.type === "subagent.updated" && stored.event.payload.origin === "app_owned",

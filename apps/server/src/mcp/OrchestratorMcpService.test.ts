@@ -3839,6 +3839,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       readonly prior: ReadonlyArray<Prior>;
       readonly role?: OrchestratorMcpDelegateTaskInput["role"];
       readonly replay?: boolean;
+      readonly parallel?: boolean;
       readonly refused?: boolean;
     }>([
       { name: "a first review goes out", prior: [] },
@@ -3873,6 +3874,12 @@ describe("OrchestratorMcpService provider resolution", () => {
         prior: ["review", "review", "review"],
         replay: true,
       },
+      {
+        name: "parallel reviews cannot all take the last round",
+        prior: ["review", "review"],
+        parallel: true,
+        refused: true,
+      },
     ])("$name", (row) =>
       Effect.gen(function* () {
         const dispatched = yield* Ref.make(0);
@@ -3893,9 +3900,8 @@ describe("OrchestratorMcpService provider resolution", () => {
                 startedAt: at(index),
                 updatedAt: at(index),
               };
-        const records = row.prior.map(record);
-        const isMessage = (index: number) =>
-          row.prior[index] === "user" || row.prior[index] === "agent";
+        const records = yield* Ref.make(row.prior.map(record));
+        const isMessage = (entry: ReturnType<typeof record>) => "createdBy" in entry;
         const task = {
           id: taskId,
           threadId: parentThreadId,
@@ -3926,17 +3932,24 @@ describe("OrchestratorMcpService provider resolution", () => {
                 assertProviderInstanceEnabled: () => Effect.void,
                 isProviderInstanceEnabledForProject: () => Effect.succeed(true),
                 getThreadRecords: (threadId) =>
-                  Effect.succeed(
-                    threadId === parentThreadId
-                      ? parentProjection(
-                          [...records.filter((_, index) => !isMessage(index)), task],
-                          parent,
-                          records.filter((_, index) => isMessage(index)),
-                        )
-                      : childProjection,
+                  Ref.get(records).pipe(
+                    Effect.map((entries) =>
+                      threadId === parentThreadId
+                        ? parentProjection(
+                            [...entries.filter((entry) => !isMessage(entry)), task],
+                            parent,
+                            entries.filter(isMessage),
+                          )
+                        : childProjection,
+                    ),
                   ),
+                // Yields before recording so a parallel call would read the old count.
                 dispatch: () =>
-                  Ref.update(dispatched, (count) => count + 1).pipe(
+                  Effect.yieldNow.pipe(
+                    Effect.andThen(Ref.update(dispatched, (count) => count + 1)),
+                    Effect.andThen(
+                      Ref.update(records, (entries) => [...entries, record("review", 30)]),
+                    ),
                     Effect.as({
                       sequence: 1,
                       storedEvents: [
@@ -3960,19 +3973,28 @@ describe("OrchestratorMcpService provider resolution", () => {
           ),
         );
 
-        const result = yield* Effect.gen(function* () {
+        const results = yield* Effect.gen(function* () {
           const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-          return yield* service
-            .delegateTask(scope, {
-              task: "Look over the fixes.",
-              clientRequestId: "review-again",
-              role: row.role ?? "review",
-            })
-            .pipe(Effect.flip, Effect.option);
+          const call = (clientRequestId: string) =>
+            service
+              .delegateTask(scope, {
+                task: "Look over the fixes.",
+                clientRequestId,
+                role: row.role ?? "review",
+              })
+              .pipe(Effect.flip, Effect.option);
+          return yield* Effect.all(
+            row.parallel === true
+              ? [call("review-again"), call("review-too")]
+              : [call("review-again")],
+            { concurrency: "unbounded" },
+          );
         }).pipe(Effect.provide(layer));
-        assert.equal(yield* Ref.get(dispatched), row.refused === true ? 0 : 1);
-        if (row.refused !== true) return assert.isTrue(Option.isNone(result));
-        const error = Option.getOrThrow(result);
+        const refusals = results.filter(Option.isSome);
+        assert.equal(yield* Ref.get(dispatched), results.length - refusals.length);
+        assert.equal(refusals.length, row.refused === true ? 1 : 0);
+        if (row.refused !== true) return;
+        const error = Option.getOrThrow(refusals[0]!);
         assert.equal(error.code, "invalid_request");
         assert.include(error.message, "Give the user the remaining findings");
       }),

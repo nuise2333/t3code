@@ -15,6 +15,7 @@ import {
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Semaphore from "effect/Semaphore";
 
 import type { OrchestratorV2Error } from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -170,44 +171,80 @@ export const assertReviewRoundLeft = (
     : Effect.void;
 };
 
-/** Review delegations from one thread count until the user writes there again; callers skip replays. */
-export const assertReviewDelegationLeft = Effect.fn(
-  "OrchestratorMcpService.assertReviewDelegationLeft",
-)(function* (
+/** Review delegations from one thread count until the user writes there again. */
+const assertReviewDelegationLeft = Effect.fn("OrchestratorMcpService.assertReviewDelegationLeft")(
+  function* (
+    threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadRecords">,
+    parentThreadId: ThreadId,
+  ) {
+    const { messages, subagents } = yield* threads
+      .getThreadRecords(parentThreadId, ["messages", "subagents"], { messageRoles: ["user"] })
+      .pipe(
+        Effect.mapError(
+          () =>
+            new OrchestratorMcpFailure({
+              code: "orchestration_error",
+              message: `Unable to read thread ${parentThreadId}.`,
+            }),
+        ),
+      );
+    const lastReply = messages.reduce(
+      (latest, message) =>
+        message.createdBy === "user"
+          ? Math.max(latest, DateTime.toEpochMillis(message.createdAt))
+          : latest,
+      Number.NEGATIVE_INFINITY,
+    );
+    const rounds = subagents.filter(
+      (task) =>
+        task.origin === "app_owned" &&
+        task.delegatedRole === "review" &&
+        DateTime.toEpochMillis(task.startedAt ?? task.updatedAt) > lastReply,
+    );
+    if (rounds.length >= MAX_REVIEW_ROUNDS) {
+      return yield* new OrchestratorMcpFailure({
+        code: "invalid_request",
+        message: `This review has had its ${MAX_REVIEW_ROUNDS} rounds since the user last replied. Give the user the remaining findings instead of reviewing again.`,
+      });
+    }
+  },
+);
+
+const reviewDelegationGates = new Map<ThreadId, { gate: Semaphore.Semaphore; users: number }>();
+
+/**
+ * Runs `record` only if the parent has a review round left, holding that parent's gate until it
+ * returns so parallel review delegations cannot all read the same count. `counted` is false for
+ * other roles and for replays of an accepted delegation.
+ */
+export const withReviewDelegationLeft = <A, E, R>(
   threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadRecords">,
   parentThreadId: ThreadId,
-) {
-  const { messages, subagents } = yield* threads
-    .getThreadRecords(parentThreadId, ["messages", "subagents"], { messageRoles: ["user"] })
-    .pipe(
-      Effect.mapError(
-        () =>
-          new OrchestratorMcpFailure({
-            code: "orchestration_error",
-            message: `Unable to read thread ${parentThreadId}.`,
-          }),
-      ),
-    );
-  const lastReply = messages.reduce(
-    (latest, message) =>
-      message.createdBy === "user"
-        ? Math.max(latest, DateTime.toEpochMillis(message.createdAt))
-        : latest,
-    Number.NEGATIVE_INFINITY,
-  );
-  const rounds = subagents.filter(
-    (task) =>
-      task.origin === "app_owned" &&
-      task.delegatedRole === "review" &&
-      DateTime.toEpochMillis(task.startedAt ?? task.updatedAt) > lastReply,
-  );
-  if (rounds.length >= MAX_REVIEW_ROUNDS) {
-    return yield* new OrchestratorMcpFailure({
-      code: "invalid_request",
-      message: `This review has had its ${MAX_REVIEW_ROUNDS} rounds since the user last replied. Give the user the remaining findings instead of reviewing again.`,
-    });
-  }
-});
+  counted: boolean,
+  record: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | OrchestratorMcpFailure, R> =>
+  counted
+    ? Effect.suspend(() => {
+        const held = reviewDelegationGates.get(parentThreadId) ?? {
+          gate: Semaphore.makeUnsafe(1),
+          users: 0,
+        };
+        reviewDelegationGates.set(parentThreadId, held);
+        held.users++;
+        return held.gate
+          .withPermit(
+            assertReviewDelegationLeft(threads, parentThreadId).pipe(Effect.andThen(record)),
+          )
+          .pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                held.users--;
+                if (held.users === 0) reviewDelegationGates.delete(parentThreadId);
+              }),
+            ),
+          );
+      })
+    : record;
 
 export const assertTargetWithinLimits = (
   limits: CallerLimits,
