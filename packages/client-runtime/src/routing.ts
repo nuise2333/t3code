@@ -469,12 +469,17 @@ interface RoutingGroupProblems {
   readonly missingRuleGroups: ReadonlyArray<RoutingTaskClass>;
   /** Member indexes, by group id, whose provider instance no longer exists. */
   readonly missingMembers: ReadonlyMap<string, ReadonlyArray<number>>;
+  /** Plan threads count as large changes, and no member of that rule's group has plan mode. */
+  readonly planlessHardRule: boolean;
 }
 
 export function routingGroupProblems(input: {
   readonly groups: ReadonlyArray<RoutingGroup>;
   readonly rules: RoutingGroupRules;
-  readonly providers: ReadonlyArray<{ readonly instanceId: ProviderInstanceId }>;
+  readonly providers: ReadonlyArray<{
+    readonly instanceId: ProviderInstanceId;
+    readonly showInteractionModeToggle?: boolean | undefined;
+  }>;
 }): RoutingGroupProblems {
   const groupIds = new Set(input.groups.map((group) => group.id));
   const instanceIds = new Set(input.providers.map((provider) => provider.instanceId));
@@ -485,12 +490,19 @@ export function routingGroupProblems(input: {
     );
     if (missing.length > 0) missingMembers.set(group.id, missing);
   }
+  const hardGroup = input.groups.find((group) => group.id === input.rules.hard);
   return {
     missingRuleGroups: ROUTING_TASK_CLASSES.filter((taskClass) => {
       const groupId = input.rules[taskClass];
       return groupId !== undefined && !groupIds.has(groupId);
     }),
     missingMembers,
+    planlessHardRule:
+      hardGroup !== undefined &&
+      hardGroup.members.every((member) => {
+        const provider = input.providers.find((entry) => entry.instanceId === member.instanceId);
+        return provider !== undefined && provider.showInteractionModeToggle !== true;
+      }),
   };
 }
 

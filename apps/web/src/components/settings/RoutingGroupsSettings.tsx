@@ -260,7 +260,9 @@ export function RoutingGroupsSettings({
                   description={
                     isMissing
                       ? "This group no longer exists, so a matching launch fails until you clear or change it."
-                      : "When a new thread asks for Auto effort and its first message is this kind of task, it starts through this group."
+                      : taskClass === "hard" && problems.planlessHardRule
+                        ? "Plan threads count as large changes, and no model in this group has plan mode, so a plan thread sent here fails to start. Add a member that has it."
+                        : "When a new thread asks for Auto effort and its first message is this kind of task, it starts through this group."
                   }
                   control={
                     <div className="flex items-center gap-2">

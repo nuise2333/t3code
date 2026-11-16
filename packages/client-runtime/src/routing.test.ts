@@ -182,6 +182,20 @@ describe("routing groups", () => {
     expect([...problems.missingMembers]).toStrictEqual([["fast", [0]]]);
   });
 
+  it("flags a large-change rule whose group has no member with plan mode", () => {
+    const planless = (showInteractionModeToggle: boolean) =>
+      routingGroupProblems({
+        groups: [group],
+        rules: { hard: "fast" },
+        providers: group.members.map((member) => ({
+          instanceId: member.instanceId,
+          showInteractionModeToggle,
+        })),
+      }).planlessHardRule;
+    expect(planless(false)).toBe(true);
+    expect(planless(true)).toBe(false);
+  });
+
   it("makes a unique id from a name", () => {
     expect(newRoutingGroupId("Cheap & Fast!", [])).toBe("cheap-fast");
     expect(newRoutingGroupId("Cheap fast", ["cheap-fast", "cheap-fast-2"])).toBe("cheap-fast-3");
