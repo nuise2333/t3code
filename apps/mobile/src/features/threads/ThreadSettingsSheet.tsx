@@ -9,6 +9,8 @@ import {
   type RoutedGroupDisplay,
   routedEffortDisplay,
   routedGroupDisplay,
+  routedModelDisplay,
+  subscriptionLabel,
 } from "@t3tools/client-runtime/routing";
 import * as Dialog from "../../components/ui/Dialog";
 import { createV5StackNavigator as createNativeStackNavigator } from "../../native/createV5StackNavigator";
@@ -288,6 +290,8 @@ type ThreadSettingsSessionProps = {
   readonly onSelectRoutingGroup?: (groupId: string) => void;
   /** The group a launched thread started through, with its skipped members. */
   readonly routedGroup?: RoutedGroupDisplay | null;
+  /** The model and account Auto picked at launch, or would have with switching on. */
+  readonly routedModel?: string | null;
   readonly environmentId: EnvironmentId | null;
   readonly projectId: ProjectId | null;
   readonly cwd: string | null;
@@ -320,6 +324,7 @@ type ThreadSettingsSessionValue = {
   readonly selectedRoutingGroupId: string | null;
   readonly pressRoutingGroup: (groupId: string) => void;
   readonly routedGroup: RoutedGroupDisplay | null;
+  readonly routedModel: string | null;
   readonly environmentId: EnvironmentId | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
@@ -656,6 +661,7 @@ function ThreadSettingsSessionProvider(
     selectedRoutingGroupId,
     pressRoutingGroup,
     routedGroup: props.routedGroup ?? null,
+    routedModel: props.routedModel ?? null,
     environmentId,
     providerInstanceId: props.providerInstanceId,
     providerGroups,
@@ -953,6 +959,9 @@ function ThreadSettingsOptionsItem(props: {
             <Text className="text-sm text-foreground-muted">{session.routedGroup.skipped}</Text>
           ) : null}
         </View>
+      ) : null}
+      {session.routedModel ? (
+        <Text className="px-5 pb-2 pt-2 text-sm text-foreground">{session.routedModel}</Text>
       ) : null}
       {session.selectedRoutingGroupId !== null ? (
         <Text className="px-5 pb-2 pt-2 text-sm text-foreground-muted">
@@ -1579,6 +1588,14 @@ export function ExistingThreadSettingsRouteScreen({
     selection: modelSelection,
     providers: serverConfig?.providers ?? [],
   });
+  const routedModel = routedModelDisplay({
+    routing: structure?.projection.thread.routing,
+    selection: modelSelection,
+    providers: (serverConfig?.providers ?? []).map((provider) => ({
+      ...provider,
+      subscription: subscriptionLabel(provider),
+    })),
+  });
 
   return (
     <ThreadSettingsPickerScreen
@@ -1611,6 +1628,7 @@ export function ExistingThreadSettingsRouteScreen({
       }}
       effortRouting={routedEffort ? { kind: "routed", display: routedEffort } : null}
       routedGroup={routedGroup}
+      routedModel={routedModel}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
       onClose={() => navigation.goBack()}

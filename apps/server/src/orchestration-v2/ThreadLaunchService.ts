@@ -1255,6 +1255,10 @@ const make = Effect.gen(function* () {
                 interactionMode: input.interactionMode,
                 runtimeMode: input.runtimeMode,
                 projectId: input.projectId,
+                hasImage:
+                  input.initialMessage?.attachments.some(
+                    (attachment) => attachment.type === "image",
+                  ) === true,
                 requested: input.routing,
               })
             : null;

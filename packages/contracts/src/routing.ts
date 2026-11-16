@@ -46,13 +46,23 @@ const PartialEffortByClass = Schema.Struct({
 export const RoutingTier = Schema.Literals(["S", "A", "B", "C"]);
 export type RoutingTier = typeof RoutingTier.Type;
 
+const PartialTierByClass = Schema.Struct({
+  readonly: Schema.optionalKey(RoutingTier),
+  quick_edit: Schema.optionalKey(RoutingTier),
+  implement: Schema.optionalKey(RoutingTier),
+  hard: Schema.optionalKey(RoutingTier),
+});
+
 const RoutingTableRow = Schema.Struct({
   driver: ProviderDriverKind,
   /** `*` matches any model of the driver. */
   model: TrimmedNonEmptyString,
   effortByClass: Schema.optionalKey(PartialEffortByClass),
-  tier: Schema.optionalKey(RoutingTier),
-  /** Only verified rows with a tier and an exact model are switch candidates. */
+  /** A class left out has no agreed evidence, so the model is no candidate for it. */
+  tierByClass: Schema.optionalKey(PartialTierByClass),
+  /** Cheaper is lower; each step is about double the cost of a task. */
+  relativeCost: Schema.optionalKey(NonNegativeInt),
+  /** Only verified rows with an exact model, a relative cost and a class's tier are candidates. */
   verified: Schema.optionalKey(Schema.Boolean),
   sourceIds: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
 });
@@ -161,6 +171,8 @@ export const RouteModelDecision = Schema.Struct({
   skipped: NonNegativeInt,
   /** The draft's model, only when the switch was applied. */
   from: Schema.optionalKey(RouteGroupMember),
+  /** Set when a screenshot of UI work kept GPT models out of the candidates. */
+  reason: Schema.optionalKey(Schema.Literal("image_frontend")),
 });
 export type RouteModelDecision = typeof RouteModelDecision.Type;
 

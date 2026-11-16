@@ -3658,7 +3658,7 @@ describe("effort routing", () => {
       ...launchInput({
         command,
         thread: `${command}:thread`,
-        message: "What does the checkout flow do?",
+        message: "Rename checkoutTotal to orderTotal",
       }),
       modelSelection: opus,
       routing: { mode: "auto", model: "auto" },
@@ -3685,11 +3685,15 @@ describe("effort routing", () => {
         };
         assert.deepStrictEqual(thread.modelSelection, haiku);
         assert.deepStrictEqual(run?.modelSelection, haiku);
-        assert.include(thread.routing, { taskClass: "readonly", effort: "medium", applied: true });
+        assert.include(thread.routing, {
+          taskClass: "quick_edit",
+          effort: "medium",
+          applied: true,
+        });
         assert.deepStrictEqual(thread.routing?.model, {
           instanceId: claudeModelSelection.instanceId,
           model: "claude-haiku-5-5",
-          tier: "C",
+          tier: "B",
           switched: "model",
           applied: true,
           skipped: 0,
@@ -3716,10 +3720,43 @@ describe("effort routing", () => {
         assert.deepStrictEqual(thread.routing?.model, {
           instanceId: claudeModelSelection.instanceId,
           model: "claude-haiku-5-5",
-          tier: "C",
+          tier: "B",
           switched: "model",
           applied: false,
           skipped: 0,
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("does not move a screenshot of UI work to a GPT model", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({ provider: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(
+          askLaunch("screenshot-ui", {
+            initialMessage: {
+              messageId: MessageId.make("screenshot-ui:id"),
+              text: "Rename the button in this screenshot to Pay",
+              attachments: [
+                {
+                  type: "image",
+                  id: ChatAttachmentId.make("screenshot-ui-image"),
+                  name: "screen.png",
+                  mimeType: "image/png",
+                  sizeBytes: 4,
+                },
+              ],
+            },
+          }),
+        );
+        assert.equal(thread.modelSelection.model, "claude-opus-5-5");
+        assert.include(thread.routing?.model, {
+          switched: "none",
+          reason: "image_frontend",
+          skipped: 1,
         });
       }).pipe(Effect.provide(harness.layer));
     });
@@ -3740,7 +3777,7 @@ describe("effort routing", () => {
         assert.include(thread.routing?.model, {
           switched: "provider",
           applied: true,
-          tier: "C",
+          tier: "B",
           skipped: 1,
         });
       }).pipe(Effect.provide(harness.layer));
@@ -3803,7 +3840,7 @@ describe("effort routing", () => {
         serverSettings: {
           autoRouting: autoRouting({ model: true, provider: true }),
           routingGroups: [{ id: "ask", name: "Ask", members: [opus], strategy: "order" as const }],
-          routingGroupRules: { readonly: "ask" },
+          routingGroupRules: { quick_edit: "ask" },
         },
       });
       return Effect.gen(function* () {

@@ -293,7 +293,8 @@ describe("resolveRoutingTable", () => {
     const verified = ModelManifest.BUNDLED_ROUTING_TABLE.rows.filter((row) => row.verified);
     assert.isAbove(verified.length, 0);
     for (const row of verified) {
-      assert.isDefined(row.tier, `${row.driver}/${row.model}`);
+      assert.isNotEmpty(Object.keys(row.tierByClass ?? {}), `${row.driver}/${row.model}`);
+      assert.isDefined(row.relativeCost, `${row.driver}/${row.model}`);
       const slugs = ModelManifest.BUNDLED_MODEL_MANIFEST.providers?.[row.driver]?.models.map(
         (model) => model.slug,
       );
@@ -328,8 +329,22 @@ describe("resolveRoutingTable", () => {
       routing: {
         ...remoteRouting,
         rows: [
-          { driver: "codex", model: "gpt-x", tier: "SS", verified: true, sourceIds: ["bench"] },
+          {
+            driver: "codex",
+            model: "gpt-x",
+            tierByClass: { implement: "SS" },
+            relativeCost: 1,
+            verified: true,
+            sourceIds: ["bench"],
+          },
         ],
+      },
+    },
+    {
+      name: "a row with a fractional relative cost",
+      routing: {
+        ...remoteRouting,
+        rows: [{ driver: "codex", model: "gpt-x", relativeCost: 1.5, sourceIds: ["bench"] }],
       },
     },
     {

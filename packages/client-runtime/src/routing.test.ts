@@ -1,4 +1,9 @@
-import { ProviderInstanceId, type RouteDecision, type RoutingGroup } from "@t3tools/contracts";
+import {
+  ProviderInstanceId,
+  type RouteDecision,
+  type RoutingGroup,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -14,6 +19,7 @@ import {
   routedGroupDisplay,
   routedModelDisplay,
   routingGroupProblems,
+  routingProviderSource,
 } from "./routing.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
@@ -224,12 +230,17 @@ describe("routedModelDisplay", () => {
   const providers = [
     {
       instanceId: claude,
+      subscription: "Claude · Max",
       models: [
         { slug: "claude-haiku-5-5", name: "Claude Haiku 5.5", shortName: "Haiku 5.5" },
         { slug: "claude-opus-5-5", name: "Claude Opus 5.5", shortName: "Opus 5.5" },
       ],
     },
-    { instanceId, models: [{ slug: "gpt-6-luna", name: "GPT-6 Luna" }] },
+    {
+      instanceId,
+      subscription: "Codex · ChatGPT Plus",
+      models: [{ slug: "gpt-6-luna", name: "GPT-6 Luna" }],
+    },
   ];
   const decision = (model: Partial<NonNullable<RouteDecision["model"]>>): RouteDecision => ({
     ...routed,
@@ -252,25 +263,28 @@ describe("routedModelDisplay", () => {
     {
       name: "a model switch while the thread keeps it",
       routing: decision({}),
-      summary: "Auto → Haiku 5.5 (Question, no edits), instead of Opus 5.5",
+      summary: "Auto → Haiku 5.5 on Claude · Max (Question, no edits), instead of Opus 5.5",
     },
     {
       name: "a provider switch",
       routing: decision({ instanceId, model: "gpt-6-luna", switched: "provider" }),
       selection: { instanceId, model: "gpt-6-luna" },
-      summary: "Auto → GPT-6 Luna (Question, no edits), instead of Opus 5.5",
+      summary:
+        "Auto → GPT-6 Luna on Codex · ChatGPT Plus (Question, no edits), instead of Opus 5.5",
     },
     {
       name: "a shadow model choice",
       routing: decision({ applied: false }),
       selection: { instanceId: claude, model: "claude-opus-5-5" },
-      summary: "With model switching on, Auto would have used Haiku 5.5 (Question, no edits)",
+      summary:
+        "With model switching on, Auto would have used Haiku 5.5 on Claude · Max (Question, no edits)",
     },
     {
       name: "a shadow provider choice",
       routing: decision({ instanceId, model: "gpt-6-luna", switched: "provider", applied: false }),
       selection: { instanceId: claude, model: "claude-opus-5-5" },
-      summary: "With provider switching on, Auto would have used GPT-6 Luna (Question, no edits)",
+      summary:
+        "With provider switching on, Auto would have used GPT-6 Luna on Codex · ChatGPT Plus (Question, no edits)",
     },
     {
       name: "a manual pick after the switch",
@@ -283,6 +297,32 @@ describe("routedModelDisplay", () => {
   ])("describes $name", ({ routing, selection = haiku, summary }) => {
     expect(routedModelDisplay({ routing, selection, providers })).toBe(summary);
   });
+
+  it.each([
+    {
+      displayName: "Codex",
+      label: "ChatGPT Plus Subscription",
+      subscription: "Codex · ChatGPT Plus",
+    },
+    { displayName: "Codex", label: "dev@example.com", subscription: "Codex" },
+    { displayName: undefined, label: "OpenAI API Key", subscription: "OpenAI API Key" },
+    { displayName: undefined, label: undefined, subscription: undefined },
+  ])(
+    "names the instance that pays: $displayName, $label",
+    ({ displayName, label, subscription }) => {
+      const snapshot = {
+        instanceId,
+        driver: "codex",
+        ...(displayName === undefined ? {} : { displayName }),
+        enabled: true,
+        installed: true,
+        status: "ready",
+        auth: { status: "authenticated", email: "dev@example.com", ...(label ? { label } : {}) },
+        models: [],
+      } as unknown as ServerProvider;
+      expect(routingProviderSource(snapshot, 0).subscription).toBe(subscription);
+    },
+  );
 });
 
 it.each([

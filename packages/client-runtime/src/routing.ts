@@ -180,6 +180,16 @@ interface ModelNameSource {
   }>;
   /** Whether the instance looks able to run this model now; the server decides at launch. */
   readonly runnable?: ((model: string) => boolean) | undefined;
+  /** The instance and plan that pay for a run, such as "Codex · ChatGPT Plus". */
+  readonly subscription?: string | undefined;
+}
+
+export function subscriptionLabel(snapshot: ServerProvider): string | undefined {
+  const plan = snapshot.auth.label?.replace(/\s+subscription$/i, "");
+  const parts = [snapshot.displayName, plan?.includes("@") === true ? undefined : plan].filter(
+    (part): part is string => part !== undefined && part.length > 0,
+  );
+  return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
 /** A provider snapshot as a group member source, with the server's cheap launch checks. */
@@ -195,6 +205,7 @@ export function routingProviderSource(snapshot: ServerProvider, now: number): Mo
     instanceId: snapshot.instanceId,
     models: snapshot.models,
     runnable: (model) => ready && exhaustedUsageWindow(snapshot, now, model) === undefined,
+    subscription: subscriptionLabel(snapshot),
   };
 }
 
@@ -259,7 +270,10 @@ export function routedModelDisplay(input: {
 }): string | null {
   const decision = input.routing?.model;
   if (!decision || decision.switched === "none" || !input.selection) return null;
-  const name = routingMemberLabel(decision, input.providers);
+  const subscription = input.providers.find(
+    (provider) => provider.instanceId === decision.instanceId,
+  )?.subscription;
+  const name = `${routingMemberLabel(decision, input.providers)}${subscription ? ` on ${subscription}` : ""}`;
   const reason = describeRoutingReasons(
     input.routing?.reasons.filter((code) => !EFFORT_ONLY_REASONS.has(code)) ?? [],
   );

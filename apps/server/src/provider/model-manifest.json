@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-15T12:00:00Z",
+  "updatedAt": "2026-11-15T18:00:00Z",
   "routing": {
     "version": 1,
-    "updatedAt": "2026-11-15T12:00:00Z",
+    "updatedAt": "2026-11-15T18:00:00Z",
     "sources": {
       "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
       "aa-coding": {
@@ -26,6 +26,22 @@
       "vals-tb4": {
         "url": "https://www.vals.ai/benchmarks/terminal-bench-4",
         "dataDate": "2026-11-11"
+      },
+      "frontier-code-2": {
+        "url": "https://cognition.com/data/frontier-code-2.0/data.json",
+        "dataDate": "2026-11-15"
+      },
+      "scale-swe-atlas": {
+        "url": "https://labs.scale.com/leaderboard/swe-atlas",
+        "dataDate": "2026-11-11"
+      },
+      "vals-programbench": {
+        "url": "https://www.vals.ai/benchmarks/programbench",
+        "dataDate": "2026-11-09"
+      },
+      "vals-swebench-multimodal": {
+        "url": "https://www.vals.ai/benchmarks/swebench-multimodal",
+        "dataDate": "2026-11-09"
       }
     },
     "defaultEffortByClass": {
@@ -39,16 +55,31 @@
       {
         "driver": "codex",
         "model": "gpt-6.1-sol",
-        "tier": "A",
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "A", "hard": "B" },
+        "relativeCost": 2,
         "verified": true,
-        "sourceIds": ["aa-coding", "tb41"]
+        "sourceIds": [
+          "aa-coding",
+          "tb41",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-programbench",
+          "vals-swebench-multimodal"
+        ]
       },
       {
         "driver": "codex",
         "model": "gpt-6-astra",
-        "tier": "A",
+        "tierByClass": { "readonly": "A", "quick_edit": "B", "implement": "A", "hard": "A" },
+        "relativeCost": 5,
         "verified": true,
-        "sourceIds": ["tb41", "aa-coding"]
+        "sourceIds": [
+          "aa-coding",
+          "tb41",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-swebench-multimodal"
+        ]
       },
       {
         "driver": "codex",
@@ -59,41 +90,66 @@
           "implement": "high",
           "hard": "high"
         },
-        "tier": "C",
+        "tierByClass": { "readonly": "C", "quick_edit": "B", "implement": "C", "hard": "C" },
+        "relativeCost": 0,
         "verified": true,
-        "sourceIds": ["codex-docs", "aa-index"]
+        "sourceIds": ["codex-docs", "aa-index", "aa-coding", "frontier-code-2"]
       },
       { "driver": "claudeAgent", "model": "*", "sourceIds": ["tb41", "aa-index", "claude-effort"] },
       {
         "driver": "claudeAgent",
         "model": "claude-opus-5-5",
         "effortByClass": { "readonly": "medium" },
-        "tier": "S",
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
+        "relativeCost": 4,
         "verified": true,
-        "sourceIds": ["vals-tb4", "aa-coding", "tb41", "aa-index"]
+        "sourceIds": [
+          "vals-tb4",
+          "aa-coding",
+          "tb41",
+          "aa-index",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-programbench"
+        ]
       },
       {
         "driver": "claudeAgent",
         "model": "claude-fable-5-2",
-        "tier": "S",
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
+        "relativeCost": 6,
         "verified": true,
-        "sourceIds": ["aa-coding", "aa-index"]
+        "sourceIds": [
+          "aa-coding",
+          "aa-index",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-programbench"
+        ]
       },
       {
         "driver": "claudeAgent",
         "model": "claude-sonnet-5-5",
         "effortByClass": { "implement": "high" },
-        "tier": "A",
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "hard": "B" },
+        "relativeCost": 3,
         "verified": true,
-        "sourceIds": ["aa-index"]
+        "sourceIds": [
+          "aa-index",
+          "aa-coding",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-programbench"
+        ]
       },
       {
         "driver": "claudeAgent",
         "model": "claude-haiku-5-5",
         "effortByClass": { "readonly": "medium" },
-        "tier": "C",
+        "tierByClass": { "readonly": "C", "quick_edit": "B", "implement": "C", "hard": "C" },
+        "relativeCost": 0,
         "verified": true,
-        "sourceIds": ["claude-effort-levels", "aa-index"]
+        "sourceIds": ["claude-effort-levels", "aa-index", "aa-coding", "frontier-code-2"]
       },
       {
         "driver": "antigravity",
@@ -115,9 +171,10 @@
           "implement": "medium",
           "hard": "medium"
         },
-        "tier": "S",
+        "tierByClass": { "readonly": "A", "quick_edit": "B", "implement": "S", "hard": "A" },
+        "relativeCost": 5,
         "verified": true,
-        "sourceIds": ["aa-index"]
+        "sourceIds": ["aa-index", "aa-coding", "frontier-code-2", "scale-swe-atlas"]
       },
       { "driver": "opencode", "model": "*", "sourceIds": ["aa-index"] },
       { "driver": "cursor", "model": "*", "sourceIds": ["aa-index"] },

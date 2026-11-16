@@ -278,7 +278,10 @@ function MachineBetaSection({
       <SettingsSection title={`Beta: ${title}`}>
         {supported.map((environment) => {
           const policy = environment.serverConfig?.managedPolicy;
-          const managed = isManagedSettingPath(policy, setting);
+          const managed = isManagedSettingPath(
+            policy,
+            setting === "autoRouting" ? "autoRouting.enabled" : setting,
+          );
           return (
             <SettingsSwitchRow
               key={environment.environmentId}

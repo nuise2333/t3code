@@ -15,6 +15,7 @@ import { isReasoningSelect } from "@t3tools/shared/model";
 import {
   chooseAutoModel,
   classifyTask,
+  isFrontendPrompt,
   resolveRoutingGroup,
   routeFor,
 } from "@t3tools/shared/routing";
@@ -79,6 +80,8 @@ export interface RoutingPolicyInput {
   readonly interactionMode: ProviderInteractionMode;
   readonly runtimeMode: RuntimeMode;
   readonly projectId: ProjectId | null;
+  /** The first message attaches an image. */
+  readonly hasImage: boolean;
   /** Only a client in its Auto effort state, or one that picked a group, asks. */
   readonly requested: LaunchRoutingRequest | undefined;
 }
@@ -276,6 +279,7 @@ const make = Effect.gen(function* () {
         projectId: input.projectId,
         runtimeMode: input.runtimeMode,
         interactionMode: input.interactionMode,
+        imageFrontend: input.hasImage && isFrontendPrompt(input.prompt),
         now: DateTime.toEpochMillis(yield* DateTime.now),
       });
       yield* Effect.annotateCurrentSpan({
@@ -296,6 +300,9 @@ const make = Effect.gen(function* () {
         switched: choice.switched,
         applied,
         skipped: choice.skipped,
+        ...(choice.skippedByReason.image_frontend === undefined
+          ? {}
+          : { reason: "image_frontend" as const }),
         ...(switching
           ? {
               from: {

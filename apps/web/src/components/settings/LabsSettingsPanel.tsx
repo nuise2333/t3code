@@ -213,7 +213,7 @@ function AutoEffortRow() {
     <SettingsRow
       serverScoped
       {...searchableSetting("auto-effort-beta")}
-      settingKeys={["autoRouting"]}
+      managedPaths={["autoRouting.enabled"]}
       mixed={mixed}
       description="Adds Auto to the effort picker for new threads. Auto picks Low, Medium or High from your first message, once, and keeps your model unless you allow switching below. Pick a level to set it yourself."
       control={
@@ -260,7 +260,6 @@ function AutoSwitchRow(props: {
     <SettingsRow
       serverScoped
       {...searchableSetting(props.id)}
-      settingKeys={["autoRouting"]}
       managedPaths={[`autoRouting.${props.setting}`]}
       mixed={mixed}
       className="px-0 py-2 sm:px-0"

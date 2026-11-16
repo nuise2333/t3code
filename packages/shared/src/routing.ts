@@ -360,8 +360,9 @@ export function resolveRoutingGroup(input: {
 
 /** Cheapest first; Auto takes the cheapest tier at or above the task's and never goes past S. */
 const TIER_ORDER: ReadonlyArray<RoutingTier> = ["C", "B", "A", "S"];
+// Questions lower effort, not the model: C-tier models trail by 20+ points on read-only Q&A.
 const DESIRED_TIER: Readonly<Record<RoutingTaskClass, RoutingTier>> = {
-  readonly: "C",
+  readonly: "A",
   quick_edit: "B",
   implement: "A",
   hard: "S",
@@ -381,9 +382,17 @@ const UNROUTED_DRIVERS: ReadonlySet<string> = new Set(["acpRegistry", "pi"]);
 const isOpaqueRouter = (driver: string, model: string) =>
   OPAQUE_ROUTER_MODELS[driver]?.includes(model) === true;
 
+const FRONTEND =
+  /\b(?:UI|CSS|layouts?|buttons?|components?|screenshots?|styles?|styling|frontend|front-end)\b|页面|界面|样式|布局|按钮|组件|截图|前端/i;
+
+/** UI work a screenshot shows; GPT models score with Haiku on screenshot-driven frontend bugs. */
+export const isFrontendPrompt = (prompt: string): boolean => FRONTEND.test(prompt);
+
+const isGptModel = (driver: string, slug: string) => driver === "codex" || slug.startsWith("gpt-");
+
 const isCandidateRow = (row: RoutingTable["rows"][number]) =>
   row.verified === true &&
-  row.tier !== undefined &&
+  row.relativeCost !== undefined &&
   row.model !== "*" &&
   !UNROUTED_DRIVERS.has(row.driver) &&
   !isOpaqueRouter(row.driver, row.model);
@@ -427,7 +436,7 @@ function quotaRank(provider: ServerProvider, model: string, now: number) {
   return { bucket: 0, score: (remaining - QUOTA_RESERVE_PERCENT) / Math.max(hours, 1) };
 }
 
-type AutoModelSkipReason = RoutingSkipReason | "premium_default";
+type AutoModelSkipReason = RoutingSkipReason | "premium_default" | "image_frontend";
 
 interface AutoModelChoice {
   /** The draft's selection when nothing switches; otherwise the target with no options yet. */
@@ -457,6 +466,8 @@ export function chooseAutoModel(input: {
   readonly projectId: ProjectId | null;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
+  /** The first message attaches an image of UI work: never move to a GPT model. */
+  readonly imageFrontend: boolean;
   readonly now: number;
 }): AutoModelChoice {
   const { current } = input;
@@ -467,11 +478,11 @@ export function chooseAutoModel(input: {
     currentProvider === undefined
       ? current.model
       : (findModel(currentProvider, current.model)?.slug ?? current.model);
-  const currentTier =
-    input.table.rows.find(
-      (row) =>
-        isCandidateRow(row) && row.driver === currentProvider?.driver && row.model === currentSlug,
-    )?.tier ?? null;
+  const currentRow = input.table.rows.find(
+    (row) =>
+      isCandidateRow(row) && row.driver === currentProvider?.driver && row.model === currentSlug,
+  );
+  const currentTier = currentRow?.tierByClass?.[input.taskClass] ?? null;
   const skippedByReason: Partial<Record<AutoModelSkipReason, number>> = {};
   let skipped = 0;
   const keep = (): AutoModelChoice => ({
@@ -493,10 +504,12 @@ export function chooseAutoModel(input: {
     readonly provider: ServerProvider;
     readonly slug: string;
     readonly tier: RoutingTier;
+    readonly relativeCost: number;
     readonly isCurrent: boolean;
   }> = [];
   for (const row of input.table.rows) {
-    if (!isCandidateRow(row) || row.tier === undefined) continue;
+    const tier = row.tierByClass?.[input.taskClass];
+    if (!isCandidateRow(row) || tier === undefined || row.relativeCost === undefined) continue;
     for (const provider of input.providers) {
       if (provider.driver !== row.driver) continue;
       if (input.scope === "instance" && provider.instanceId !== current.instanceId) continue;
@@ -513,28 +526,41 @@ export function chooseAutoModel(input: {
           provider,
           runnableInstanceIds: undefined,
         }) ??
-        (!isCurrent && premiumByDefault(model.capabilities?.optionDescriptors ?? [])
-          ? "premium_default"
-          : null);
+        (isCurrent
+          ? null
+          : premiumByDefault(model.capabilities?.optionDescriptors ?? [])
+            ? "premium_default"
+            : input.imageFrontend && isGptModel(provider.driver, model.slug)
+              ? "image_frontend"
+              : null);
       if (reason !== null) {
         skipped += 1;
         skippedByReason[reason] = (skippedByReason[reason] ?? 0) + 1;
         continue;
       }
-      candidates.push({ provider, slug: model.slug, tier: row.tier, isCurrent });
+      candidates.push({
+        provider,
+        slug: model.slug,
+        tier,
+        relativeCost: row.relativeCost,
+        isCurrent,
+      });
     }
   }
 
-  // Only hard tasks may move to a pricier tier than the thread's model, so turning Auto on saves.
+  // Only hard tasks may move to a pricier model than the thread's, so turning Auto on saves.
+  // An unknown current cost can't be undercut, so the thread keeps its model.
+  if (input.taskClass !== "hard" && currentRow?.relativeCost === undefined) return keep();
   const ceiling =
-    input.taskClass === "hard" || currentTier === null
-      ? TIER_ORDER.length
-      : TIER_ORDER.indexOf(currentTier) + 1;
-  const tier = TIER_ORDER.slice(TIER_ORDER.indexOf(DESIRED_TIER[input.taskClass]), ceiling).find(
-    (level) => candidates.some((candidate) => candidate.tier === level),
+    input.taskClass === "hard" || currentRow?.relativeCost === undefined
+      ? Number.POSITIVE_INFINITY
+      : currentRow.relativeCost;
+  const affordable = candidates.filter((candidate) => candidate.relativeCost <= ceiling);
+  const tier = TIER_ORDER.slice(TIER_ORDER.indexOf(DESIRED_TIER[input.taskClass])).find((level) =>
+    affordable.some((candidate) => candidate.tier === level),
   );
   if (tier === undefined) return keep();
-  const ranked = candidates
+  const ranked = affordable
     .filter((candidate) => candidate.tier === tier)
     .map((candidate) => ({
       candidate,
@@ -542,10 +568,11 @@ export function chooseAutoModel(input: {
       isCurrent: candidate.isCurrent ? 0 : 1,
       ...quotaRank(candidate.provider, candidate.slug, input.now),
     }))
-    // Staying on the thread's instance keeps its prompt cache and session; then spend expiring quota.
+    // The thread's instance keeps its account; then the cheaper model, then expiring quota.
     .sort(
       (a, b) =>
         a.onCurrentInstance - b.onCurrentInstance ||
+        a.candidate.relativeCost - b.candidate.relativeCost ||
         a.isCurrent - b.isCurrent ||
         a.bucket - b.bucket ||
         b.score - a.score,
