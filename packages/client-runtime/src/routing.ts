@@ -28,7 +28,9 @@ import {
 } from "@t3tools/shared/routing";
 import { exhaustedUsageWindow } from "@t3tools/shared/usageLimits";
 
-const REASON_LABELS: Partial<Record<RoutingReason, string>> = {
+type ReasonCode = RoutingReason | NonNullable<NonNullable<RouteDecision["model"]>["kept"]>;
+
+const REASON_LABELS: Partial<Record<ReasonCode, string>> = {
   plan_mode: "Plan mode",
   many_paths: "Mentions 3+ files",
   hard_keyword: "Large change",
@@ -112,16 +114,14 @@ export function autoRoutingNote(input: {
   return `Picks a level up to High, and may switch ${change}, from your first message.`;
 }
 
-export function describeRoutingReasons(reasons: ReadonlyArray<RoutingReason>): string {
+export function describeRoutingReasons(reasons: ReadonlyArray<ReasonCode>): string {
   return reasons.flatMap((reason) => REASON_LABELS[reason] ?? []).join(", ");
 }
 
 /** The decision's reasons, with the security keep that rides on `model.kept` for older clients. */
-const routingReasons = (routing: RouteDecision): ReadonlyArray<RoutingReason> => {
+const routingReasons = (routing: RouteDecision): ReadonlyArray<ReasonCode> => {
   const kept = routing.model?.kept;
-  return kept === undefined || routing.reasons.includes(kept)
-    ? routing.reasons
-    : [...routing.reasons, kept];
+  return kept === undefined ? routing.reasons : [...routing.reasons, kept];
 };
 
 export interface RoutedEffortDisplay {
@@ -422,7 +422,7 @@ export function routedGroupDisplay(input: {
   };
 }
 
-const EFFORT_ONLY_REASONS: ReadonlySet<RoutingReason> = new Set(["model_row", "nearest_level"]);
+const EFFORT_ONLY_REASONS: ReadonlySet<ReasonCode> = new Set(["model_row", "nearest_level"]);
 const ROLE_LABELS = { research: "Research", review: "Review" } as const;
 
 /**

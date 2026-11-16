@@ -25,8 +25,6 @@ export const RoutingReason = Schema.Literals([
   "no_effort_control",
   "no_row",
   "user_choice",
-  /** Read only: an earlier build wrote it here; decisions now carry it on `model.kept`. */
-  "security_prompt",
 ]);
 export type RoutingReason = typeof RoutingReason.Type;
 
@@ -208,8 +206,7 @@ export const RouteDecision = Schema.Struct({
   baseline: Schema.optionalKey(TrimmedNonEmptyString),
   /** False for a shadow decision: recorded, but the launch kept its own selection. */
   applied: Schema.Boolean,
-  /** Routing writes at most four; five reads what an earlier build wrote with security_prompt. */
-  reasons: Schema.Array(RoutingReason).check(Schema.isMaxLength(5)),
+  reasons: Schema.Array(RoutingReason).check(Schema.isMaxLength(4)),
   tableUpdatedAt: Schema.optionalKey(Schema.String),
   group: Schema.optionalKey(RouteGroupDecision),
   model: Schema.optionalKey(RouteModelDecision),

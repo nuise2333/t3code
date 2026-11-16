@@ -3833,7 +3833,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
     );
 
-    type Prior = "review" | "research" | "user" | "agent";
+    type Prior = "review" | "research" | "user" | "agent" | "scheduled";
     it.effect.each<{
       readonly name: string;
       readonly prior: ReadonlyArray<Prior>;
@@ -3863,6 +3863,11 @@ describe("OrchestratorMcpService provider resolution", () => {
         prior: ["review", "review", "review", "agent"],
         refused: true,
       },
+      {
+        name: "a scheduled delivery does not start the count again",
+        prior: ["review", "review", "review", "scheduled"],
+        refused: true,
+      },
       { name: "other roles do not count", prior: ["research", "research", "research"] },
       {
         name: "a task in another role is not capped",
@@ -3885,11 +3890,14 @@ describe("OrchestratorMcpService provider resolution", () => {
         const dispatched = yield* Ref.make(0);
         const at = (index: number) => DateTime.makeUnsafe(Date.UTC(2026, 10, 15, 10, index));
         const record = (kind: Prior, index: number) =>
-          kind === "user" || kind === "agent"
+          kind === "user" || kind === "agent" || kind === "scheduled"
             ? {
                 id: MessageId.make(`message:${index}`),
                 role: "user",
-                createdBy: kind,
+                createdBy: kind === "agent" ? "agent" : "user",
+                ...(kind === "scheduled"
+                  ? { scheduledTaskId: ScheduledTaskId.make("scheduled-task:daily") }
+                  : {}),
                 createdAt: at(index),
               }
             : {

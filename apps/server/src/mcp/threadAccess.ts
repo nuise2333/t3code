@@ -171,7 +171,7 @@ export const assertReviewRoundLeft = (
     : Effect.void;
 };
 
-/** Review delegations from one thread count until the user writes there again. */
+/** Review delegations count until the user writes in the parent; a scheduled delivery is not that. */
 const assertReviewDelegationLeft = Effect.fn("OrchestratorMcpService.assertReviewDelegationLeft")(
   function* (
     threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadRecords">,
@@ -190,7 +190,7 @@ const assertReviewDelegationLeft = Effect.fn("OrchestratorMcpService.assertRevie
       );
     const lastReply = messages.reduce(
       (latest, message) =>
-        message.createdBy === "user"
+        message.createdBy === "user" && message.scheduledTaskId === undefined
           ? Math.max(latest, DateTime.toEpochMillis(message.createdAt))
           : latest,
       Number.NEGATIVE_INFINITY,
