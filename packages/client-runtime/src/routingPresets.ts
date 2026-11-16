@@ -100,22 +100,23 @@ export const ROUTING_GROUP_PRESETS: ReadonlyArray<RoutingGroupPreset> = [
 ];
 
 /**
- * How closely a provider's model id names this slug, lower is closer, null when it doesn't.
- * Qwen Code reports ids as `<id>(<auth type>)`; gateways prefix them (`auto/<slug>`), and a
- * `group/<slug>` named exactly after the model ranks last since a user group may mix models.
+ * How well a provider's model id serves this slug, lower is better, null when it doesn't name it.
+ * Qwen Code reports ids as `<id>(<auth type>)`. A gateway route (`auto/<slug>`, then a
+ * `group/<slug>` that may mix models) beats the bare id beside it, which can be a personal key
+ * whose terms forbid automated use, such as a Qwen Token Plan.
  */
 export function modelIdMatchRank(id: string, slug: string): number | null {
   const bare = id.replace(/\([^()]*\)$/, "");
-  if (bare === slug) return 0;
+  if (bare === slug) return 2;
   if (!bare.includes("/") || bare.slice(bare.lastIndexOf("/") + 1) !== slug) return null;
-  return bare.startsWith("group/") ? 2 : 1;
+  return bare.startsWith("group/") ? 1 : 0;
 }
 
 export interface PresetProviderSource {
   readonly instanceId: ProviderInstanceId;
   readonly driver: string;
   readonly models: ReadonlyArray<
-    Pick<ServerProviderModel, "slug" | "capabilities" | "isDefault"> & {
+    Pick<ServerProviderModel, "slug" | "capabilities"> & {
       readonly aliases?: ReadonlyArray<string> | undefined;
     }
   >;
@@ -149,13 +150,10 @@ function findMember(
       );
       return ranks.length === 0 ? null : Math.min(...ranks);
     };
-    // The instance's own default wins among matches: it is the route its user already chose.
     const model = provider.models
       .flatMap((candidate) => {
-        const found = rank(candidate);
-        return found === null
-          ? []
-          : [{ candidate, order: candidate.isDefault === true ? -1 : found }];
+        const order = rank(candidate);
+        return order === null ? [] : [{ candidate, order }];
       })
       .sort((left, right) => left.order - right.order)[0]?.candidate;
     if (model === undefined) continue;

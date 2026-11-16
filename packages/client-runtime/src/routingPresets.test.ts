@@ -19,9 +19,7 @@ const effort = (levels: ReadonlyArray<string>): ProviderOptionDescriptor => ({
 const source = (
   instanceId: string,
   driver: string,
-  models: ReadonlyArray<
-    string | { slug: string; levels?: ReadonlyArray<string>; isDefault?: true }
-  >,
+  models: ReadonlyArray<string | { slug: string; levels?: ReadonlyArray<string> }>,
 ): PresetProviderSource => ({
   instanceId: ProviderInstanceId.make(instanceId),
   driver,
@@ -29,7 +27,6 @@ const source = (
     const entry = typeof model === "string" ? { slug: model } : model;
     return {
       slug: entry.slug,
-      ...("isDefault" in entry ? { isDefault: entry.isDefault } : {}),
       capabilities: entry.levels ? { optionDescriptors: [effort(entry.levels)] } : null,
     };
   }),
@@ -43,11 +40,11 @@ const preset = (id: string): RoutingGroupPreset => {
 
 describe("modelIdMatchRank", () => {
   it.each([
-    ["gpt-6-astra", "gpt-6-astra", 0],
-    ["qwen4-max(openai)", "qwen4-max", 0],
-    ["auto/gpt-6-astra", "gpt-6-astra", 1],
-    ["bailian-token-plan/qwen4-max", "qwen4-max", 1],
-    ["group/qwen4-max(openai)", "qwen4-max", 2],
+    ["auto/gpt-6-astra", "gpt-6-astra", 0],
+    ["bailian-token-plan/qwen4-max", "qwen4-max", 0],
+    ["group/qwen4-max(openai)", "qwen4-max", 1],
+    ["gpt-6-astra", "gpt-6-astra", 2],
+    ["qwen4-max(openai)", "qwen4-max", 2],
     ["group/gpt-6-astra-high", "gpt-6-astra", null],
     ["gpt-6-astra-mini", "gpt-6-astra", null],
   ])("%s names %s at %s", (id, slug, expected) => {
@@ -81,32 +78,20 @@ describe("resolveRoutingGroupPreset", () => {
       skipped: ["Opus 5.5"],
     },
     {
-      name: "the first instance in provider order, exact before gateway within one",
+      name: "the first instance in provider order, gateway before exact within one",
       preset: "batch-translation",
       providers: [
-        source("work", "codex", ["auto/gpt-6-luna", "gpt-6-luna"]),
+        source("work", "codex", ["gpt-6-luna", "auto/gpt-6-luna"]),
         source("personal", "codex", ["gpt-6-luna"]),
       ],
-      members: ["work:gpt-6-luna"],
+      members: ["work:auto/gpt-6-luna"],
       skipped: ["DeepSeek V4.1 Flash", "Haiku 5.5"],
     },
     {
-      name: "Qwen Code ids, preferring the instance's default route",
+      name: "a Qwen Code gateway group before the Token Plan key beside it",
       preset: "office-knowledge",
-      providers: [
-        source("qwen", "acpRegistry", [
-          "qwen4-max(openai)",
-          { slug: "group/qwen4-max(openai)", isDefault: true },
-        ]),
-      ],
+      providers: [source("qwen", "acpRegistry", ["qwen4-max(openai)", "group/qwen4-max(openai)"])],
       members: ["qwen:group/qwen4-max(openai)"],
-      skipped: ["Opus 5.5", "GPT-6.1 Sol"],
-    },
-    {
-      name: "an exact id before a group named after the model",
-      preset: "office-knowledge",
-      providers: [source("qwen", "acpRegistry", ["group/qwen4-max(openai)", "qwen4-max(openai)"])],
-      members: ["qwen:qwen4-max(openai)"],
       skipped: ["Opus 5.5", "GPT-6.1 Sol"],
     },
     {
