@@ -3810,8 +3810,10 @@ describe("OrchestratorMcpService provider resolution", () => {
           const [command] = (yield* Ref.get(dispatched)) as ReadonlyArray<{
             readonly modelSelection: unknown;
             readonly routing?: RouteDecision;
+            readonly delegatedRole?: string;
           }>;
           assert.deepEqual(command?.modelSelection, row.modelSelection);
+          assert.equal(command?.delegatedRole, row.input.role === "review" ? "review" : undefined);
           if (row.input.routingGroupId !== undefined) {
             assert.include(command?.routing?.group, { id: "deep", rank: "quota" });
             assert.isUndefined(command?.routing?.role);
@@ -5030,6 +5032,67 @@ describe("OrchestratorMcpService thread lookup", () => {
       assert.deepStrictEqual(fromLink?.linkedSender, sender);
       assert.isUndefined(fromLink?.senderThreadId);
       assert.isUndefined((yield* sendAs(linked()))?.linkedSender);
+    }),
+  );
+
+  it.effect.each<{
+    readonly name: string;
+    readonly review: boolean;
+    readonly agentSends: number;
+    readonly userSends?: number;
+    readonly refused?: boolean;
+  }>([
+    { name: "a review's second round goes out", review: true, agentSends: 1 },
+    { name: "a review's third round goes out", review: true, agentSends: 2 },
+    { name: "a review's fourth round is refused", review: true, agentSends: 3, refused: true },
+    { name: "a child that is not a review is not capped", review: false, agentSends: 3 },
+    { name: "the user's own sends are not rounds", review: true, agentSends: 2, userSends: 3 },
+  ])("$name", (row) =>
+    Effect.gen(function* () {
+      const child = liveThreadShell(ThreadId.make("thread:review-child"));
+      const projection = idleThreadProjection(child);
+      const message = (index: number, createdBy: "agent" | "user") => ({
+        id: MessageId.make(`message:${createdBy}-${index}`),
+        role: "user",
+        createdBy,
+      });
+      const messages = [
+        ...Array.from({ length: row.agentSends }, (_, index) => message(index, "agent")),
+        ...Array.from({ length: row.userSends ?? 0 }, (_, index) => message(index, "user")),
+      ];
+      const sent = yield* Ref.make(0);
+      const result = yield* Effect.gen(function* () {
+        const mcp = yield* OrchestratorMcpService.OrchestratorMcpService;
+        return yield* mcp
+          .sendToThread(client, { threadId: child.id, message: "Look again." })
+          .pipe(Effect.flip, Effect.option);
+      }).pipe(
+        Effect.provide(
+          service([child], sent, {
+            getProjectThreadRecords: () =>
+              Effect.succeed({
+                ...projection,
+                thread: {
+                  ...projection.thread,
+                  ...(row.review ? { delegatedRole: "review" as const } : {}),
+                },
+              }),
+            getThreadRecords: () => Effect.succeed({ messages } as never),
+            sendToThread: () =>
+              Ref.update(sent, (count) => count + 1).pipe(
+                Effect.as({
+                  run: { id: RunId.make("run:sent"), status: "running" },
+                  delivery: "started",
+                } as never),
+              ),
+          }),
+        ),
+      );
+      assert.equal(yield* Ref.get(sent), row.refused === true ? 0 : 1);
+      if (row.refused !== true) return assert.isTrue(Option.isNone(result));
+      const error = Option.getOrThrow(result);
+      assert.equal(error.code, "thread_not_sendable");
+      assert.include(error.message, "Give the user the remaining findings");
     }),
   );
 

@@ -516,6 +516,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
   /** The launch's effort routing decision, applied or shadow-only. Detail payloads only. */
   routing: Schema.optional(LenientRouteDecision),
+  /** A task delegated as a review; agents get a capped number of rounds with it. */
+  delegatedRole: Schema.optional(Schema.Literal("review")),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -3549,6 +3551,7 @@ export const OrchestrationV2Command = Schema.Union([
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
     /** Only the server sets this, from the routing group the task asked for. */
     routing: Schema.optional(RouteDecision),
+    delegatedRole: Schema.optional(Schema.Literal("review")),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({

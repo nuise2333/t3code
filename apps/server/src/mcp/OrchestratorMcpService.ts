@@ -145,6 +145,8 @@ import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 // Return recoverable handles before common MCP client timeouts expire.
 const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const MAX_WAIT_TIMEOUT_MS = 45_000;
+// Reviewer reports (2026-11): only about 21% of re-reviews pass, so a fourth round rarely helps.
+const MAX_REVIEW_ROUNDS = 3;
 const DEFAULT_SECRET_REQUEST_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_SECRET_REQUEST_TIMEOUT_MS = 60 * 60 * 1_000;
 const TASK_WAKE_EVENTS = [
@@ -2774,6 +2776,7 @@ const make = Effect.gen(function* () {
           interactionMode,
           ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
           ...(routed === null ? {} : { routing: routed.decision }),
+          ...(input.role === "review" ? { delegatedRole: "review" } : {}),
           // Async delegations wake the parent on every child terminal; wait
           // delegations deliver through the blocking tool call until `awaitTask`
           // gives up the wait (timeout, cancelled call) and upgrades the wake.
@@ -3441,6 +3444,23 @@ const make = Effect.gen(function* () {
         requestKey: key,
         operation: "thread-send",
       });
+      if (target.thread.delegatedRole === "review") {
+        const { messages } = yield* threadManagement
+          .getThreadRecords(input.threadId, ["messages"])
+          .pipe(Effect.mapError(threadManagementFailure));
+        const rounds = messages.filter(
+          (message) => message.role === "user" && message.createdBy === "agent",
+        );
+        if (
+          rounds.length >= MAX_REVIEW_ROUNDS &&
+          !rounds.some((message) => message.id === messageId)
+        ) {
+          return yield* failure(
+            "thread_not_sendable",
+            `This review has had its ${MAX_REVIEW_ROUNDS} rounds. Give the user the remaining findings instead of reviewing again.`,
+          );
+        }
+      }
       const result = yield* threadManagement
         .sendToThread({
           projectId: target.thread.projectId,
