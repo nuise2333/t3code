@@ -145,7 +145,11 @@ didn't pick a model in that draft, and only among models T3 Code has benchmark
 data for on that kind of task. It takes the cheapest model rated well enough,
 moves to a pricier model than yours only for large changes, and keeps questions
 on a capable model (it lowers their level instead). With a screenshot of UI work
-attached, it does not switch to a GPT model. It never turns on fast mode, a
+attached, it does not switch to a GPT model or to another provider, though it may
+still pick another model on yours. It does not pick Gemini 4 models, which are
+slow to answer; picking one yourself still works. A message about security or
+vulnerabilities keeps your model, because some Claude models quietly hand those
+to an older model. It never turns on fast mode, a
 larger context, or other paid extras. A started thread shows the model Auto
 picked and the provider account that pays for it; with switching off, it shows
 what Auto would have picked.

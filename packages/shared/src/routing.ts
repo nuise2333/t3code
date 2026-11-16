@@ -488,12 +488,23 @@ export const isFrontendPrompt = (prompt: string): boolean => FRONTEND.test(promp
 
 const isGptModel = (driver: string, slug: string) => driver === "codex" || slug.startsWith("gpt-");
 
-const isCandidateRow = (row: RoutingTable["rows"][number]) =>
+// Claude 5.5 models and Fable 5.2 reroute these to Opus 4.8 (HN 49901375, 2026-09-29; Theo, 2026-11-11).
+const SECURITY =
+  /\b(?:security|vulnerab\w*|exploit\w*|CVEs?)\b|\bCVE-\d|漏洞|(?<!类型|线程|并发|内存)安全(?!地)/i;
+
+/** A security or vulnerability prompt, outside pasted code. */
+export const isSecurityPrompt = (prompt: string): boolean => SECURITY.test(stripPasted(prompt));
+
+const isTierRow = (row: RoutingTable["rows"][number]) =>
   row.verified === true &&
   row.relativeCost !== undefined &&
   row.model !== "*" &&
   !UNROUTED_DRIVERS.has(row.driver) &&
   !isOpaqueRouter(row.driver, row.model);
+
+/** Every Auto launch has someone waiting on it, so background-only rows are no candidates yet. */
+const isCandidateRow = (row: RoutingTable["rows"][number]) =>
+  isTierRow(row) && row.backgroundOnly !== true;
 
 const findModel = (provider: ServerProvider, model: string) =>
   provider.models.find(
@@ -595,6 +606,8 @@ type AutoModelSkipReason = RoutingSkipReason | "premium_default" | "image_fronte
 interface AutoModelChoice {
   /** The draft's selection when nothing switches; otherwise the target with no options yet. */
   readonly selection: ModelSelection;
+  /** Set when a security prompt kept the thread's model. */
+  readonly reason?: "security_prompt";
   readonly tier: RoutingTier | null;
   readonly switched: "none" | "model" | "provider";
   readonly skipped: number;
@@ -620,8 +633,13 @@ export function chooseAutoModel(input: {
   readonly projectId: ProjectId | null;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
-  /** The first message attaches an image of UI work: never move to a GPT model. */
+  /**
+   * The first message attaches an image of UI work: never move to a GPT model, and outside a
+   * review never leave the thread's instance.
+   */
   readonly imageFrontend: boolean;
+  /** Outside a review, a security prompt keeps the thread's model. */
+  readonly securityPrompt?: boolean | undefined;
   /** Instances with an orchestration adapter; others would fail only at dispatch. */
   readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId> | undefined;
   /**
@@ -640,8 +658,7 @@ export function chooseAutoModel(input: {
       ? current.model
       : (findModel(currentProvider, current.model)?.slug ?? current.model);
   const currentRow = input.table.rows.find(
-    (row) =>
-      isCandidateRow(row) && row.driver === currentProvider?.driver && row.model === currentSlug,
+    (row) => isTierRow(row) && row.driver === currentProvider?.driver && row.model === currentSlug,
   );
   const currentTier = currentRow?.tierByClass?.[input.taskClass] ?? null;
   const skippedByReason: Partial<Record<AutoModelSkipReason, number>> = {};
@@ -661,6 +678,9 @@ export function chooseAutoModel(input: {
       isOpaqueRouter(currentProvider.driver, currentSlug))
   ) {
     return keep();
+  }
+  if (review === undefined && input.securityPrompt === true) {
+    return { ...keep(), reason: "security_prompt" };
   }
 
   const candidates: Array<{
@@ -697,7 +717,9 @@ export function chooseAutoModel(input: {
           ? null
           : premiumByDefault(model.capabilities?.optionDescriptors ?? [])
             ? "premium_default"
-            : input.imageFrontend && isGptModel(provider.driver, model.slug)
+            : input.imageFrontend &&
+                (isGptModel(provider.driver, model.slug) ||
+                  (review === undefined && provider.instanceId !== current.instanceId))
               ? "image_frontend"
               : null);
       if (reason !== null) {

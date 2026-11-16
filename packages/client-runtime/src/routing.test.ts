@@ -412,6 +412,9 @@ it("ignores the switches on a server that cannot honor them", () => {
 
 it("skips reason codes it has no words for", () => {
   expect(describeRoutingReasons(["no_effort_control", "question"])).toBe("Question, no edits");
+  expect(describeRoutingReasons(["debug_keyword", "security_prompt"])).toBe(
+    "Debugging, Security prompt, model kept",
+  );
 });
 
 it.each([

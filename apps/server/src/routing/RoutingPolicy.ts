@@ -19,6 +19,7 @@ import {
   chooseAutoModel,
   classifyTask,
   isFrontendPrompt,
+  isSecurityPrompt,
   modelVendor,
   resolveRoutingGroup,
   routeFor,
@@ -331,6 +332,7 @@ const make = Effect.gen(function* () {
         runtimeMode: input.runtimeMode,
         interactionMode: input.interactionMode,
         imageFrontend: input.hasImage && isFrontendPrompt(input.prompt),
+        securityPrompt: isSecurityPrompt(input.prompt),
         runnableInstanceIds: delegation?.runnableInstanceIds,
         review,
         now: DateTime.toEpochMillis(yield* DateTime.now),
@@ -380,6 +382,7 @@ const make = Effect.gen(function* () {
             }),
       });
       const role = delegation === undefined ? {} : { role: delegation.role };
+      const kept = choice.reason === undefined ? [] : [choice.reason];
       // A review on the parent's own model only lifts an effort below high, never lowers one.
       const keepsEffort =
         review !== undefined &&
@@ -392,6 +395,7 @@ const make = Effect.gen(function* () {
           decision: {
             ...routed.decision,
             ...(keepsEffort ? { applied: false } : {}),
+            reasons: [...routed.decision.reasons, ...kept],
             ...role,
             model: modelDecision,
           },
@@ -404,7 +408,7 @@ const make = Effect.gen(function* () {
           ...role,
           effort: null,
           applied: false,
-          reasons: [...classified.reasons],
+          reasons: [...classified.reasons, ...kept],
           model: modelDecision,
         },
       } satisfies RoutedSelection;

@@ -21,6 +21,7 @@ import {
   chooseAutoModel,
   classifyTask,
   isFrontendPrompt,
+  isSecurityPrompt,
   nextHigherEffort,
   modelVendor,
   resolveRoutingGroup,
@@ -1191,6 +1192,24 @@ describe("isFrontendPrompt", () => {
   });
 });
 
+describe("isSecurityPrompt", () => {
+  it.each([
+    { prompt: "Fix the XSS vulnerability in the login form", security: true },
+    { prompt: "Is CVE-2026-1234 exploitable here?", security: true },
+    { prompt: "Review the security of the auth middleware", security: true },
+    { prompt: "修复登录接口的漏洞", security: true },
+    { prompt: "检查这个接口有没有安全问题", security: true },
+    { prompt: "把缓存改成线程安全的，再加一个类型安全的封装", security: false },
+    { prompt: "安全地删除旧的迁移文件", security: false },
+    {
+      prompt: "Why does this fail?\n  at SecurityConfig (src/security/config.ts:12:3)",
+      security: false,
+    },
+  ])("$prompt", ({ prompt, security }) => {
+    expect(isSecurityPrompt(prompt)).toBe(security);
+  });
+});
+
 describe("modelVendor", () => {
   it.each([
     ["claudeAgent", "claude-opus-4-1", "anthropic"],
@@ -1325,6 +1344,7 @@ describe("chooseAutoModel", () => {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: ProviderInteractionMode;
     readonly imageFrontend?: boolean;
+    readonly securityPrompt?: boolean;
     readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId>;
     readonly review?: { readonly parentVendor: ModelVendor | null };
   }) =>
@@ -1339,6 +1359,7 @@ describe("chooseAutoModel", () => {
       runtimeMode: input.runtimeMode ?? "full-access",
       interactionMode: input.interactionMode ?? "default",
       imageFrontend: input.imageFrontend ?? false,
+      securityPrompt: input.securityPrompt,
       runnableInstanceIds: input.runnableInstanceIds,
       review: input.review,
       now: NOW,
@@ -1358,12 +1379,14 @@ describe("chooseAutoModel", () => {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: ProviderInteractionMode;
     readonly imageFrontend?: boolean;
+    readonly securityPrompt?: boolean;
     readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId>;
     readonly review?: { readonly parentVendor: ModelVendor | null };
     readonly picks: ModelSelection;
     readonly switched: "none" | "model" | "provider";
     readonly tier: RoutingTier | null;
     readonly skipped?: number;
+    readonly reason?: "security_prompt";
   }>([
     {
       name: "quick_edit moves to the B tier on the same instance",
@@ -1522,19 +1545,106 @@ describe("chooseAutoModel", () => {
       tier: "S",
     },
     {
-      name: "a screenshot of UI work does not move to a GPT model",
+      name: "a screenshot of UI work leaves neither for GPT nor for another instance",
       current: on(claudeId, "model-opus"),
       taskClass: "quick_edit",
       imageFrontend: true,
       providers: [
         provider(claudeId, "claudeAgent", ["model-opus"]),
-        provider(claudeTwoId, "claudeAgent", ["model-haiku"]),
+        provider(claudeTwoId, "claudeAgent", ["model-haiku"], quota(0, hoursFromNow(1))),
         codex(quota(0, hoursFromNow(1))),
       ],
-      picks: on(claudeTwoId, "model-haiku"),
-      switched: "provider",
+      picks: on(claudeId, "model-opus"),
+      switched: "none",
+      tier: "S",
+      skipped: 3,
+    },
+    {
+      name: "a screenshot of UI work may still change model on the thread's instance",
+      current: on(claudeId, "model-opus"),
+      taskClass: "quick_edit",
+      imageFrontend: true,
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-haiku"),
+      switched: "model",
       tier: "B",
       skipped: 2,
+    },
+    {
+      name: "a review of a screenshot of UI work still leaves the instance, but not for GPT",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      imageFrontend: true,
+      providers: [
+        claude(),
+        codex(),
+        provider(ProviderInstanceId.make("antigravity_fake"), "antigravity", ["gemini-fake-pro"]),
+      ],
+      rows: [...ROWS, row("antigravity", "gemini-fake-pro", every("S"), 5)],
+      review: { parentVendor: "anthropic" },
+      picks: on(ProviderInstanceId.make("antigravity_fake"), "gemini-fake-pro"),
+      switched: "provider",
+      tier: "S",
+      skipped: 2,
+    },
+    {
+      name: "a background-only model is no candidate",
+      current: on(claudeId, "model-haiku"),
+      taskClass: "implement",
+      providers: [
+        claude(),
+        provider(ProviderInstanceId.make("antigravity_fake"), "antigravity", ["gemini-fake-pro"]),
+      ],
+      rows: [
+        ...ROWS,
+        { ...row("antigravity", "gemini-fake-pro", every("A"), 0), backgroundOnly: true },
+      ],
+      picks: on(claudeId, "model-haiku"),
+      switched: "none",
+      tier: "C",
+    },
+    {
+      name: "a background-only model is no reviewer",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [
+        claude(),
+        provider(ProviderInstanceId.make("antigravity_fake"), "antigravity", ["gemini-fake-pro"]),
+      ],
+      rows: [
+        ...ROWS,
+        { ...row("antigravity", "gemini-fake-pro", every("S"), 0), backgroundOnly: true },
+      ],
+      review: { parentVendor: "anthropic" },
+      picks: on(claudeId, "model-opus"),
+      switched: "none",
+      tier: "S",
+    },
+    {
+      name: "a background-only thread model keeps its tier",
+      current: on(ProviderInstanceId.make("antigravity_fake"), "gemini-fake-pro"),
+      taskClass: "readonly",
+      providers: [
+        provider(ProviderInstanceId.make("antigravity_fake"), "antigravity", ["gemini-fake-pro"]),
+      ],
+      rows: [
+        ...ROWS,
+        { ...row("antigravity", "gemini-fake-pro", every("A"), 3), backgroundOnly: true },
+      ],
+      picks: on(ProviderInstanceId.make("antigravity_fake"), "gemini-fake-pro"),
+      switched: "none",
+      tier: "A",
+    },
+    {
+      name: "a hard security prompt keeps the thread's model",
+      current: on(claudeId, "model-haiku"),
+      taskClass: "hard",
+      securityPrompt: true,
+      providers: [claude(), codex()],
+      picks: on(claudeId, "model-haiku"),
+      switched: "none",
+      tier: "C",
+      reason: "security_prompt",
     },
     {
       name: "a screenshot of UI work skips a gpt- model on another driver",
@@ -1850,6 +1960,7 @@ describe("chooseAutoModel", () => {
     expect(choice.switched).toBe(row.switched);
     expect(choice.tier).toBe(row.tier);
     if (row.skipped !== undefined) expect(choice.skipped).toBe(row.skipped);
+    expect(choice.reason).toBe(row.reason);
   });
 
   it("drops the old selection's options and keeps them when it stays", () => {

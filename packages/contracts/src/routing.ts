@@ -25,6 +25,7 @@ export const RoutingReason = Schema.Literals([
   "no_effort_control",
   "no_row",
   "user_choice",
+  "security_prompt",
 ]);
 export type RoutingReason = typeof RoutingReason.Type;
 
@@ -72,6 +73,8 @@ const RoutingTableRow = Schema.Struct({
   ),
   /** Only verified rows with an exact model, a relative cost and a class's tier are candidates. */
   verified: Schema.optionalKey(Schema.Boolean),
+  /** Too slow for a launch someone waits on; its tiers wait for unattended routing. */
+  backgroundOnly: Schema.optionalKey(Schema.Boolean),
   sourceIds: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
 });
 
@@ -182,7 +185,7 @@ export const RouteModelDecision = Schema.Struct({
   skipped: NonNegativeInt,
   /** The draft's model, only when the switch was applied. */
   from: Schema.optionalKey(RouteGroupMember),
-  /** Set when a screenshot of UI work kept GPT models out of the candidates. */
+  /** Set when a screenshot of UI work kept GPT models and other instances out of the candidates. */
   reason: Schema.optionalKey(Schema.Literal("image_frontend")),
 });
 export type RouteModelDecision = typeof RouteModelDecision.Type;

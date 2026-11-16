@@ -46,7 +46,16 @@
       "vals-swebench-multimodal": {
         "url": "https://www.vals.ai/benchmarks/swebench-multimodal",
         "dataDate": "2026-11-09"
-      }
+      },
+      "paddo-gemini-4": {
+        "url": "https://paddo.dev/blog/gemini-4-carbon/",
+        "dataDate": "2026-11-11"
+      },
+      "theo-gemini-4": {
+        "url": "https://www.youtube.com/watch?v=OBNVzWYMKbE",
+        "dataDate": "2026-11-11"
+      },
+      "v2ex-gemini-4-latency": { "url": "https://www.v2ex.com/t/1257050", "dataDate": "2026-11-14" }
     },
     "defaultEffortByClass": {
       "readonly": "low",
@@ -191,7 +200,16 @@
         "tierByClass": { "readonly": "A", "quick_edit": "B", "implement": "S", "hard": "A" },
         "relativeCost": 5,
         "verified": true,
-        "sourceIds": ["aa-index", "aa-coding", "frontier-code-2", "scale-swe-atlas"]
+        "backgroundOnly": true,
+        "sourceIds": [
+          "aa-index",
+          "aa-coding",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "paddo-gemini-4",
+          "theo-gemini-4",
+          "v2ex-gemini-4-latency"
+        ]
       },
       { "driver": "opencode", "model": "*", "sourceIds": ["aa-index"] },
       { "driver": "cursor", "model": "*", "sourceIds": ["aa-index"] },

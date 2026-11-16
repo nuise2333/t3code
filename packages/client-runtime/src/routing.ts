@@ -38,6 +38,7 @@ const REASON_LABELS: Partial<Record<RoutingReason, string>> = {
   default_class: "No clear signal",
   model_row: "Tuned for this model",
   nearest_level: "Closest level this model offers",
+  security_prompt: "Security prompt, model kept",
 };
 
 const AUTO_REQUEST: LaunchRoutingRequest = { mode: "auto" };
