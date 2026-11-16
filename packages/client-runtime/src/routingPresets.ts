@@ -121,8 +121,6 @@ export interface PresetProviderSource {
 
 type SourceModel = PresetProviderSource["models"][number];
 
-const EFFORT_LADDER: ReadonlyArray<PresetEffort> = ["low", "medium", "high"];
-
 /** The target if offered, else the nearest lower level, else the nearest higher one up to high. */
 function effortOptions(model: SourceModel, target: PresetEffort | undefined) {
   if (target === undefined) return undefined;
@@ -133,13 +131,8 @@ function effortOptions(model: SourceModel, target: PresetEffort | undefined) {
       .map((option) => option.id)
       .filter((id) => !descriptor.promptInjectedValues?.includes(id)),
   );
-  const index = EFFORT_LADDER.indexOf(target);
-  const level =
-    EFFORT_LADDER.slice(0, index + 1)
-      .reverse()
-      .find((candidate) => offered.has(candidate)) ??
-    EFFORT_LADDER.slice(index + 1).find((candidate) => offered.has(candidate));
-  return level === undefined ? undefined : [{ id: descriptor.id, value: level }];
+  // A missing level falls back to the model's default: writing must not land on high or low.
+  return offered.has(target) ? [{ id: descriptor.id, value: target }] : undefined;
 }
 
 function findMember(
