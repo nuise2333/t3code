@@ -179,7 +179,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole).annotate({
     description:
-      "Without a target, the user's Auto settings may pick the child's model: review on another vendor, research cheaper. A vendor the user requires still needs target.model.",
+      "Without a target, the user's Auto settings may pick the child's model: review on another vendor, research cheaper. A vendor the user requires still needs target.model. Web research: give the task a search budget, and ask it to check that cited links open and quotes appear, and to list sources it couldn't reach apart from ones that had nothing.",
   }),
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
@@ -735,6 +735,10 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
         "Runs share one thread but each starts a fresh session. Unbound: the first run makes the thread.",
     }),
   ),
+  routingGroupId: Schema.optional(Schema.NullOr(RoutingGroupId)).annotate({
+    description:
+      "Group id from orchestrator_capabilities; each run that starts a thread uses a usable member. Not for a bound thread. null clears.",
+  }),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
 });
 export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTaskInput.Type;
@@ -757,6 +761,7 @@ export const OrchestratorMcpScheduledTask = Schema.Struct({
   projectId: ProjectId,
   boundThreadId: Schema.NullOr(ThreadId),
   freshSession: Schema.Boolean,
+  routingGroupId: Schema.optional(RoutingGroupId),
   schedule: ScheduledTaskSchedule,
   nextRunAt: Schema.NullOr(IsoDateTime),
   lastRunStatus: ScheduledTaskRunStatus,
@@ -801,6 +806,7 @@ export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   bindToCurrentThread: Schema.optional(Schema.Boolean),
   freshSession: Schema.optional(Schema.Boolean),
+  routingGroupId: Schema.optional(Schema.NullOr(RoutingGroupId)),
 });
 export type OrchestratorMcpUpdateScheduledTaskInput =
   typeof OrchestratorMcpUpdateScheduledTaskInput.Type;

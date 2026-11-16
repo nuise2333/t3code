@@ -299,6 +299,7 @@ function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): Orchestrato
     projectId: task.projectId,
     boundThreadId: task.threadId,
     freshSession: scheduledTaskThreadMode(task) === "fresh_session",
+    ...(task.routingGroupId ? { routingGroupId: task.routingGroupId } : {}),
     schedule: task.schedule,
     nextRunAt: task.nextRunAt,
     lastRunStatus: task.lastRunStatus,
@@ -2121,6 +2122,30 @@ const make = Effect.gen(function* () {
     };
   });
 
+  // Each launching run resolves the group, so a save only checks that it exists.
+  const scheduledRoutingGroup = Effect.fn("OrchestratorMcpService.scheduledRoutingGroup")(
+    function* (groupId: string | null, boundToThread: boolean) {
+      if (groupId === null) return null;
+      if (boundToThread) {
+        return yield* failure(
+          "invalid_request",
+          "routingGroupId applies only to runs that start a thread. Unbind with bindToCurrentThread: false, or omit routingGroupId.",
+        );
+      }
+      const settings = yield* serverSettings.getSettings.pipe(
+        Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
+      );
+      const group = settings.routingGroups.find((entry) => entry.id === groupId);
+      if (group === undefined) {
+        return yield* failure(
+          "invalid_request",
+          `No routing group ${groupId}. orchestrator_capabilities lists this environment's groups.`,
+        );
+      }
+      return group;
+    },
+  );
+
   const scheduledTaskRunModes = Effect.fn("OrchestratorMcpService.scheduledTaskRunModes")(
     function* (task: ScheduledTask) {
       const modes = [{ runtimeMode: task.runtimeMode, interactionMode: task.interactionMode }];
@@ -2219,8 +2244,11 @@ const make = Effect.gen(function* () {
             : "bindToCurrentThread binds to this thread, which belongs to a different project.",
         );
       }
+      const group = yield* scheduledRoutingGroup(input.routingGroupId ?? null, bindToCurrentThread);
       const modelSelection =
-        parent?.thread.modelSelection ?? (yield* projectDefaultModelSelection(project));
+        group?.members[0] ??
+        parent?.thread.modelSelection ??
+        (yield* projectDefaultModelSelection(project));
       // Never end on a lone high surrogate, which renders as a broken character.
       const derivedTitle = (input.prompt.split("\n")[0]?.trim() ?? "")
         .slice(0, 80)
@@ -2240,6 +2268,7 @@ const make = Effect.gen(function* () {
             : "new_thread",
         workspaceStrategy: yield* scheduledTaskWorkspaceStrategy(bindToCurrentThread, projectId),
         modelSelection,
+        routingGroupId: group?.id ?? null,
         runtimeMode: limits.runtimeMode,
         interactionMode: limits.interactionMode,
         createdBy: "agent",
@@ -2321,6 +2350,17 @@ const make = Effect.gen(function* () {
             : input.bindToCurrentThread && parent !== undefined
               ? parent.thread.id
               : null;
+        // An omitted group is kept unchecked, unless binding to a thread leaves it behind.
+        const group =
+          input.routingGroupId === undefined
+            ? null
+            : yield* scheduledRoutingGroup(input.routingGroupId, threadId !== null);
+        const routingGroupId =
+          input.routingGroupId === undefined
+            ? threadId === null
+              ? (existing.routingGroupId ?? null)
+              : null
+            : (group?.id ?? null);
         // Reset the workspace only when the binding flips, so unbinding cannot leave runs in the shared checkout.
         const workspaceStrategy =
           (threadId === null) === (existing.threadId === null)
@@ -2347,7 +2387,11 @@ const make = Effect.gen(function* () {
                   ? "new_thread"
                   : "continue",
           workspaceStrategy,
-          modelSelection: existing.modelSelection,
+          modelSelection:
+            group !== null && group.id !== existing.routingGroupId
+              ? (group.members[0] ?? existing.modelSelection)
+              : existing.modelSelection,
+          routingGroupId,
           runtimeMode: existing.runtimeMode,
           interactionMode: existing.interactionMode,
           createdBy: existing.createdBy,

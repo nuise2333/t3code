@@ -4272,6 +4272,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       lastRunError: null,
       runCount: 0,
     };
+    const officeMember = { instanceId: ProviderInstanceId.make("claude"), model: "opus" };
     const client: McpInvocationScope = {
       environmentId: EnvironmentId.make("environment:scheduled-base"),
       requestNamespace: "client:scheduled-base",
@@ -4301,7 +4302,11 @@ describe("OrchestratorMcpService provider resolution", () => {
             Layer.mock(ThreadManagementService.ThreadManagementService)({
               getThreadShell: () => Effect.succeed(null),
             }),
-            ServerSettings.layerTest(),
+            ServerSettings.layerTest({
+              routingGroups: [
+                { id: "office", name: "Office", members: [officeMember], strategy: "order" },
+              ],
+            }),
             Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
               list: () => Effect.succeed([]),
@@ -4380,6 +4385,63 @@ describe("OrchestratorMcpService provider resolution", () => {
         assert.deepEqual(
           (yield* Ref.get(inputs)).map((input) => input.title),
           [title],
+        );
+      }),
+    );
+
+    it.effect("a routing group seeds new-thread runs and leaves with a thread binding", () =>
+      Effect.gen(function* () {
+        const inputs = yield* Ref.make<ReadonlyArray<ScheduledTaskUpsertInput>>([]);
+        const withTask = (task: ScheduledTask) =>
+          OrchestratorMcpService.OrchestratorMcpService.pipe(
+            Effect.provide(
+              service(
+                masterRepository,
+                Ref.makeUnsafe<ReadonlyArray<ScheduledTask["workspaceStrategy"]>>([]),
+                task,
+                inputs,
+              ),
+            ),
+          );
+        const mcp = yield* withTask(existing);
+        yield* mcp.scheduleTask(client, {
+          projectId,
+          prompt: "Digest",
+          schedule,
+          routingGroupId: "office",
+        });
+        const unknown = yield* mcp
+          .scheduleTask(client, { projectId, prompt: "Digest", schedule, routingGroupId: "gone" })
+          .pipe(Effect.flip);
+        assert.include(unknown.message, "No routing group gone");
+
+        const grouped = yield* withTask({ ...existing, routingGroupId: "deleted-later" });
+        // An unrelated edit keeps the group without checking it still exists.
+        yield* grouped.updateScheduledTask(client, {
+          scheduledTaskId: existing.id,
+          prompt: "Digest v2",
+        });
+        yield* grouped.updateScheduledTask(client, {
+          scheduledTaskId: existing.id,
+          routingGroupId: null,
+        });
+        const bound = yield* withTask({
+          ...existing,
+          threadId: ThreadId.make("thread:scheduled-base"),
+          threadMode: "continue",
+        });
+        const refused = yield* bound
+          .updateScheduledTask(client, { scheduledTaskId: existing.id, routingGroupId: "office" })
+          .pipe(Effect.flip);
+        assert.include(refused.message, "only to runs that start a thread");
+
+        assert.deepEqual(
+          (yield* Ref.get(inputs)).map((input) => [input.routingGroupId, input.modelSelection]),
+          [
+            ["office", officeMember],
+            ["deleted-later", existing.modelSelection],
+            [null, existing.modelSelection],
+          ],
         );
       }),
     );
