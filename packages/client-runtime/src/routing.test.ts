@@ -27,6 +27,7 @@ import {
   routedModelDisplay,
   routingGroupProblems,
   routingProviderSource,
+  rootCauseTarget,
 } from "./routing.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
@@ -505,7 +506,7 @@ describe("higherEffortRetry", () => {
     parentNodeId: NodeId.make(parent),
     kind,
   });
-  const offered = { key: "run-2", messageId: "msg-1", effort: "high" };
+  const offered = { key: "run-2", messageId: "msg-1", effort: "high", commands: ["vp test"] };
 
   it.each([
     {
@@ -640,7 +641,19 @@ describe("higherEffortRetry", () => {
       runs: [run(1), run(2)],
       messages: [{ id: MessageId.make("msg-1"), text: "ultrathink about this" }],
       turnItems: [command(1, "vp test", 1), command(2, "vp test", 1)],
-      expected: null,
+      expected: { ...offered, effort: null },
+    },
+    {
+      name: "only the commands that failed in both runs",
+      runs: [run(1), run(2)],
+      turnItems: [
+        command(1, "vp test", 1),
+        command(1, "vp lint", 1, { ordinal: 1 }),
+        command(2, "vp test", 1),
+        command(2, "vp lint", 0, { ordinal: 1 }),
+        command(2, "vp fmt", 1, { ordinal: 2 }),
+      ],
+      expected: offered,
     },
     {
       name: "the level after one the composer already raised",
@@ -666,7 +679,120 @@ describe("higherEffortRetry", () => {
       selection: "composer" in row ? row.composer : selection("medium"),
     });
     expect(
-      result && { key: result.key, messageId: result.messageId, effort: result.effort.value },
+      result && {
+        key: result.key,
+        messageId: result.messageId,
+        effort: result.effort?.value ?? null,
+        commands: result.commands,
+      },
+    ).toStrictEqual(expected);
+  });
+});
+
+describe("rootCauseTarget", () => {
+  const provider = (
+    id: string,
+    driver: string,
+    models: ReadonlyArray<string>,
+    extra: { readonly plan?: true; readonly status?: string } = {},
+  ) =>
+    ({
+      instanceId: ProviderInstanceId.make(id),
+      driver,
+      enabled: true,
+      installed: true,
+      status: extra.status ?? "ready",
+      auth: { status: "authenticated" },
+      ...(extra.plan ? { showInteractionModeToggle: true } : {}),
+      models: models.map((slug, index) => ({
+        slug,
+        name: slug.toUpperCase(),
+        isCustom: false,
+        isDefault: index === 0,
+      })),
+    }) as unknown as ServerProvider;
+  const codex = provider("codex", "codex", ["gpt-6"], { plan: true });
+  const claude = provider("claude", "claudeAgent", ["claude-opus-5-5"], { plan: true });
+  const gemini = provider("antigravity", "antigravity", ["gemini-4-carbon", "claude-sonnet-5-5"]);
+  const grok = provider("grok", "grok", ["grok-5"]);
+
+  it.each([
+    {
+      name: "an OpenAI failure goes to Claude",
+      failing: { instance: "codex", model: "gpt-6" },
+      providers: [codex, gemini, grok, claude],
+      expected: { instance: "claude", model: "claude-opus-5-5", mode: "plan" },
+    },
+    {
+      name: "a Claude failure goes to OpenAI",
+      failing: { instance: "claude", model: "claude-opus-5-5" },
+      providers: [gemini, claude, codex],
+      expected: { instance: "codex", model: "gpt-6", mode: "plan" },
+    },
+    {
+      name: "an instance default outranks another instance's other model",
+      failing: { instance: "codex", model: "gpt-6" },
+      providers: [codex, gemini, provider("claude", "claudeAgent", ["claude-opus-5-5"])],
+      expected: { instance: "claude", model: "claude-opus-5-5", mode: "default" },
+    },
+    {
+      name: "a non-default model of the counterpart outranks a third vendor",
+      failing: { instance: "codex", model: "gpt-6" },
+      providers: [codex, gemini],
+      expected: { instance: "antigravity", model: "claude-sonnet-5-5", mode: "default" },
+    },
+    {
+      name: "no counterpart falls back to another known vendor",
+      failing: { instance: "claude", model: "claude-opus-5-5" },
+      providers: [claude, grok],
+      expected: { instance: "grok", model: "grok-5", mode: "default" },
+    },
+    {
+      name: "a Gemini failure prefers Claude",
+      failing: { instance: "antigravity", model: "gemini-4-carbon" },
+      providers: [gemini, codex, claude],
+      expected: { instance: "claude", model: "claude-opus-5-5", mode: "plan" },
+    },
+    {
+      name: "only the same vendor is ready",
+      failing: { instance: "codex", model: "gpt-6" },
+      providers: [codex, provider("codex_work", "codex", ["gpt-6-mini"])],
+      expected: null,
+    },
+    {
+      name: "the other vendor is not ready",
+      failing: { instance: "codex", model: "gpt-6" },
+      providers: [
+        codex,
+        provider("claude", "claudeAgent", ["claude-opus-5-5"], { status: "error" }),
+      ],
+      expected: null,
+    },
+    {
+      name: "the failing model's vendor is unknown",
+      failing: { instance: "cursor", model: "auto" },
+      providers: [provider("cursor", "cursor", ["auto"]), claude],
+      expected: null,
+    },
+  ])("$name", ({ failing, providers, expected }) => {
+    const result = rootCauseTarget({
+      failing: { instanceId: ProviderInstanceId.make(failing.instance), model: failing.model },
+      providers,
+      settings: {
+        providerInstances: Object.fromEntries(
+          providers.map((entry) => [entry.instanceId, { driver: entry.driver, enabled: true }]),
+        ),
+        projectSettingsOverrides: {},
+      },
+      projectId: null,
+      now: 0,
+    });
+    expect(
+      result && {
+        instance: result.selection.instanceId,
+        model: result.selection.model,
+        mode: result.interactionMode,
+      },
     ).toStrictEqual(expected);
   });
 });

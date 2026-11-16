@@ -9,8 +9,11 @@ import {
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
+  type ProjectId,
   type ProviderInstanceId,
+  type ProviderInteractionMode,
   type ProviderOptionDescriptor,
+  resolveProjectProviderInstanceEnabled,
   type RouteDecision,
   type RoutingGroup,
   type RoutingGroupRules,
@@ -18,12 +21,15 @@ import {
   type RoutingSkipReason,
   type RoutingTaskClass,
   type ServerProvider,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import { isClaudeUltrathinkPrompt, isReasoningSelect } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   effortSetOutsidePicker,
   type HigherEffort,
+  type ModelVendor,
+  modelVendor,
   nextHigherEffort,
 } from "@t3tools/shared/routing";
 import { exhaustedUsageWindow } from "@t3tools/shared/usageLimits";
@@ -174,7 +180,10 @@ export interface HigherEffortRetry {
   readonly key: string;
   /** The older run's message, which the retry rewinds to. */
   readonly messageId: MessageId;
-  readonly effort: HigherEffort;
+  /** Null when no higher level is offered; the failure can still go to another vendor. */
+  readonly effort: HigherEffort | null;
+  /** The commands that failed at the end of both runs. */
+  readonly commands: ReadonlyArray<string>;
 }
 
 /** The run's own work: its root and nodes below it, but nothing a subagent ran. */
@@ -229,8 +238,8 @@ const sameModel = (left: ModelSelection, right: ModelSelection) =>
   left.instanceId === right.instanceId && left.model === right.model;
 
 /**
- * Offers a retry one level above the composer's current one when a command failed at the end of
- * both of the last two completed runs on that model. Auto never acts on this; its user decides.
+ * Finds a command that failed at the end of both of the last two completed runs on the composer's
+ * model, with a retry one level above its current one when there is one. Auto never acts on this.
  */
 export function higherEffortRetry(input: {
   readonly runs: ReadonlyArray<RetryScanRun>;
@@ -258,10 +267,10 @@ export function higherEffortRetry(input: {
   }
   const nodesById = new Map(input.nodes.map((node) => [node.id, node]));
   const olderFailures = lastOwnFailures(older, input.turnItems, nodesById);
-  const repeated = [...lastOwnFailures(newer, input.turnItems, nodesById)].some(
-    ([command, failed]) => failed && olderFailures.get(command) === true,
-  );
-  if (!repeated) return null;
+  const commands = [...lastOwnFailures(newer, input.turnItems, nodesById)]
+    .filter(([command, failed]) => failed && olderFailures.get(command) === true)
+    .map(([command]) => command);
+  if (commands.length === 0) return null;
   const effort = nextHigherEffort({
     descriptors: input.descriptors,
     selection: input.selection,
@@ -271,7 +280,100 @@ export function higherEffortRetry(input: {
         isClaudeUltrathinkPrompt(message.text),
     ),
   });
-  return effort === null ? null : { key: newer.id, messageId: older.userMessageId, effort };
+  return { key: newer.id, messageId: older.userMessageId, effort, commands };
+}
+
+const providerReady = (snapshot: ServerProvider): boolean =>
+  snapshot.enabled &&
+  snapshot.installed &&
+  snapshot.status !== "error" &&
+  snapshot.status !== "disabled" &&
+  snapshot.auth.status !== "unauthenticated" &&
+  isProviderAvailable(snapshot);
+
+export interface RootCauseTarget {
+  readonly selection: ModelSelection;
+  readonly modelName: string;
+  readonly interactionMode: ProviderInteractionMode;
+}
+
+const VENDOR_ORDER: ReadonlyArray<ModelVendor> = ["anthropic", "openai", "google", "xai"];
+const COUNTERPART_VENDOR: Partial<Record<ModelVendor, ModelVendor>> = {
+  anthropic: "openai",
+  openai: "anthropic",
+};
+
+/**
+ * Another vendor's model for a read-only look at a repeated failure, since more effort on the same
+ * model keeps its blind spots. Claude and OpenAI models check each other first; instance defaults
+ * win within a vendor. Null when the failing model's vendor is unknown or no other is ready.
+ */
+export function rootCauseTarget(input: {
+  readonly failing: Pick<ModelSelection, "instanceId" | "model">;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+  readonly projectId: ProjectId | null;
+  readonly now: number;
+}): RootCauseTarget | null {
+  const failingProvider = input.providers.find(
+    (provider) => provider.instanceId === input.failing.instanceId,
+  );
+  if (failingProvider === undefined) return null;
+  const failingVendor = modelVendor(
+    failingProvider.driver,
+    failingProvider.models.find(
+      (model) =>
+        model.slug === input.failing.model || model.aliases?.includes(input.failing.model) === true,
+    )?.slug ?? input.failing.model,
+  );
+  if (failingVendor === null) return null;
+  const counterpart = COUNTERPART_VENDOR[failingVendor];
+  const vendors = [
+    ...(counterpart === undefined ? [] : [counterpart]),
+    ...VENDOR_ORDER.filter((vendor) => vendor !== failingVendor && vendor !== counterpart),
+  ];
+  const ready = input.providers.filter(
+    (provider) =>
+      providerReady(provider) &&
+      resolveProjectProviderInstanceEnabled(input.settings, input.projectId, provider.instanceId),
+  );
+  for (const vendor of vendors) {
+    for (const defaultOnly of [true, false]) {
+      for (const provider of ready) {
+        const model = provider.models.find(
+          (candidate) =>
+            (!defaultOnly || candidate.isDefault === true) &&
+            modelVendor(provider.driver, candidate.slug) === vendor &&
+            exhaustedUsageWindow(provider, input.now, candidate.slug) === undefined,
+        );
+        if (model !== undefined) {
+          return {
+            selection: { instanceId: provider.instanceId, model: model.slug },
+            modelName: model.shortName ?? model.name,
+            interactionMode: provider.showInteractionModeToggle === true ? "plan" : "default",
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** The new thread's draft: the user reads it over and sends it. */
+export function rootCausePrompt(commands: ReadonlyArray<string>): string {
+  const ticks = commands.flatMap((command) => command.match(/`+/g) ?? []);
+  const fence = "`".repeat(Math.max(3, ...ticks.map((run) => run.length + 1)));
+  return [
+    commands.length === 1
+      ? "This command failed at the end of two turns in a row in another thread:"
+      : "These commands failed at the end of two turns in a row in another thread:",
+    "",
+    fence,
+    ...commands,
+    fence,
+    "",
+    "Find the root cause. Do not edit any files: read the code and run only commands that change nothing. Report the cause, the evidence for it, and the fix you would make.",
+  ].join("\n");
 }
 
 /** The groups a new thread may pick: none from a server that cannot resolve them. */
@@ -331,13 +433,7 @@ export function subscriptionLabel(snapshot: ServerProvider): string | undefined 
 
 /** A provider snapshot as a group member source, with the server's cheap launch checks. */
 export function routingProviderSource(snapshot: ServerProvider, now: number): ModelNameSource {
-  const ready =
-    snapshot.enabled &&
-    snapshot.installed &&
-    snapshot.status !== "error" &&
-    snapshot.status !== "disabled" &&
-    snapshot.auth.status !== "unauthenticated" &&
-    isProviderAvailable(snapshot);
+  const ready = providerReady(snapshot);
   return {
     instanceId: snapshot.instanceId,
     models: snapshot.models,

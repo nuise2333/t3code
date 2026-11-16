@@ -48,9 +48,14 @@ import { RightPanelSurfaceContent } from "./chat/RightPanelSurfaceContent";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
-import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+import type { ScopedProjectRef, UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
-import { higherEffortRetry } from "@t3tools/client-runtime/routing";
+import {
+  higherEffortRetry,
+  rootCausePrompt,
+  rootCauseTarget,
+  type RootCauseTarget,
+} from "@t3tools/client-runtime/routing";
 import { effortRetryBannerItem } from "./chat/ComposerEffortRetry";
 import { freshSessionBannerItem } from "./chat/ComposerFreshSession";
 import { armFreshSession, disarmFreshSession, useFreshSessionArmed } from "./chat/freshSessionArms";
@@ -1155,6 +1160,17 @@ export default function ChatView(props: ChatViewProps) {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   };
   const handleNewThreadInActiveProjectStable = useStableCallback(handleNewThreadInActiveProject);
+  const openRootCauseThread = async (
+    projectRef: ScopedProjectRef,
+    target: RootCauseTarget,
+    commands: ReadonlyArray<string>,
+  ) => {
+    const opened = await handleNewThread(projectRef, { prompt: rootCausePrompt(commands) });
+    if (opened === null) return;
+    const { setModelSelection, setInteractionMode } = useComposerDraftStore.getState();
+    setModelSelection(opened.draftId, target.selection, { explicit: true, replaceOptions: true });
+    setInteractionMode(opened.draftId, target.interactionMode);
+  };
   const projectGroupingSettings = selectProjectGroupingSettings(settings);
   const activeDraftLogicalProjectKey =
     !isServerThread && activeProject
@@ -2621,13 +2637,7 @@ export default function ChatView(props: ChatViewProps) {
     const nextSelection =
       (composerModelSelectionApplies ? composerSelectedModelSelection : null) ??
       serverProjection?.thread.modelSelection;
-    if (
-      !serverProjection ||
-      !nextSelection ||
-      !supportsConversationRollback ||
-      isWorking ||
-      phase === "running"
-    ) {
+    if (!serverProjection || !nextSelection || isWorking || phase === "running") {
       return [];
     }
     const provider = providerStatuses.find(
@@ -2645,22 +2655,48 @@ export default function ChatView(props: ChatViewProps) {
       selection: nextSelection,
     });
     if (!provider || !retry || dismissedEffortRetryKey === retry.key) return [];
-    const turnCount = deriveRevertTurnCountByUserMessageId({
-      timelineEntries,
-      checkpoints: turnDiffSummaries,
-      threadStartCheckpointAvailable,
-      availableRevertTurnCounts,
-    }).get(retry.messageId);
-    if (turnCount === undefined) return [];
+    const { effort } = retry;
+    const turnCount =
+      effort !== null && supportsConversationRollback
+        ? deriveRevertTurnCountByUserMessageId({
+            timelineEntries,
+            checkpoints: turnDiffSummaries,
+            threadStartCheckpointAvailable,
+            availableRevertTurnCounts,
+          }).get(retry.messageId)
+        : undefined;
+    const rootCause =
+      activeProjectRef === null
+        ? null
+        : rootCauseTarget({
+            failing: nextSelection,
+            providers: providerStatuses,
+            settings,
+            projectId: activeProjectRef.projectId,
+            now: Date.parse(nowMinute),
+          });
+    if ((effort === null || turnCount === undefined) && rootCause === null) return [];
     return [
       effortRetryBannerItem({
-        levelLabel: retry.effort.label,
-        onRetry: () =>
-          onRetryWithEffortStable(turnCount, retry.messageId, {
-            ...retry.effort,
-            provider: provider.driver,
-            selection: nextSelection,
-          }),
+        retry:
+          effort === null || turnCount === undefined
+            ? null
+            : {
+                levelLabel: effort.label,
+                onRetry: () =>
+                  onRetryWithEffortStable(turnCount, retry.messageId, {
+                    ...effort,
+                    provider: provider.driver,
+                    selection: nextSelection,
+                  }),
+              },
+        rootCause:
+          rootCause === null || activeProjectRef === null
+            ? null
+            : {
+                modelName: rootCause.modelName,
+                onOpen: () => void openRootCauseThread(activeProjectRef, rootCause, retry.commands),
+              },
         onDismiss: () => setDismissedEffortRetryKey(retry.key),
       }),
     ];
