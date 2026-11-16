@@ -174,6 +174,7 @@ it("drops a malformed routing group alone and keeps the first of a repeated id",
       "not a group",
       { id: "fast", name: "Fast again", members: [member], strategy: "order" },
       { id: "deep", name: "Deep", members: [member], strategy: "order" },
+      { id: "spread", name: "Spread", members: [member], strategy: "order", rank: "quota" },
     ],
     routingGroupRules: { hard: "deep", readonly: "fast" },
     autoRouting: { enabled: true },
@@ -181,7 +182,9 @@ it("drops a malformed routing group alone and keeps the first of a repeated id",
   expect(settings.routingGroups.map((group) => [group.id, group.name])).toEqual([
     ["fast", "Fast"],
     ["deep", "Deep"],
+    ["spread", "Spread"],
   ]);
+  expect(settings.routingGroups.at(-1)?.rank).toBe("quota");
   expect(settings.routingGroupRules).toEqual({ hard: "deep", readonly: "fast" });
   expect(settings.autoRouting).toEqual({
     enabled: true,

@@ -22,8 +22,10 @@ import {
   classifyTask,
   isFrontendPrompt,
   nextHigherEffort,
+  modelVendor,
   resolveRoutingGroup,
   routeFor,
+  type ModelVendor,
 } from "./routing.ts";
 
 const table: RoutingTable = {
@@ -402,6 +404,36 @@ describe("routeFor", () => {
       nearest: true,
       emitted: { low: null },
     },
+    {
+      name: "a role's task class replaces what the prompt classifies as",
+      driver: "codex",
+      levels: ["low", "medium", "high"],
+      prompt: "Fix the login bug in auth.ts",
+      mode: "default",
+      effort: "low",
+      taskClass: "readonly",
+    },
+    {
+      name: "a minimum level rises to the next offered one",
+      driver: "codex",
+      levels: ["low", "high"],
+      prompt: QUESTION,
+      mode: "default",
+      effort: "high",
+      nearest: true,
+      taskClass: "readonly",
+      minEffort: "medium",
+    },
+    {
+      name: "a minimum level never rises past high",
+      driver: "codex",
+      levels: ["low", "xhigh", "max"],
+      prompt: QUESTION,
+      mode: "default",
+      effort: null,
+      taskClass: "readonly",
+      minEffort: "medium",
+    },
   ] as const)("$name", ({ driver, levels, prompt, mode, effort, ...rest }) => {
     const emitted: Readonly<Record<string, string | null>> | undefined =
       "emitted" in rest ? rest.emitted : undefined;
@@ -420,6 +452,8 @@ describe("routeFor", () => {
       interactionMode: mode,
       apply: true,
       emittedLevel: emitted === undefined ? undefined : (id) => emitted[id],
+      taskClass: "taskClass" in rest ? rest.taskClass : undefined,
+      minEffort: "minEffort" in rest ? rest.minEffort : undefined,
     });
     expect(result.decision.effort).toBe(effort);
     expect(result.decision.reasons.includes("nearest_level")).toBe("nearest" in rest);
@@ -795,11 +829,15 @@ describe("resolveRoutingGroup", () => {
     model: "model-a",
     ...extra,
   });
-  const group = (members: ReadonlyArray<ModelSelection>): RoutingGroup => ({
+  const group = (
+    members: ReadonlyArray<ModelSelection>,
+    rank?: RoutingGroup["rank"],
+  ): RoutingGroup => ({
     id: "fast",
     name: "Fast",
     members,
     strategy: "order",
+    ...(rank === undefined ? {} : { rank }),
   });
   const projectId = ProjectId.make("project-fake");
   const resolve = (input: {
@@ -809,9 +847,10 @@ describe("resolveRoutingGroup", () => {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: ProviderInteractionMode;
     readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId>;
+    readonly rank?: RoutingGroup["rank"];
   }) =>
     resolveRoutingGroup({
-      group: group(input.members),
+      group: group(input.members, input.rank),
       providers: input.providers ?? providers(),
       settings: input.settings ?? settings(),
       projectId,
@@ -952,6 +991,130 @@ describe("resolveRoutingGroup", () => {
     });
   });
 
+  const windows = (
+    ...entries: ReadonlyArray<readonly [id: string, usedPercent: number, resetsInHours: number]>
+  ) =>
+    ({
+      usageLimits: {
+        windows: entries.map(([id, usedPercent, hours]) => ({
+          id,
+          kind: id === "secondary" ? "weekly" : "session",
+          label: id,
+          usedPercent,
+          resetsAt: DateTime.formatIso(DateTime.makeUnsafe(NOW + hours * 3_600_000)),
+        })),
+      },
+    }) as unknown as Partial<ServerProvider>;
+  const apiKey = { auth: { status: "authenticated", type: "apiKey" } } as Partial<ServerProvider>;
+  const gone = ProviderInstanceId.make("gone");
+
+  it.each<{
+    readonly name: string;
+    readonly members: ReadonlyArray<ModelSelection>;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly rank?: RoutingGroup["rank"];
+    readonly index: number;
+    readonly skipped?: ReadonlyArray<{
+      readonly index: number;
+      readonly reason: RoutingSkipReason;
+    }>;
+  }>([
+    {
+      name: "starts on the subscription whose window resets soonest and still has room",
+      members: [member(claudeId), member(codexId)],
+      providers: providers({
+        claude: windows(["primary", 50, 100]),
+        codex: windows(["primary", 50, 1]),
+      }),
+      rank: "quota",
+      index: 1,
+    },
+    {
+      name: "lets the tightest window govern",
+      members: [member(codexId), member(claudeId)],
+      providers: providers({
+        codex: windows(["primary", 10, 1], ["secondary", 90, 100]),
+        claude: windows(["primary", 50, 5]),
+      }),
+      rank: "quota",
+      index: 1,
+    },
+    {
+      name: "ranks plan credits after a subscription",
+      members: [member(codexId), member(claudeId)],
+      providers: providers({
+        codex: windows(["individual", 10, 1]),
+        claude: windows(["primary", 80, 100]),
+      }),
+      rank: "quota",
+      index: 1,
+    },
+    {
+      name: "ranks unknown funding after plan credits",
+      members: [member(kiroId), member(codexId)],
+      providers: providers({ codex: windows(["individual", 10, 1]) }),
+      rank: "quota",
+      index: 1,
+    },
+    {
+      name: "ranks pay-as-you-go after unknown funding",
+      members: [member(claudeId), member(kiroId)],
+      providers: providers({ claude: apiKey }),
+      rank: "quota",
+      index: 1,
+    },
+    {
+      name: "ranks a member inside the reserve after pay-as-you-go",
+      members: [member(codexId), member(claudeId)],
+      providers: providers({ codex: windows(["primary", 90, 1]), claude: apiKey }),
+      rank: "quota",
+      index: 1,
+    },
+    {
+      name: "still takes a member inside the reserve when it is the only one left",
+      members: [member(gone), member(codexId)],
+      providers: providers({ codex: windows(["primary", 90, 1]) }),
+      rank: "quota",
+      index: 1,
+      skipped: [{ index: 0, reason: "instance_missing" }],
+    },
+    {
+      name: "records a skipped member that comes after the chosen one",
+      members: [member(claudeId), member(codexId)],
+      providers: providers({ codex: exhausted("2026-06-01T03:00:00Z") }),
+      rank: "quota",
+      index: 0,
+      skipped: [{ index: 1, reason: "usage_exhausted" }],
+    },
+    {
+      name: "keeps member order on a tie",
+      members: [member(kiroId), member(claudeId)],
+      providers: providers(),
+      rank: "quota",
+      index: 0,
+    },
+    {
+      name: "keeps member order without a rank",
+      members: [member(claudeId), member(codexId)],
+      providers: providers({
+        claude: windows(["primary", 50, 100]),
+        codex: windows(["primary", 50, 1]),
+      }),
+      index: 0,
+    },
+  ])("by quota: $name", (row) => {
+    const result = resolve({
+      members: row.members,
+      providers: row.providers,
+      runtimeMode: "full-access",
+      ...(row.rank === undefined ? {} : { rank: row.rank }),
+    });
+    expect(result).toMatchObject({ ok: true, index: row.index });
+    expect(result.skipped.map(({ index, reason }) => ({ index, reason }))).toEqual(
+      row.skipped ?? [],
+    );
+  });
+
   it("matches a member's model by alias and keeps a window that has reset", () => {
     expect(
       resolve({
@@ -1025,6 +1188,22 @@ describe("isFrontendPrompt", () => {
     { prompt: "解释这张架构图", frontend: false },
   ])("$prompt", ({ prompt, frontend }) => {
     expect(isFrontendPrompt(prompt)).toBe(frontend);
+  });
+});
+
+describe("modelVendor", () => {
+  it.each([
+    ["claudeAgent", "claude-opus-4-1", "anthropic"],
+    ["claudeAgent", "opus", "anthropic"],
+    ["codex", "gpt-5", "openai"],
+    ["codex", "custom-alias", "openai"],
+    ["cursor", "o3", "openai"],
+    ["antigravity", "claude-sonnet-4-5", "anthropic"],
+    ["antigravity", "gemini-3-pro", "google"],
+    ["opencode", "openrouter/x-ai/grok-4", "xai"],
+    ["cursor", "auto", null],
+  ] as const)("%s %s is %s", (driver, slug, vendor) => {
+    expect(modelVendor(driver, slug)).toBe(vendor);
   });
 });
 
@@ -1146,6 +1325,8 @@ describe("chooseAutoModel", () => {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: ProviderInteractionMode;
     readonly imageFrontend?: boolean;
+    readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId>;
+    readonly review?: { readonly parentVendor: ModelVendor | null };
   }) =>
     chooseAutoModel({
       table: tableOf(input.rows ?? ROWS),
@@ -1158,6 +1339,8 @@ describe("chooseAutoModel", () => {
       runtimeMode: input.runtimeMode ?? "full-access",
       interactionMode: input.interactionMode ?? "default",
       imageFrontend: input.imageFrontend ?? false,
+      runnableInstanceIds: input.runnableInstanceIds,
+      review: input.review,
       now: NOW,
     });
   const on = (instanceId: ProviderInstanceId, model: string): ModelSelection => ({
@@ -1175,6 +1358,8 @@ describe("chooseAutoModel", () => {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: ProviderInteractionMode;
     readonly imageFrontend?: boolean;
+    readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId>;
+    readonly review?: { readonly parentVendor: ModelVendor | null };
     readonly picks: ModelSelection;
     readonly switched: "none" | "model" | "provider";
     readonly tier: RoutingTier | null;
@@ -1566,6 +1751,98 @@ describe("chooseAutoModel", () => {
       switched: "provider",
       tier: "B",
       skipped: 1,
+    },
+    {
+      name: "an instance without an orchestration adapter is no candidate",
+      current: on(claudeId, "model-opus"),
+      taskClass: "quick_edit",
+      scope: "provider",
+      providers: [claude(), codex()],
+      runnableInstanceIds: new Set([claudeId]),
+      picks: on(claudeId, "model-opus"),
+      switched: "none",
+      tier: "S",
+      skipped: 2,
+    },
+    {
+      name: "review leaves the parent's vendor, even on a driver serving several",
+      current: on(codexId, "model-sol"),
+      taskClass: "readonly",
+      providers: [codex(), provider(cursorId, "cursor", ["gpt-fake-5", "claude-fake-4"])],
+      rows: [
+        ...ROWS,
+        row("cursor", "gpt-fake-5", every("A"), 0),
+        row("cursor", "claude-fake-4", every("A"), 1),
+      ],
+      review: { parentVendor: "openai" },
+      picks: on(cursorId, "claude-fake-4"),
+      switched: "provider",
+      tier: "A",
+    },
+    {
+      name: "review counts Claude on Antigravity as the Claude parent's vendor",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [
+        claude(),
+        provider(ProviderInstanceId.make("antigravity_fake"), "antigravity", [
+          "claude-fake-opus",
+          "gemini-fake-pro",
+        ]),
+      ],
+      rows: [
+        ...ROWS,
+        row("antigravity", "claude-fake-opus", every("S"), 0),
+        row("antigravity", "gemini-fake-pro", every("S"), 3),
+      ],
+      review: { parentVendor: "anthropic" },
+      picks: on(ProviderInstanceId.make("antigravity_fake"), "gemini-fake-pro"),
+      switched: "provider",
+      tier: "S",
+    },
+    {
+      name: "review from an Opus parent picks Sol at the parent's read-only tier",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [claude(), codex()],
+      rows: [
+        row("claudeAgent", "model-opus", { ...every("S"), readonly: "A" }, 4),
+        ...ROWS.filter((entry) => entry.model !== "model-opus"),
+      ],
+      review: { parentVendor: "anthropic" },
+      picks: on(codexId, "model-sol"),
+      switched: "provider",
+      tier: "A",
+    },
+    {
+      name: "review from a Haiku parent pays more rather than land below A",
+      current: on(claudeId, "model-haiku"),
+      taskClass: "readonly",
+      providers: [claude(), codex()],
+      review: { parentVendor: "anthropic" },
+      picks: on(codexId, "model-sol"),
+      switched: "provider",
+      tier: "A",
+    },
+    {
+      name: "review keeps the parent when no other vendor qualifies",
+      current: on(claudeId, "model-opus"),
+      taskClass: "readonly",
+      providers: [claude()],
+      review: { parentVendor: "anthropic" },
+      picks: on(claudeId, "model-opus"),
+      switched: "none",
+      tier: "S",
+    },
+    {
+      name: "review from a parent of unknown vendor takes any known vendor",
+      current: on(cursorId, "auto"),
+      taskClass: "readonly",
+      providers: [provider(cursorId, "cursor", ["auto"]), claude()],
+      review: { parentVendor: null },
+      picks: on(claudeId, "model-sonnet"),
+      switched: "provider",
+      tier: "A",
     },
   ])("$name", (row) => {
     const choice = choose(row);

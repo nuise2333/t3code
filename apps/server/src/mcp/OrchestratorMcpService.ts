@@ -2616,14 +2616,13 @@ const make = Effect.gen(function* () {
     }),
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, input) {
       const groupId = input.routingGroupId;
-      if (
-        groupId !== undefined &&
-        (input.target?.providerInstanceId !== undefined ||
-          input.target?.driverKind !== undefined ||
-          input.target?.model !== undefined ||
-          input.target?.options !== undefined ||
-          input.target?.environmentId !== undefined)
-      ) {
+      const explicitTarget =
+        input.target?.providerInstanceId !== undefined ||
+        input.target?.driverKind !== undefined ||
+        input.target?.model !== undefined ||
+        input.target?.options !== undefined ||
+        input.target?.environmentId !== undefined;
+      if (groupId !== undefined && explicitTarget) {
         return yield* failure(
           "invalid_request",
           "routingGroupId picks the model here; omit target's provider, model, options and environmentId.",
@@ -2696,10 +2695,10 @@ const make = Effect.gen(function* () {
         input.interactionMode,
       );
       // A retry replays the accepted request, so it neither resolves again nor fails on quota.
-      const routed =
-        groupId === undefined || isRetryOfAcceptedDelegation
-          ? null
-          : yield* routingPolicy
+      const routed = isRetryOfAcceptedDelegation
+        ? null
+        : groupId !== undefined
+          ? yield* routingPolicy
               .resolveGroup({
                 groupId,
                 via: "picker",
@@ -2709,9 +2708,23 @@ const make = Effect.gen(function* () {
                 projectId: parent.thread.projectId,
                 runnableInstanceIds: yield* loadOrchestrationCapableInstanceIds(),
               })
-              .pipe(Effect.mapError((error) => failure("model_unavailable", error.message)));
+              .pipe(Effect.mapError((error) => failure("model_unavailable", error.message)))
+          : target !== undefined &&
+              !explicitTarget &&
+              (input.role === "research" || input.role === "review")
+            ? yield* routingPolicy.routeDelegation({
+                role: input.role,
+                parentSelection: target.modelSelection,
+                prompt: input.task,
+                runtimeMode,
+                interactionMode,
+                projectId: parent.thread.projectId,
+                runnableInstanceIds: yield* loadOrchestrationCapableInstanceIds(),
+              })
+            : null;
+      // Without a group, a routed selection exists only when the agent named no target.
       const modelSelection =
-        target?.modelSelection ?? routed?.selection ?? parent.thread.modelSelection;
+        routed?.selection ?? target?.modelSelection ?? parent.thread.modelSelection;
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
       if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
         const project = yield* requireProject(parent.thread.projectId);

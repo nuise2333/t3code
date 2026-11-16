@@ -108,17 +108,15 @@ describe("routing groups", () => {
       { instanceId, model: "gpt-6" },
     ],
   };
-  const routing: RouteDecision = {
-    ...routed,
-    group: {
-      id: "fast",
-      name: "Fast",
-      via: "picker",
-      chosen: 1,
-      member: { instanceId, model: "gpt-6" },
-      skipped: [{ index: 0, instanceId: claude, model: "opus", reason: "usage_exhausted" }],
-    },
+  const groupDecision: NonNullable<RouteDecision["group"]> = {
+    id: "fast",
+    name: "Fast",
+    via: "picker",
+    chosen: 1,
+    member: { instanceId, model: "gpt-6" },
+    skipped: [{ index: 0, instanceId: claude, model: "opus", reason: "usage_exhausted" }],
   };
+  const routing: RouteDecision = { ...routed, group: groupDecision };
 
   it("names the group, the chosen model and the skipped members as launched", () => {
     expect(routedGroupDisplay({ routing, selection: group.members[1], providers })).toStrictEqual({
@@ -126,6 +124,10 @@ describe("routing groups", () => {
       label: "Fast → GPT 6",
       skipped: "Skipped: Claude Opus (usage limit)",
     });
+    const byQuota: RouteDecision = { ...routed, group: { ...groupDecision, rank: "quota" } };
+    expect(
+      routedGroupDisplay({ routing: byQuota, selection: group.members[1], providers })?.label,
+    ).toBe("Fast (by quota) → GPT 6");
   });
 
   it("drops the label after a manual pick", () => {
@@ -292,6 +294,28 @@ describe("routedModelDisplay", () => {
       selection: { instanceId: claude, model: "claude-opus-5-5" },
       summary:
         "With provider switching on, Auto would have used GPT-6 Luna on Codex · ChatGPT Plus (Question, no edits)",
+    },
+    {
+      name: "a delegated review on another vendor",
+      routing: {
+        ...decision({ instanceId, model: "gpt-6-luna", switched: "provider" }),
+        role: "review" as const,
+        reasons: [],
+      },
+      selection: { instanceId, model: "gpt-6-luna" },
+      summary: "Review → GPT-6 Luna on Codex · ChatGPT Plus, instead of Opus 5.5",
+    },
+    {
+      name: "a delegated review shadow on the same instance names the provider switch",
+      routing: { ...decision({ applied: false }), role: "review" as const, reasons: [] },
+      selection: { instanceId: claude, model: "claude-opus-5-5" },
+      summary: "With provider switching on, Review would have used Haiku 5.5 on Claude · Max",
+    },
+    {
+      name: "a delegated research shadow choice",
+      routing: { ...decision({ applied: false }), role: "research" as const, reasons: [] },
+      selection: { instanceId: claude, model: "claude-opus-5-5" },
+      summary: "With model switching on, Research would have used Haiku 5.5 on Claude · Max",
     },
     {
       name: "a manual pick after the switch",

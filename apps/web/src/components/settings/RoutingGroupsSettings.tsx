@@ -55,6 +55,12 @@ import { SETTINGS_PICKER_TRIGGER_CLASSNAME, SettingsRow, SettingsSection } from 
 
 const NO_GROUP = "__none__";
 
+type RoutingGroupRank = NonNullable<RoutingGroup["rank"]>;
+const RANK_LABELS: Record<RoutingGroupRank, string> = {
+  order: "In order",
+  quota: "Most quota left",
+};
+
 type Editing = { readonly index: number | null; readonly group: RoutingGroup };
 
 /**
@@ -72,9 +78,10 @@ export function RoutingGroupsSettings({
 }) {
   const settings = useEnvironmentSettings(environmentId);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const supported =
-    useAtomValue(serverEnvironment.configValueAtom(environmentId))?.environment.capabilities
-      .routingGroups === true;
+  const capabilities = useAtomValue(serverEnvironment.configValueAtom(environmentId))?.environment
+    .capabilities;
+  const supported = capabilities?.routingGroups === true;
+  const quotaSupported = capabilities?.routingGroupQuota === true;
   const [editing, setEditing] = useState<Editing | null>(null);
   const [deleting, setDeleting] = useState<RoutingGroup | null>(null);
   if (!supported) return null;
@@ -263,6 +270,7 @@ export function RoutingGroupsSettings({
           editing={editing}
           providers={providers}
           seedMember={seedMember}
+          quotaSupported={quotaSupported}
           takenIds={[...groups.map((group) => group.id), ...Object.values(rules)]}
           onClose={() => setEditing(null)}
           onSave={(group) => {
@@ -314,6 +322,7 @@ function RoutingGroupDialog({
   editing,
   providers,
   seedMember,
+  quotaSupported,
   takenIds,
   onClose,
   onSave,
@@ -322,6 +331,8 @@ function RoutingGroupDialog({
   readonly editing: Editing;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly seedMember: ModelSelection | null;
+  /** An older server strips `rank`, so it gets neither the choice nor the key. */
+  readonly quotaSupported: boolean;
   readonly takenIds: ReadonlyArray<string>;
   readonly onClose: () => void;
   readonly onSave: (group: RoutingGroup) => void;
@@ -330,6 +341,7 @@ function RoutingGroupDialog({
   const formId = useId();
   const [name, setName] = useState(editing.group.name);
   const [members, setMembers] = useState<ReadonlyArray<ModelSelection>>(editing.group.members);
+  const [rank, setRank] = useState<RoutingGroupRank>(editing.group.rank ?? "order");
   const entries = providerInstanceEntriesFor(providers, settings, null);
   const trimmedName = name.trim();
   const canSave =
@@ -348,8 +360,9 @@ function RoutingGroupDialog({
             {editing.index === null ? "Add routing group" : "Edit routing group"}
           </DialogTitle>
           <DialogDescription>
-            A new thread picked with this group starts on the first model that can run it, top to
-            bottom. It decides once, when the thread starts.
+            {rank === "quota"
+              ? "A new thread picked with this group starts on the model whose subscription has the most usage left to spend per hour before it resets. It decides once, when the thread starts."
+              : "A new thread picked with this group starts on the first model that can run it, top to bottom. It decides once, when the thread starts."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -364,6 +377,7 @@ function RoutingGroupDialog({
                 id: editing.group.id || newRoutingGroupId(trimmedName, takenIds),
                 name: trimmedName,
                 strategy: "order",
+                ...(quotaSupported ? { rank } : {}),
                 members,
               });
             }}
@@ -379,8 +393,27 @@ function RoutingGroupDialog({
                 autoFocus
               />
             </div>
+            {quotaSupported ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor={`${formId}-rank`}>Start on</Label>
+                <Select
+                  value={rank}
+                  onValueChange={(value) => {
+                    if (value === "order" || value === "quota") setRank(value);
+                  }}
+                >
+                  <SelectTrigger id={`${formId}-rank`} size="sm">
+                    <SelectValue>{RANK_LABELS[rank]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value="order">{RANK_LABELS.order}</SelectItem>
+                    <SelectItem value="quota">{RANK_LABELS.quota}</SelectItem>
+                  </SelectPopup>
+                </Select>
+              </div>
+            ) : null}
             <div className="grid gap-2">
-              <Label>Models, in order</Label>
+              <Label>{rank === "quota" ? "Models, ties in order" : "Models, in order"}</Label>
               {members.map((member, index) => {
                 const entry = entries.find(
                   (candidate) => candidate.instanceId === member.instanceId,

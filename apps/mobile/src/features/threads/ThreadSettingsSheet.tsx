@@ -966,7 +966,7 @@ function ThreadSettingsOptionsItem(props: {
       {session.selectedRoutingGroupId !== null ? (
         <Text className="px-5 pb-2 pt-2 text-sm text-foreground-muted">
           {session.routingGroups.some((group) => group.id === session.selectedRoutingGroupId)
-            ? "The thread starts on the group's first usable model, with the options set for it in Settings. Pick a model to choose it yourself."
+            ? "The thread starts on a usable member of the group, ranked and with the options set for it in Settings. Pick a model to choose it yourself."
             : "This routing group no longer exists. Pick a model or another group."}
         </Text>
       ) : null}

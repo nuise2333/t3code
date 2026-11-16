@@ -174,10 +174,13 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   target: Schema.optional(OrchestratorMcpTarget),
   routingGroupId: Schema.optional(RoutingGroupId).annotate({
     description:
-      "Group id from orchestrator_capabilities; runs its first usable model here. Not with a target model or environment.",
+      "Group id from orchestrator_capabilities; runs a usable member here. Not with a target model or environment.",
   }),
   title: Schema.optional(OrchestratorMcpTitle),
-  role: Schema.optional(OrchestratorMcpTaskRole),
+  role: Schema.optional(OrchestratorMcpTaskRole).annotate({
+    description:
+      "Without a target, the user's Auto settings may pick the child's model: review on another vendor, research cheaper. A vendor the user requires still needs target.model.",
+  }),
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:

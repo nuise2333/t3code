@@ -144,7 +144,7 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     modelSelection: Schema.optional(ModelSelection),
     routingGroupId: Schema.optional(RoutingGroupId).annotate({
       description:
-        "Group id from orchestrator_capabilities; launches its first usable model. Not with modelSelection.",
+        "Group id from orchestrator_capabilities; launches a usable member. Not with modelSelection.",
     }),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),

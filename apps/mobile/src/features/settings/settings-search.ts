@@ -94,6 +94,7 @@ const SETTINGS_SEARCH_TERMS = {
     "fallback",
     "failover",
     "order",
+    "quota",
     "auto rules",
   ],
   SettingsEnvironmentSourceControl: [

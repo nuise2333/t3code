@@ -390,6 +390,18 @@ function translateLegacyAutoRoutingPatch(patch: ServerSettingsPatch): ServerSett
   return { ...rest, autoRouting: { enabled: autoRoutingEnabled, ...rest.autoRouting } };
 }
 
+/** Clients that predate `rank` save a group without it; an edited group keeps its stored rank. */
+function keepRoutingGroupRanks(
+  current: ServerSettings["routingGroups"],
+  patched: NonNullable<ServerSettingsPatch["routingGroups"]>,
+): ServerSettings["routingGroups"] {
+  return patched.map((group) => {
+    if (group.rank !== undefined) return group;
+    const rank = current.find((saved) => saved.id === group.id)?.rank;
+    return rank === undefined ? group : { ...group, rank };
+  });
+}
+
 export function applyServerSettingsPatch(
   current: ServerSettings,
   rawPatch: ServerSettingsPatch,
@@ -552,6 +564,9 @@ export function applyServerSettingsPatch(
       : {}),
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
+      : {}),
+    ...(patch.routingGroups !== undefined
+      ? { routingGroups: keepRoutingGroupRanks(current.routingGroups, patch.routingGroups) }
       : {}),
     ...(patch.routingGroupRules !== undefined
       ? { routingGroupRules: patch.routingGroupRules }

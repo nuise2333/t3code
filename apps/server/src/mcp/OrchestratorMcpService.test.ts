@@ -10,6 +10,7 @@ import {
   NodeId,
   ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
   type OrchestratorMcpCapabilitiesResult,
+  type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpListScheduledTasksInput,
   type Project,
   OrchestratorMcpTarget,
@@ -27,6 +28,7 @@ import {
   type OrchestrationV2ServerCommand,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
+  type RouteDecision,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
@@ -65,6 +67,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { buildUnavailableProviderSnapshot } from "../provider/unavailableProviderSnapshot.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -3532,6 +3535,300 @@ describe("OrchestratorMcpService provider resolution", () => {
         }).pipe(Effect.provide(layer));
       }),
   );
+
+  describe("a delegated role picks the child's model", () => {
+    const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+    const effortModel = (slug: string, id: string, levels: ReadonlyArray<string>, def: string) => ({
+      slug,
+      name: slug,
+      isCustom: false,
+      capabilities: {
+        optionDescriptors: [
+          {
+            id,
+            label: "Effort",
+            type: "select",
+            options: levels.map((level) => ({ id: level, label: level, isDefault: level === def })),
+          },
+        ],
+      },
+    });
+    const providers = [
+      {
+        ...providerSnapshot({
+          instanceId: codexInstanceId,
+          driver: ProviderDriverKind.make("codex"),
+        }),
+        models: [
+          effortModel(
+            "gpt-6.1-sol",
+            "reasoningEffort",
+            ["low", "medium", "high", "xhigh"],
+            "medium",
+          ),
+          effortModel("gpt-6-luna", "reasoningEffort", ["low", "medium", "high", "xhigh"], "high"),
+        ],
+      },
+      {
+        ...providerSnapshot({
+          instanceId: claudeInstanceId,
+          driver: ProviderDriverKind.make("claudeAgent"),
+        }),
+        models: [
+          effortModel(
+            "claude-opus-5-5",
+            "effort",
+            ["low", "medium", "high", "xhigh", "max"],
+            "high",
+          ),
+          effortModel(
+            "claude-sonnet-5-5",
+            "effort",
+            ["low", "medium", "high", "xhigh", "max"],
+            "high",
+          ),
+        ],
+      },
+    ] as unknown as ReadonlyArray<ServerProvider>;
+    const sol = (effort: string, model = "gpt-6.1-sol") => ({
+      instanceId: codexInstanceId,
+      model,
+      options: [{ id: "reasoningEffort", value: effort }],
+    });
+    const auto = (provider: boolean) => ({
+      enabled: true,
+      allowModelSwitch: provider,
+      allowProviderSwitch: provider,
+    });
+    const sonnetMedium = {
+      instanceId: claudeInstanceId,
+      model: "claude-sonnet-5-5",
+      options: [{ id: "effort", value: "medium" }],
+    };
+
+    it.effect.each<{
+      readonly name: string;
+      readonly autoRouting: ReturnType<typeof auto> | { readonly enabled: false };
+      readonly parentEffort: string;
+      readonly parentModel?: string;
+      readonly input: Partial<OrchestratorMcpDelegateTaskInput>;
+      readonly replay?: boolean;
+      readonly modelSelection: unknown;
+      readonly routing?: {
+        readonly role: RouteDecision["role"];
+        readonly effort: RouteDecision["effort"];
+        readonly switched: string;
+      };
+    }>([
+      {
+        name: "no role keeps the parent's model",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: {},
+        modelSelection: sol("xhigh"),
+      },
+      {
+        name: "implementation keeps the parent's model",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "implementation" },
+        modelSelection: sol("xhigh"),
+      },
+      {
+        name: "review moves to another vendor at medium",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review" },
+        modelSelection: sonnetMedium,
+        routing: { role: "review", effort: "medium", switched: "provider" },
+      },
+      {
+        name: "review in place raises low to medium",
+        autoRouting: auto(false),
+        parentEffort: "low",
+        input: { role: "review" },
+        modelSelection: sol("medium"),
+        routing: { role: "review", effort: "medium", switched: "provider" },
+      },
+      {
+        name: "review in place raises low to medium, not to the model's readonly effort",
+        autoRouting: auto(false),
+        parentEffort: "low",
+        parentModel: "gpt-6-luna",
+        input: { role: "review" },
+        modelSelection: sol("medium", "gpt-6-luna"),
+        routing: { role: "review", effort: "medium", switched: "provider" },
+      },
+      {
+        name: "review in place keeps high",
+        autoRouting: auto(false),
+        parentEffort: "high",
+        input: { role: "review" },
+        modelSelection: sol("high"),
+        routing: { role: "review", effort: "medium", switched: "provider" },
+      },
+      {
+        name: "research runs at the readonly effort",
+        autoRouting: auto(false),
+        parentEffort: "xhigh",
+        input: { role: "research" },
+        modelSelection: sol("low"),
+        routing: { role: "research", effort: "low", switched: "none" },
+      },
+      {
+        name: "a target model wins over the role",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review", target: { model: "gpt-6.1-sol" } },
+        modelSelection: sol("xhigh"),
+      },
+      {
+        name: "target options win over the role",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review", target: { options: [{ id: "reasoningEffort", value: "high" }] } },
+        modelSelection: sol("high"),
+      },
+      {
+        name: "a routing group wins over the role",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review", routingGroupId: "deep" },
+        modelSelection: { instanceId: claudeInstanceId, model: "claude-opus-5-5" },
+      },
+      {
+        name: "Auto off keeps the parent's model",
+        autoRouting: { enabled: false },
+        parentEffort: "xhigh",
+        input: { role: "review" },
+        modelSelection: sol("xhigh"),
+      },
+      {
+        name: "a replay does not route again",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review" },
+        replay: true,
+        modelSelection: sol("xhigh"),
+      },
+    ])("$name", (row) =>
+      Effect.gen(function* () {
+        const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        let delegated = false;
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          runId: parentRunId,
+          parentNodeId,
+          origin: "app_owned",
+          createdBy: "agent",
+          driver: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Look over the change.",
+          title: null,
+          model: "gpt-6.1-sol",
+          status: "running",
+          result: null,
+          startedAt: null,
+          completedAt: null,
+        };
+        const parent = sol(row.parentEffort, row.parentModel);
+        const registry = providerRegistryLayer(providers);
+        const settings = ServerSettings.layerTest({
+          autoRouting: row.autoRouting,
+          routingGroups: [
+            {
+              id: "deep",
+              name: "Deep",
+              members: [{ instanceId: claudeInstanceId, model: "claude-opus-5-5" }],
+              strategy: "order",
+              rank: "quota",
+            },
+          ],
+        });
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.succeed(row.replay === true),
+            assertProviderInstanceEnabled: () => Effect.void,
+            isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+            getThreadRecords: (threadId) =>
+              Effect.succeed(
+                threadId === parentThreadId
+                  ? parentProjection(delegated ? [task] : [], parent)
+                  : childProjection,
+              ),
+            dispatch: (command) =>
+              Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    delegated = true;
+                  }),
+                ),
+                Effect.as({
+                  sequence: 1,
+                  storedEvents: [
+                    {
+                      sequence: 1,
+                      commandId: null,
+                      event: { type: "subagent.updated", payload: task },
+                    },
+                  ],
+                } as never),
+              ),
+          }),
+          settings,
+          registry,
+          adapterRegistryLayer([codexInstanceId, claudeInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        const layer = OrchestratorMcpService.layer.pipe(
+          Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+          Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          Layer.provide(
+            RoutingPolicy.layer.pipe(
+              Layer.provide(Layer.mergeAll(ModelManifest.layerTest, registry, settings)),
+            ),
+          ),
+          Layer.provide(layerDependencies),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          yield* service.delegateTask(scope, {
+            task: "Look over the change.",
+            clientRequestId: "delegate-role",
+            ...row.input,
+          });
+          const [command] = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+            readonly modelSelection: unknown;
+            readonly routing?: RouteDecision;
+          }>;
+          assert.deepEqual(command?.modelSelection, row.modelSelection);
+          if (row.input.routingGroupId !== undefined) {
+            assert.include(command?.routing?.group, { id: "deep", rank: "quota" });
+            assert.isUndefined(command?.routing?.role);
+            return;
+          }
+          if (row.routing === undefined) return assert.isUndefined(command?.routing);
+          const routing = command?.routing;
+          const recorded: unknown = {
+            role: routing?.role,
+            effort: routing?.effort,
+            switched: routing?.model?.switched,
+          };
+          assert.deepEqual(recorded, row.routing);
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+  });
 
   describe("scheduled tasks at modes above the caller's", () => {
     const projectId = ProjectId.make("project:scheduled");

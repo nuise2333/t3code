@@ -138,6 +138,31 @@ describe("serverSettings helpers", () => {
     expect(patched.routingGroupRules).toEqual({ hard: "deep" });
   });
 
+  it("keeps a stored rank when a client that predates it saves the group", () => {
+    const member = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-fake-1" };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      routingGroups: [
+        { id: "spread", name: "Spread", members: [member], strategy: "order", rank: "quota" },
+      ],
+    });
+    const renamed = applyServerSettingsPatch(saved, {
+      routingGroups: [
+        { id: "spread", name: "Spread out", members: [member], strategy: "order" },
+        { id: "fresh", name: "Fresh", members: [member], strategy: "order" },
+      ],
+    });
+    expect(renamed.routingGroups.map((group) => [group.id, group.rank])).toEqual([
+      ["spread", "quota"],
+      ["fresh", undefined],
+    ]);
+    const ordered = applyServerSettingsPatch(renamed, {
+      routingGroups: [
+        { id: "spread", name: "Spread", members: [member], strategy: "order", rank: "order" },
+      ],
+    });
+    expect(ordered.routingGroups[0]?.rank).toBe("order");
+  });
+
   it("changes a cleanup rule without replacing the machine's other rules", () => {
     const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnMerge: true, logsAfterDays: 30 },

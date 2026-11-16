@@ -150,6 +150,12 @@ larger context, or other paid extras. A started thread shows the model Auto
 picked and the provider account that pays for it; with switching off, it shows
 what Auto would have picked.
 
+With Auto effort on, a subtask an agent delegates as a review prefers a model
+from another vendor at Medium effort or higher; with provider switching off it
+stays on the current model and is raised to at least Medium. A research subtask
+may run on a cheaper model or level. Other subtasks, and any the agent names a
+model for, keep their model. This applies only to subtasks run on this machine.
+
 When the same command fails in your last two turns, the composer offers **Retry
 with** the next higher level. It rewinds to your earlier message, like
 [Edit from here](#edit-an-earlier-prompt), and raises the composer's level,
@@ -160,9 +166,13 @@ which stays until you change it. Auto never does this on its own.
 A routing group is an ordered list of models, each with its own options. Create
 one in **Settings → Providers → Routing groups** on web and desktop, or
 **Settings → Routing groups** on mobile, then pick it from a new thread's model
-picker. When the thread starts, it runs on the first model in the list that is
-set up, has usage left, and supports the thread's permissions and plan mode. It
-decides once; later turns stay on that model, and the thread names the group and
+picker. Only models that are set up, have usage left, and support the thread's
+permissions and plan mode can run it. **In order** runs the first of those in the
+list. **Most quota left** starts on the subscription with the most usage left to
+spend per hour before its tightest window resets, then plan credits, then
+pay-as-you-go accounts. A subscription with 15% or less left in a window goes
+last, so it is used only when nothing else can run. Either way it decides once, when the
+thread starts; later turns stay on that model, and the thread names the group and
 any model it skipped. If no model qualifies, the thread does not start and the
 error lists why each one was skipped.
 

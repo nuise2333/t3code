@@ -9,13 +9,17 @@ import {
   type RouteModelDecision,
   ProviderDriverKind,
   RoutingSkipReason,
+  type RoutingEffort,
+  type RoutingTaskClass,
   type RuntimeMode,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { isReasoningSelect } from "@t3tools/shared/model";
 import {
   chooseAutoModel,
   classifyTask,
   isFrontendPrompt,
+  modelVendor,
   resolveRoutingGroup,
   routeFor,
 } from "@t3tools/shared/routing";
@@ -34,6 +38,18 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 
 const CLAUDE = ProviderDriverKind.make("claudeAgent");
+
+const BELOW_MEDIUM: ReadonlySet<string> = new Set(["none", "off", "minimal", "low"]);
+
+const vendorOf = (providers: ReadonlyArray<ServerProvider>, selection: ModelSelection) => {
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  if (provider === undefined) return null;
+  const model = provider.models.find(
+    (candidate) =>
+      candidate.slug === selection.model || candidate.aliases?.includes(selection.model) === true,
+  );
+  return modelVendor(provider.driver, model?.slug ?? selection.model);
+};
 
 const SKIP_REASON_TEXT: Record<RoutingSkipReason, string> = {
   instance_missing: "provider instance not found",
@@ -97,6 +113,16 @@ export interface RoutingGroupInput {
   readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId>;
 }
 
+export interface RoutingDelegationInput {
+  readonly role: "research" | "review";
+  readonly parentSelection: ModelSelection;
+  readonly prompt: string;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly runtimeMode: RuntimeMode;
+  readonly projectId: ProjectId | null;
+  readonly runnableInstanceIds: ReadonlySet<ProviderInstanceId>;
+}
+
 export interface RoutedSelection {
   readonly selection: ModelSelection;
   readonly decision: RouteDecision;
@@ -112,6 +138,10 @@ export class RoutingPolicy extends Context.Service<
     readonly resolveGroup: (
       input: RoutingGroupInput,
     ) => Effect.Effect<RoutedSelection, RoutingGroupUnavailableError>;
+    /** Null when Auto is off or routing fails; the task then keeps the parent's model. */
+    readonly routeDelegation: (
+      input: RoutingDelegationInput,
+    ) => Effect.Effect<RoutedSelection | null>;
   }
 >()("t3/routing/RoutingPolicy") {}
 
@@ -128,6 +158,9 @@ const make = Effect.gen(function* () {
       readonly apply: boolean;
       /** A group member's own effort is the user's choice; an Auto draft's is only a default. */
       readonly keepExplicitEffort: boolean;
+      readonly taskClass?: RoutingTaskClass | undefined;
+      readonly minEffort?: RoutingEffort | undefined;
+      readonly exactMinEffort?: boolean | undefined;
     }) {
       const providers = yield* providerRegistry.getProviders;
       const provider = providers.find(
@@ -182,6 +215,9 @@ const make = Effect.gen(function* () {
         prompt: input.prompt,
         interactionMode: input.interactionMode,
         apply: input.apply,
+        taskClass: input.taskClass,
+        minEffort: input.minEffort,
+        exactMinEffort: input.exactMinEffort,
       });
     },
     Effect.catchCause((cause) =>
@@ -224,6 +260,7 @@ const make = Effect.gen(function* () {
       id: group.id,
       name: group.name,
       via: input.via,
+      ...(group.rank === "quota" ? { rank: "quota" as const } : {}),
       chosen: resolution.index,
       member: { instanceId: resolution.selection.instanceId, model: resolution.selection.model },
       skipped: resolution.skipped,
@@ -260,9 +297,25 @@ const make = Effect.gen(function* () {
       input: RoutingPolicyInput,
       switches: { readonly allowModelSwitch: boolean; readonly allowProviderSwitch: boolean },
       settings: Parameters<typeof chooseAutoModel>[0]["settings"],
+      delegation?: Pick<RoutingDelegationInput, "role" | "runnableInstanceIds">,
     ) {
-      const { allowModelSwitch, allowProviderSwitch } = switches;
-      const classified = classifyTask(input);
+      const providers = yield* providerRegistry.getProviders;
+      const review =
+        delegation?.role === "review"
+          ? { parentVendor: vendorOf(providers, input.modelSelection) }
+          : undefined;
+      // A review always changes vendor, so only the cross-provider switch lets it move.
+      const { allowModelSwitch, allowProviderSwitch } =
+        review === undefined
+          ? switches
+          : {
+              allowModelSwitch: switches.allowProviderSwitch,
+              allowProviderSwitch: switches.allowProviderSwitch,
+            };
+      const classified =
+        delegation === undefined
+          ? classifyTask(input)
+          : { taskClass: "readonly" as const, reasons: [] as ReadonlyArray<never> };
       // A shadow uses the widest scope, to show the most Auto could have done.
       const choice = chooseAutoModel({
         table: ModelManifest.resolveRoutingTable(yield* manifest.current),
@@ -274,12 +327,14 @@ const make = Effect.gen(function* () {
             : allowModelSwitch
               ? "instance"
               : "provider",
-        providers: yield* providerRegistry.getProviders,
+        providers,
         settings,
         projectId: input.projectId,
         runtimeMode: input.runtimeMode,
         interactionMode: input.interactionMode,
         imageFrontend: input.hasImage && isFrontendPrompt(input.prompt),
+        runnableInstanceIds: delegation?.runnableInstanceIds,
+        review,
         now: DateTime.toEpochMillis(yield* DateTime.now),
       });
       yield* Effect.annotateCurrentSpan({
@@ -319,17 +374,37 @@ const make = Effect.gen(function* () {
         interactionMode: input.interactionMode,
         apply: true,
         keepExplicitEffort: false,
+        ...(delegation === undefined
+          ? {}
+          : {
+              taskClass: classified.taskClass,
+              minEffort: review === undefined ? undefined : "medium",
+              exactMinEffort: review !== undefined && !switching,
+            }),
       });
+      const role = delegation === undefined ? {} : { role: delegation.role };
+      // A review on the parent's own model only lifts an effort below medium, never lowers one.
+      const keepsEffort =
+        review !== undefined &&
+        !switching &&
+        routed?.decision.baseline !== undefined &&
+        !BELOW_MEDIUM.has(routed.decision.baseline);
       if (routed !== null) {
         return {
-          selection: routed.selection,
-          decision: { ...routed.decision, model: modelDecision },
+          selection: keepsEffort ? selection : routed.selection,
+          decision: {
+            ...routed.decision,
+            ...(keepsEffort ? { applied: false } : {}),
+            ...role,
+            model: modelDecision,
+          },
         };
       }
       return {
         selection,
         decision: {
           taskClass: classified.taskClass,
+          ...role,
           effort: null,
           applied: false,
           reasons: [...classified.reasons],
@@ -375,7 +450,34 @@ const make = Effect.gen(function* () {
     });
   });
 
-  return RoutingPolicy.of({ decide, resolveGroup });
+  const routeDelegation = Effect.fn("RoutingPolicy.routeDelegation")(
+    function* (input: RoutingDelegationInput) {
+      const settings = yield* serverSettings.getSettings;
+      if (!settings.autoRouting.enabled) return null;
+      return yield* routeModel(
+        {
+          modelSelection: input.parentSelection,
+          prompt: input.prompt,
+          interactionMode: input.interactionMode,
+          runtimeMode: input.runtimeMode,
+          projectId: input.projectId,
+          hasImage: false,
+          requested: undefined,
+        },
+        settings.autoRouting,
+        settings,
+        input,
+      );
+    },
+    Effect.catchCause((cause) =>
+      Effect.logWarning(
+        "Delegation routing failed; the task keeps the parent's model.",
+        cause,
+      ).pipe(Effect.as(null)),
+    ),
+  );
+
+  return RoutingPolicy.of({ decide, resolveGroup, routeDelegation });
 });
 
 export const layer = Layer.effect(RoutingPolicy, make);

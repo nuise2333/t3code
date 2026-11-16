@@ -298,7 +298,7 @@ export function ComposerControlsBar(props: {
     ? {
         suffix: null,
         detail: pickedGroup.summary
-          ? `Routing group: first usable of ${pickedGroup.summary}`
+          ? `Routing group: a usable member of ${pickedGroup.summary}`
           : "This routing group no longer exists",
       }
     : routedGroup

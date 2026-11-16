@@ -1017,7 +1017,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Routing groups",
     to: "/settings/providers",
     searchTerms: [
-      "routing group model group fallback failover order first available usage limit auto rules",
+      "routing group model group fallback failover order first available usage limit quota auto rules",
     ],
     providerSettingsOnly: true,
   },

@@ -359,7 +359,7 @@ export function routingMemberLabel(
 
 export interface RoutedGroupDisplay {
   readonly groupName: string;
-  /** Such as "Fast → GPT-6.1". */
+  /** Such as "Fast → GPT-6.1", or "Fast (by quota) → GPT-6.1". */
   readonly label: string;
   /** Such as "Skipped: Opus 5.5 (usage limit)"; null when the first member ran. */
   readonly skipped: string | null;
@@ -388,12 +388,13 @@ export function routedGroupDisplay(input: {
   );
   return {
     groupName: decision.name,
-    label: `${decision.name} → ${routingMemberLabel(input.selection, input.providers)}`,
+    label: `${decision.name}${decision.rank === "quota" ? " (by quota)" : ""} → ${routingMemberLabel(input.selection, input.providers)}`,
     skipped: skipped.length > 0 ? `Skipped: ${skipped.join(", ")}` : null,
   };
 }
 
 const EFFORT_ONLY_REASONS: ReadonlySet<RoutingReason> = new Set(["model_row", "nearest_level"]);
+const ROLE_LABELS = { research: "Research", review: "Review" } as const;
 
 /**
  * The model Auto picked at launch while the thread still uses it, or, for a shadow choice, the
@@ -414,8 +415,11 @@ export function routedModelDisplay(input: {
     input.routing?.reasons.filter((code) => !EFFORT_ONLY_REASONS.has(code)) ?? [],
   );
   const why = reason ? ` (${reason})` : "";
+  const picker = input.routing?.role ? ROLE_LABELS[input.routing.role] : "Auto";
   if (!decision.applied) {
-    return `With ${decision.switched} switching on, Auto would have used ${name}${why}`;
+    // The server lets a review change vendor only with provider switching, even on one instance.
+    const toggle = input.routing?.role === "review" ? "provider" : decision.switched;
+    return `With ${toggle} switching on, ${picker} would have used ${name}${why}`;
   }
   if (
     decision.instanceId !== input.selection.instanceId ||
@@ -426,7 +430,7 @@ export function routedModelDisplay(input: {
   const from = decision.from
     ? `, instead of ${routingMemberLabel(decision.from, input.providers)}`
     : "";
-  return `Auto → ${name}${why}${from}`;
+  return `${picker} → ${name}${why}${from}`;
 }
 
 interface RoutingGroupProblems {

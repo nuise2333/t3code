@@ -612,7 +612,7 @@ export function ComposerRoutingGroupColumn(props: { name: string; summary: strin
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 pt-2.5 pb-1.5 text-muted-foreground text-xs">
         {props.summary ? (
           <>
-            <p>Starts on the first usable model, in order:</p>
+            <p>Starts on a usable member, ranked as the group is set in Settings:</p>
             <p className="text-foreground">{props.summary}</p>
             <p>
               Each member keeps the options set in Settings. Pick a model to choose it yourself.

@@ -199,9 +199,18 @@ export function routeFor(input: {
   readonly apply: boolean;
   /** The level the adapter sends for a choice: undefined sends the id itself, null sends none. */
   readonly emittedLevel?: ((choiceId: string) => string | null | undefined) | undefined;
+  /** Set by a delegated role; replaces what the prompt would classify as. */
+  readonly taskClass?: RoutingTaskClass | undefined;
+  /** The lowest level to pick; a missing level then rises, still never past high. */
+  readonly minEffort?: RoutingEffort | undefined;
+  /** Targets minEffort itself, ignoring the class effort. */
+  readonly exactMinEffort?: boolean | undefined;
 }): { readonly selection: ModelSelection; readonly decision: RouteDecision } {
   const { table, selection } = input;
-  const classified = classifyTask(input);
+  const classified =
+    input.taskClass === undefined
+      ? classifyTask(input)
+      : { taskClass: input.taskClass, reasons: [] as ReadonlyArray<RoutingReason> };
   const unchanged = (reason: RoutingReason) => ({
     selection,
     decision: {
@@ -230,7 +239,8 @@ export function routeFor(input: {
   const row = exactRow ?? rows.find((row) => row.model === "*");
   if (row === undefined) return unchanged("no_row");
 
-  const rowEffort = row.effortByClass?.[classified.taskClass];
+  const rowEffort =
+    input.exactMinEffort === true ? undefined : row.effortByClass?.[classified.taskClass];
   const classTarget = rowEffort ?? table.defaultEffortByClass[classified.taskClass];
   const descriptor = input.descriptors?.find(isReasoningSelect);
   if (descriptor === undefined) return unchanged("no_effort_control");
@@ -243,13 +253,24 @@ export function routeFor(input: {
   const modelDefault = getProviderOptionCurrentValue(descriptor);
   const defaultRank = typeof modelDefault === "string" ? LEVEL_RANK[modelDefault] : undefined;
   // With no signal, routing has no evidence to go below the model's own default.
-  const target =
+  const signalTarget =
     classified.reasons.includes("default_class") &&
     defaultRank !== undefined &&
     defaultRank > EFFORT_LADDER.indexOf(classTarget)
       ? (EFFORT_LADDER[Math.min(defaultRank, EFFORT_LADDER.length - 1)] ?? classTarget)
       : classTarget;
-  const effort = nearestOfferedLevel(target, offered, defaultRank);
+  const minEffort = input.minEffort;
+  const target =
+    minEffort !== undefined &&
+    (input.exactMinEffort === true ||
+      EFFORT_LADDER.indexOf(minEffort) > EFFORT_LADDER.indexOf(signalTarget))
+      ? minEffort
+      : signalTarget;
+  const effort =
+    minEffort === undefined
+      ? nearestOfferedLevel(target, offered, defaultRank)
+      : (EFFORT_LADDER.slice(EFFORT_LADDER.indexOf(target)).find((level) => offered.has(level)) ??
+        null);
   if (effort === null) return unchanged("no_effort_control");
 
   const explicit = selection.options?.find((option) => option.id === descriptor.id)?.value;
@@ -357,7 +378,18 @@ function acceptedOptions(
   return options.length === 0 ? rest : { ...rest, options };
 }
 
-/** The first member, in order, that can run this launch; never a model outside the group. */
+const QUOTA_RANK_ORDER: Readonly<Record<QuotaFunding, number>> = {
+  subscription: 0,
+  credits: 1,
+  unknown: 2,
+  payg: 3,
+};
+
+/**
+ * The first member that can run this launch, in order or by quota; never a model outside the
+ * group. Quota ranks subscriptions with room by pressure, then credits, unknown, pay-as-you-go,
+ * and last whatever sits inside the reserve.
+ */
 export function resolveRoutingGroup(input: {
   readonly group: RoutingGroup;
   readonly providers: ReadonlyArray<ServerProvider>;
@@ -369,6 +401,13 @@ export function resolveRoutingGroup(input: {
   readonly now: number;
 }): RoutingGroupResolution {
   const skipped: Array<RoutingGroupSkip> = [];
+  const byQuota = input.group.rank === "quota";
+  const usable: Array<{
+    readonly index: number;
+    readonly member: ModelSelection;
+    readonly provider: ServerProvider;
+    readonly slug: string;
+  }> = [];
   for (const [index, member] of input.group.members.entries()) {
     const provider = input.providers.find(
       (candidate) => candidate.instanceId === member.instanceId,
@@ -379,17 +418,46 @@ export function resolveRoutingGroup(input: {
       member,
       provider,
     });
-    if (reason !== null) {
-      skipped.push({ index, instanceId: member.instanceId, model: member.model, reason });
+    if (reason !== null || provider === undefined) {
+      skipped.push({
+        index,
+        instanceId: member.instanceId,
+        model: member.model,
+        reason: reason ?? "instance_missing",
+      });
       continue;
     }
-    const descriptors = provider?.models.find(
-      (candidate) =>
-        candidate.slug === member.model || candidate.aliases?.includes(member.model) === true,
-    )?.capabilities?.optionDescriptors;
-    return { ok: true, index, selection: acceptedOptions(member, descriptors), skipped };
+    usable.push({
+      index,
+      member,
+      provider,
+      slug: findModel(provider, member.model)?.slug ?? member.model,
+    });
+    if (!byQuota) break;
   }
-  return { ok: false, skipped };
+  const ranked = byQuota
+    ? usable
+        .map((entry) => {
+          const standing = quotaStanding(entry.provider, entry.slug, input.now);
+          return {
+            entry,
+            group: standing.inReserve ? 4 : QUOTA_RANK_ORDER[standing.funding],
+            pressure: standing.funding === "subscription" ? standing.pressure : 0,
+          };
+        })
+        .sort((a, b) => a.group - b.group || b.pressure - a.pressure)
+        .map(({ entry }) => entry)
+    : usable;
+  const chosen = ranked[0];
+  if (chosen === undefined) return { ok: false, skipped };
+  const descriptors = findModel(chosen.provider, chosen.member.model)?.capabilities
+    ?.optionDescriptors;
+  return {
+    ok: true,
+    index: chosen.index,
+    selection: acceptedOptions(chosen.member, descriptors),
+    skipped,
+  };
 }
 
 /** Cheapest first; Auto takes the cheapest tier at or above the task's and never goes past S. */
@@ -452,22 +520,78 @@ function premiumByDefault(descriptors: ReadonlyArray<ProviderOptionDescriptor>):
   });
 }
 
-/** 0 known with room, 1 unknown, 2 known inside the reserve; higher score spends expiring quota first. */
-function quotaRank(provider: ServerProvider, model: string, now: number) {
+type QuotaFunding = "subscription" | "credits" | "payg" | "unknown";
+
+interface QuotaStanding {
+  readonly funding: QuotaFunding;
+  /** The tightest window has no more than the share Auto leaves for the user. */
+  readonly inReserve: boolean;
+  /** Room above the reserve per hour to the tightest window's reset; higher spends first. */
+  readonly pressure: number;
+}
+
+const API_KEY_AUTH = /api[-_ ]?key/i;
+
+/** Inferred from the windows a model spends; map the usage source's own kind once it reports one. */
+function quotaFunding(
+  provider: ServerProvider,
+  windows: ReadonlyArray<{ readonly id: string }>,
+): QuotaFunding {
+  if (windows.length === 0) {
+    return provider.auth.type !== undefined && API_KEY_AUTH.test(provider.auth.type)
+      ? "payg"
+      : "unknown";
+  }
+  if (provider.driver === "codex" && windows.every((window) => window.id === "individual")) {
+    return "credits";
+  }
+  return "subscription";
+}
+
+function quotaStanding(provider: ServerProvider, model: string, now: number): QuotaStanding {
   const windows = applicableUsageWindows(provider, now, model);
-  if (windows.length === 0) return { bucket: 1, score: 0 };
+  const funding = quotaFunding(provider, windows);
+  if (windows.length === 0) return { funding, inReserve: false, pressure: 0 };
   const tightest = windows.reduce((least, window) =>
     window.usedPercent > least.usedPercent ? window : least,
   );
   const remaining = 100 - tightest.usedPercent;
-  if (remaining <= QUOTA_RESERVE_PERCENT) return { bucket: 2, score: 0 };
+  if (remaining <= QUOTA_RESERVE_PERCENT) return { funding, inReserve: true, pressure: 0 };
   const resetsAt = tightest.resetsAt === undefined ? Number.NaN : Date.parse(tightest.resetsAt);
   const hours = Number.isFinite(resetsAt)
     ? (resetsAt - now) / 3_600_000
     : tightest.windowDurationMins === undefined
       ? FALLBACK_RESET_HOURS
       : tightest.windowDurationMins / 60;
-  return { bucket: 0, score: (remaining - QUOTA_RESERVE_PERCENT) / Math.max(hours, 1) };
+  return {
+    funding,
+    inReserve: false,
+    pressure: (remaining - QUOTA_RESERVE_PERCENT) / Math.max(hours, 1),
+  };
+}
+
+/** 0 known with room, 1 unknown, 2 known inside the reserve; higher score spends expiring quota first. */
+function quotaRank(provider: ServerProvider, model: string, now: number) {
+  const standing = quotaStanding(provider, model, now);
+  const windowed = standing.funding === "subscription" || standing.funding === "credits";
+  return {
+    bucket: !windowed ? 1 : standing.inReserve ? 2 : 0,
+    score: standing.pressure,
+  };
+}
+
+export type ModelVendor = "anthropic" | "openai" | "google" | "xai";
+
+/** Who trains a model, by its slug; drivers like Antigravity and Cursor serve several vendors. */
+export function modelVendor(driver: string, slug: string): ModelVendor | null {
+  const model = slug.slice(slug.lastIndexOf("/") + 1).toLowerCase();
+  if (model.startsWith("claude-")) return "anthropic";
+  if (model.startsWith("gpt-") || /^o\d/.test(model)) return "openai";
+  if (model.startsWith("gemini-")) return "google";
+  if (model.startsWith("grok-")) return "xai";
+  if (driver === "claudeAgent") return "anthropic";
+  if (driver === "codex") return "openai";
+  return null;
 }
 
 type AutoModelSkipReason = RoutingSkipReason | "premium_default" | "image_frontend";
@@ -502,6 +626,13 @@ export function chooseAutoModel(input: {
   readonly interactionMode: ProviderInteractionMode;
   /** The first message attaches an image of UI work: never move to a GPT model. */
   readonly imageFrontend: boolean;
+  /** Instances with an orchestration adapter; others would fail only at dispatch. */
+  readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId> | undefined;
+  /**
+   * A delegated review: another vendor's model, at no lower tier than the parent's, at any cost.
+   * A null parent vendor admits any known vendor.
+   */
+  readonly review?: { readonly parentVendor: ModelVendor | null } | undefined;
   readonly now: number;
 }): AutoModelChoice {
   const { current } = input;
@@ -526,7 +657,9 @@ export function chooseAutoModel(input: {
     skipped,
     skippedByReason,
   });
+  const { review } = input;
   if (
+    review === undefined &&
     currentProvider !== undefined &&
     (UNROUTED_DRIVERS.has(currentProvider.driver) ||
       isOpaqueRouter(currentProvider.driver, currentSlug))
@@ -553,12 +686,16 @@ export function chooseAutoModel(input: {
       if (input.scope === "provider" && provider.instanceId === current.instanceId && !isCurrent) {
         continue;
       }
+      if (review !== undefined) {
+        const vendor = modelVendor(provider.driver, model.slug);
+        if (isCurrent || vendor === null || vendor === review.parentVendor) continue;
+      }
       const reason: AutoModelSkipReason | null =
         memberSkipReason({
           ...input,
           member: { instanceId: provider.instanceId, model: model.slug },
           provider,
-          runnableInstanceIds: undefined,
+          runnableInstanceIds: input.runnableInstanceIds,
         }) ??
         (isCurrent
           ? null
@@ -580,6 +717,33 @@ export function chooseAutoModel(input: {
         isCurrent,
       });
     }
+  }
+
+  if (review !== undefined) {
+    const floor = Math.max(
+      TIER_ORDER.indexOf(DESIRED_TIER[input.taskClass]),
+      currentTier === null ? -1 : TIER_ORDER.indexOf(currentTier),
+    );
+    const reviewer = candidates
+      .filter((candidate) => TIER_ORDER.indexOf(candidate.tier) >= floor)
+      .map((candidate) => ({
+        candidate,
+        ...quotaRank(candidate.provider, candidate.slug, input.now),
+      }))
+      .sort(
+        (a, b) =>
+          a.candidate.relativeCost - b.candidate.relativeCost ||
+          a.bucket - b.bucket ||
+          b.score - a.score,
+      )[0]?.candidate;
+    if (reviewer === undefined) return keep();
+    return {
+      selection: { instanceId: reviewer.provider.instanceId, model: reviewer.slug },
+      tier: reviewer.tier,
+      switched: reviewer.provider.instanceId === current.instanceId ? "model" : "provider",
+      skipped,
+      skippedByReason,
+    };
   }
 
   // Only hard tasks may move to a pricier model than the thread's, so turning Auto on saves.

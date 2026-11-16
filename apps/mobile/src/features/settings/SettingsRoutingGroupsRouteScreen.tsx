@@ -50,6 +50,7 @@ import {
 import { type SettingsTarget, useSettingsEnvironmentFilter } from "./settings-environment-filter";
 
 const NO_GROUP = "__none__";
+const RANK_LABELS = { order: "In order", quota: "Most quota left" } as const;
 
 function useRoutingSettingsWriter() {
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
@@ -118,7 +119,8 @@ export function SettingsRoutingGroupsRouteScreen() {
         <Text className="px-2 text-sm text-foreground-muted">
           A group is an ordered list of models. Pick it in a new thread's model picker, and the
           thread starts on the first model that can run it: set up, with usage left, and able to use
-          the thread's permissions and plan mode. It decides once, when the thread starts.
+          the thread's permissions and plan mode. A group set to start on the most quota left picks
+          by usage instead. It decides once, when the thread starts.
         </Text>
         {supported.length === 0 ? (
           <Text className="px-2 text-foreground-muted">
@@ -310,12 +312,16 @@ export function SettingsRoutingGroupEditRouteScreen() {
   const providers = config.providers;
   const groups = config.settings.routingGroups;
   const seed = seedMember(config);
+  // An older server strips `rank`, so it gets neither the choice nor the key.
+  const quotaSupported = config.environment.capabilities.routingGroupQuota === true;
+  const rank = group.rank ?? "order";
   const setMembers = (members: ReadonlyArray<ModelSelection>) =>
     updateRoutingGroupEditor((current) => ({ ...current, group: { ...current.group, members } }));
   const save = async () => {
+    const saved: RoutingGroup = quotaSupported ? { ...group, rank } : group;
     const next = groups.some((entry) => entry.id === group.id)
-      ? groups.map((entry) => (entry.id === group.id ? group : entry))
-      : [...groups, group];
+      ? groups.map((entry) => (entry.id === group.id ? saved : entry))
+      : [...groups, saved];
     const result = await write(editor.environmentId, { routingGroups: next });
     if (result._tag === "Success") navigation.goBack();
   };
@@ -349,8 +355,34 @@ export function SettingsRoutingGroupEditRouteScreen() {
             }
           />
         </SettingsSection>
+        {quotaSupported ? (
+          <SettingsSection
+            title="Start on"
+            footer={
+              rank === "quota"
+                ? "The model whose subscription has the most usage left to spend per hour before it resets."
+                : "The first model that can run the thread, top to bottom."
+            }
+          >
+            <MenuRow
+              label={RANK_LABELS[rank]}
+              actions={(["order", "quota"] as const).map((id) => ({
+                id,
+                title: RANK_LABELS[id],
+                ...(id === rank ? { state: "on" as const } : {}),
+              }))}
+              onAction={(id) => {
+                if (id === "order" || id === "quota")
+                  updateRoutingGroupEditor((current) => ({
+                    ...current,
+                    group: { ...current.group, rank: id },
+                  }));
+              }}
+            />
+          </SettingsSection>
+        ) : null}
         <SettingsSection
-          title="Models, in order"
+          title={rank === "quota" ? "Models, ties in order" : "Models, in order"}
           footer="Each model keeps the options you set for it here."
         >
           {group.members.map((member, index) => (

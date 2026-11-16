@@ -114,7 +114,7 @@ export type RoutingGroupId = typeof RoutingGroupId.Type;
 export const MAX_ROUTING_GROUPS = 16;
 export const MAX_ROUTING_GROUP_MEMBERS = 8;
 
-/** An ordered list of selections; a launch takes the first member that can run it. */
+/** An ordered list of selections; a launch takes the first member that can run it, or by quota. */
 export const RoutingGroup = Schema.Struct({
   /** Stable once created; a rename changes only `name`. */
   id: RoutingGroupId,
@@ -124,6 +124,8 @@ export const RoutingGroup = Schema.Struct({
     Schema.isMaxLength(MAX_ROUTING_GROUP_MEMBERS),
   ),
   strategy: Schema.Literal("order"),
+  /** Not a strategy value: older clients drop groups with an unknown strategy, then save the list. */
+  rank: Schema.optionalKey(Schema.Literals(["order", "quota"])),
 });
 export type RoutingGroup = typeof RoutingGroup.Type;
 
@@ -158,6 +160,7 @@ export const RouteGroupDecision = Schema.Struct({
   /** The name at launch, so a later rename or delete keeps the thread's label. */
   name: TrimmedNonEmptyString,
   via: Schema.Literals(["picker", "rule"]),
+  rank: Schema.optionalKey(Schema.Literal("quota")),
   chosen: NonNegativeInt,
   /** Members as they were at launch, so later group edits do not relabel this thread. */
   member: RouteGroupMember,
@@ -186,6 +189,8 @@ export type RouteModelDecision = typeof RouteModelDecision.Type;
 
 export const RouteDecision = Schema.Struct({
   taskClass: RoutingTaskClass,
+  /** A delegated task's role that picked the model; older clients drop the key. */
+  role: Schema.optionalKey(Schema.Literals(["research", "review"])),
   /** The choice id routing writes to `optionId`; null when it leaves the selection unchanged. */
   effort: Schema.NullOr(RoutingEffort),
   optionId: Schema.optionalKey(TrimmedNonEmptyString),
