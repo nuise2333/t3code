@@ -476,6 +476,9 @@ const OPAQUE_ROUTER_MODELS: Readonly<Partial<Record<string, ReadonlyArray<string
 // ACP agents publish arbitrary models; Pi only takes an explicit model as a hint.
 const UNROUTED_DRIVERS: ReadonlySet<string> = new Set(["acpRegistry", "pi"]);
 
+// Drivers a gateway like magpie sits behind; OpenCode's `vendor/model` ids bill through OpenCode.
+const GATEWAY_DRIVERS: ReadonlySet<string> = new Set(["codex", "claudeAgent"]);
+
 const isOpaqueRouter = (driver: string, model: string) =>
   OPAQUE_ROUTER_MODELS[driver]?.includes(model) === true;
 
@@ -504,7 +507,8 @@ type RoutingRow = RoutingTable["rows"][number];
 /**
  * The driver's row for a model's ids. Gateways like magpie prefix ids (`auto/<slug>`), so a
  * prefixed id falls back to the row of its last segment, never stripping an effort suffix.
- * `otherDrivers` also takes that slug's tier row on another driver, for tier and cost only.
+ * `otherDrivers` also takes that slug's tier row on another driver, for tier and cost only, on
+ * the drivers a gateway serves.
  */
 function modelRow(
   table: RoutingTable,
@@ -521,7 +525,7 @@ function modelRow(
   if (segments.length === 0) return undefined;
   return (
     table.rows.find((row) => own(row) && segments.includes(row.model)) ??
-    (otherDrivers && !UNROUTED_DRIVERS.has(driver)
+    (otherDrivers && GATEWAY_DRIVERS.has(driver)
       ? table.rows.find((row) => isTierRow(row) && segments.includes(row.model))
       : undefined)
   );

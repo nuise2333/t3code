@@ -1277,6 +1277,7 @@ describe("chooseAutoModel", () => {
   const kiroId = ProviderInstanceId.make("kiro_fake");
   const museId = ProviderInstanceId.make("muse_fake");
   const piId = ProviderInstanceId.make("pi_fake");
+  const opencodeId = ProviderInstanceId.make("opencode_fake");
   const acpId = ProviderInstanceId.make("acp_fake");
   const effort = effortSelect("effort", ["low", "medium", "high", "xhigh", "max"]);
 
@@ -2008,6 +2009,19 @@ describe("chooseAutoModel", () => {
       picks: on(codexId, "auto/model-haiku"),
       switched: "model",
       tier: "B",
+    },
+    {
+      name: "an OpenCode vendor id borrows no other driver's row, since OpenCode bills it",
+      current: on(claudeId, "model-opus"),
+      taskClass: "quick_edit",
+      scope: "any",
+      providers: [
+        provider(claudeId, "claudeAgent", ["model-opus"]),
+        provider(opencodeId, "opencode", ["anthropic/model-haiku"]),
+      ],
+      picks: on(claudeId, "model-opus"),
+      switched: "none",
+      tier: "S",
     },
     {
       name: "review from a parent of unknown vendor takes any known vendor",
