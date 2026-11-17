@@ -50,6 +50,7 @@ import {
   type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
+  type FilesystemSearchDirectoriesResult,
   SourceControlProviderKind,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   resolveEnvironmentMachineKind,
@@ -118,6 +119,7 @@ import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment, useFilesystemReadAccess } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
+import { useDebouncedValue } from "../state/queries";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
@@ -193,6 +195,7 @@ import {
   ADDON_ICON_CLASS,
   browseInputEndPaddingClass,
   buildBrowseGroups,
+  buildFolderSearchGroups,
   buildRootGroups,
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
@@ -277,6 +280,9 @@ import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
+const EMPTY_FOLDER_SEARCH_ENTRIES: FilesystemSearchDirectoriesResult["entries"] = [];
+const FOLDER_SEARCH_LIMIT = 50;
+const FOLDER_SEARCH_DEBOUNCE_MS = 120;
 const ADD_PROJECT_ENTRY_GROUP = "add-project";
 const NEW_THREAD_IN_GROUP = "projects";
 
@@ -760,6 +766,35 @@ function OpenCommandPaletteDialog(props: {
         })
       : filterFilesystemBrowseEntries(browseEntries, browsePath.filterQuery);
 
+  const folderSearchText =
+    currentView?.searchesFolders === true &&
+    canBrowsePaths &&
+    !isBrowsing &&
+    addProjectCloneFlow === null
+      ? query.trim()
+      : "";
+  const debouncedFolderSearchText = useDebouncedValue(folderSearchText, FOLDER_SEARCH_DEBOUNCE_MS);
+  const isFolderSearch = folderSearchText.length > 0;
+  const folderSearchQuery = useEnvironmentQuery(
+    browseAccess.canReadFiles &&
+      isFolderSearch &&
+      debouncedFolderSearchText.length > 0 &&
+      browseEnvironmentId !== null
+      ? filesystemEnvironment.searchDirectories({
+          environmentId: browseEnvironmentId,
+          input: { query: debouncedFolderSearchText, limit: FOLDER_SEARCH_LIMIT },
+        })
+      : null,
+  );
+  const folderSearchAccessError =
+    isFolderSearch && !browseAccess.isPending && !browseAccess.canReadFiles
+      ? (browseAccess.error ?? "This connection cannot search host folders.")
+      : null;
+  const isFolderSearchPending =
+    isFolderSearch &&
+    folderSearchAccessError === null &&
+    (debouncedFolderSearchText !== folderSearchText || folderSearchQuery.isPending);
+
   const prefetchBrowsePath = async (
     partialPath: string,
     environmentId: EnvironmentId | null = browseEnvironmentId,
@@ -985,6 +1020,7 @@ function OpenCommandPaletteDialog(props: {
       addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
       groups: [],
       initialQuery,
+      searchesFolders: true,
     };
 
     await browseNavigation.run(
@@ -1051,7 +1087,7 @@ function OpenCommandPaletteDialog(props: {
         value: `action:add-project:${environmentId}:local`,
         searchTerms: ["local", "folder", "directory", "browse"],
         title: "Local folder",
-        description: "Browse a folder on disk",
+        description: "Browse a folder on disk or search it by name",
         icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
         keepOpen: true,
         run: async () => {
@@ -2303,6 +2339,18 @@ function OpenCommandPaletteDialog(props: {
     browseUp,
     browseTo,
   });
+  const existingProjectPaths = new Set(
+    Array.from(projectByKey.values())
+      .filter((project) => project.environmentId === browseEnvironmentId)
+      .map((project) => project.workspaceRoot),
+  );
+  const folderSearchGroups = buildFolderSearchGroups({
+    entries: folderSearchQuery.data?.entries ?? EMPTY_FOLDER_SEARCH_ENTRIES,
+    existingProjectPaths,
+    repositoryIcon: <FolderGit2Icon className={ITEM_ICON_CLASS} />,
+    directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
+    addFolder: handleAddProject,
+  });
   const cloneDestinationBrowseGroups = browseGroups.map((group) =>
     group.value === "directories" ? { ...group, label: "Select where to clone" } : group,
   );
@@ -2448,6 +2496,8 @@ function OpenCommandPaletteDialog(props: {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
     displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
+  } else if (isFolderSearch) {
+    displayedGroups = folderSearchGroups;
   }
   const resultRows = buildCommandPaletteRows(displayedGroups);
   const autoHighlightsFirstRow =
@@ -3020,9 +3070,9 @@ function OpenCommandPaletteDialog(props: {
           description={addProjectCloneFlow.repository?.url ?? addProjectCloneFlow.remoteUrl}
         />
       ) : null}
-      {browseAccessError ? (
+      {browseAccessError || folderSearchAccessError ? (
         <div role="alert" className="px-4 py-3 text-sm text-muted-foreground">
-          {browseAccessError}
+          {browseAccessError ?? folderSearchAccessError}
         </div>
       ) : isBrowsePending && browseResult === null ? (
         <div role="status" className="px-4 py-3 text-sm text-muted-foreground">
@@ -3051,9 +3101,15 @@ function OpenCommandPaletteDialog(props: {
                 ? {
                     emptyStateMessage: "Press Enter to create this folder and add it as a project.",
                   }
-                : isThreadSearchPending
-                  ? { emptyStateMessage: "Searching thread messages…" }
-                  : {})}
+                : isFolderSearch
+                  ? {
+                      emptyStateMessage: isFolderSearchPending
+                        ? "Searching folders…"
+                        : "No folders match. Type a path like ~/ to browse instead.",
+                    }
+                  : isThreadSearchPending
+                    ? { emptyStateMessage: "Searching thread messages…" }
+                    : {})}
       />
     </CommandPaletteContent>
   );

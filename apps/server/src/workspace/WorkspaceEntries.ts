@@ -11,6 +11,8 @@ import * as Schema from "effect/Schema";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  FilesystemSearchDirectoriesInput,
+  FilesystemSearchDirectoriesResult,
   ProjectEntry,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
@@ -27,6 +29,7 @@ import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as DirectorySearch from "./DirectorySearch.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
 
@@ -99,6 +102,9 @@ export class WorkspaceEntries extends Context.Service<
     readonly browse: (
       input: FilesystemBrowseInput,
     ) => Effect.Effect<FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
+    readonly searchDirectories: (
+      input: FilesystemSearchDirectoriesInput,
+    ) => Effect.Effect<FilesystemSearchDirectoriesResult>;
     readonly list: (
       input: ProjectListEntriesInput,
     ) => Effect.Effect<ProjectListEntriesResult, WorkspaceEntriesError>;
@@ -120,6 +126,12 @@ const IGNORED_FILES_LIMIT = 200;
 
 /** Paths sent to one `git check-ignore` call when labelling a folder's children. */
 const IGNORE_CHECK_CHUNK_SIZE = 1000;
+
+/** Bounds one host-wide folder scan; results from a partial scan are still useful. */
+const DIRECTORY_SEARCH_MAX_DEPTH = 6;
+const DIRECTORY_SEARCH_MAX_DIRECTORIES = 60_000;
+const DIRECTORY_SEARCH_SCAN_BUDGET = "4 seconds";
+const DIRECTORY_SEARCH_INDEX_TTL = "5 minutes";
 
 /** Children classified at once when listing a folder; each symlink costs a realpath and a stat. */
 const SYMLINK_RESOLVE_BATCH_SIZE = 64;
@@ -253,6 +265,33 @@ export const make = Effect.gen(function* () {
       };
     },
   );
+
+  const directorySearchIndex = yield* Effect.cachedWithTTL(
+    Effect.gen(function* () {
+      const platform = yield* HostProcess.Platform;
+      const homeDirectory = yield* HostProcess.HomeDirectory;
+      const environment = yield* HostProcess.Environment;
+      const roots = yield* Effect.promise(() =>
+        DirectorySearch.listDirectorySearchRoots({ platform, homeDirectory, environment }),
+      );
+      return yield* DirectorySearch.scanDirectories({
+        roots,
+        homeDirectory,
+        platform,
+        maxDepth: DIRECTORY_SEARCH_MAX_DEPTH,
+        maxDirectories: DIRECTORY_SEARCH_MAX_DIRECTORIES,
+        timeout: DIRECTORY_SEARCH_SCAN_BUDGET,
+      });
+    }),
+    DIRECTORY_SEARCH_INDEX_TTL,
+  );
+
+  const searchDirectories: WorkspaceEntries["Service"]["searchDirectories"] = Effect.fn(
+    "WorkspaceEntries.searchDirectories",
+  )(function* (input) {
+    const index = yield* directorySearchIndex;
+    return DirectorySearch.searchIndexedDirectories(index.directories, input.query, input.limit);
+  });
 
   const search: WorkspaceEntries["Service"]["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
@@ -597,7 +636,15 @@ export const make = Effect.gen(function* () {
     };
   });
 
-  return WorkspaceEntries.of({ browse, list, listIgnoredFiles, refresh, search, searchContents });
+  return WorkspaceEntries.of({
+    browse,
+    list,
+    listIgnoredFiles,
+    refresh,
+    search,
+    searchContents,
+    searchDirectories,
+  });
 });
 
 export const layer = Layer.effect(WorkspaceEntries, make).pipe(

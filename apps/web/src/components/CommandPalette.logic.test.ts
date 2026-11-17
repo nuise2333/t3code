@@ -9,6 +9,7 @@ import {
   buildThreadActionItems,
   buildLinkedThreadActionItems,
   filterPinnedBrowseEntries,
+  buildFolderSearchGroups,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
   resolveAddProjectEntry,
@@ -775,6 +776,33 @@ describe("buildThreadActionItems", () => {
       "thread:environment-local:word-fresh",
       "thread:environment-local:prefix-stale",
     ]);
+  });
+});
+
+describe("buildFolderSearchGroups", () => {
+  it("keeps the server ranking but lists folders that are already projects last", async () => {
+    const addFolder = vi.fn();
+    const groups = buildFolderSearchGroups({
+      entries: [
+        { name: "t3-code", fullPath: "/h/Projects/t3-code", isGitRepository: true },
+        { name: "t3-code", fullPath: "/Volumes/T7/t3-code", isGitRepository: true },
+        { name: "t3-code-fork", fullPath: "/h/t3-code-fork", isGitRepository: false },
+      ],
+      existingProjectPaths: new Set(["/h/Projects/t3-code"]),
+      repositoryIcon: null,
+      directoryIcon: null,
+      addFolder,
+    });
+    const items = groups[0]?.items ?? [];
+    expect(items.map((item) => item.value)).toEqual([
+      "folder-search:/Volumes/T7/t3-code",
+      "folder-search:/h/t3-code-fork",
+      "folder-search:/h/Projects/t3-code",
+    ]);
+    const first = items[0];
+    if (first?.kind !== "action") throw new Error("expected an action item");
+    await first.run();
+    expect(addFolder).toHaveBeenCalledWith("/Volumes/T7/t3-code");
   });
 });
 

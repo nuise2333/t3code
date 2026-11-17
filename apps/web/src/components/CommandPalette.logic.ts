@@ -24,6 +24,7 @@ import {
   type ProjectId,
   type EnvironmentMachineKind,
   type FilesystemBrowseEntry,
+  type FilesystemDirectorySearchEntry,
   type KeybindingCommand,
   type SourceControlDiscoveryResult,
   type SourceControlRepositoryInfo,
@@ -238,6 +239,8 @@ export interface CommandPaletteView {
   readonly addonIcon: ReactNode;
   readonly groups: ReadonlyArray<CommandPaletteGroup>;
   readonly initialQuery?: string;
+  /** Text that is not a path searches the host's folders by name. */
+  readonly searchesFolders?: boolean;
 }
 
 // Child search unmounts the palette; retain search data without its view closures.
@@ -733,6 +736,35 @@ export function buildBrowseGroups(input: {
   }
 
   return [{ value: "directories", label: "Directories", items }];
+}
+
+/** Server ranking is kept, except folders that already are projects drop to the end. */
+export function buildFolderSearchGroups(input: {
+  entries: ReadonlyArray<FilesystemDirectorySearchEntry>;
+  existingProjectPaths: ReadonlySet<string>;
+  repositoryIcon: ReactNode;
+  directoryIcon: ReactNode;
+  addFolder: (fullPath: string) => void | Promise<void>;
+}): CommandPaletteGroup[] {
+  const isExisting = (entry: FilesystemDirectorySearchEntry) =>
+    input.existingProjectPaths.has(entry.fullPath);
+  const ordered = [
+    ...input.entries.filter((entry) => !isExisting(entry)),
+    ...input.entries.filter(isExisting),
+  ];
+  const items = ordered.map((entry): CommandPaletteActionItem => ({
+    kind: "action",
+    value: `folder-search:${entry.fullPath}`,
+    searchTerms: [entry.name, entry.fullPath],
+    title: entry.name,
+    description: isExisting(entry) ? `${entry.fullPath} · Already added` : entry.fullPath,
+    icon: entry.isGitRepository ? input.repositoryIcon : input.directoryIcon,
+    keepOpen: true,
+    run: async () => {
+      await input.addFolder(entry.fullPath);
+    },
+  }));
+  return items.length === 0 ? [] : [{ value: "folder-search", label: "Folders", items }];
 }
 
 export function filterPinnedBrowseEntries(input: {

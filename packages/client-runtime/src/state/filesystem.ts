@@ -155,5 +155,10 @@ export function createFilesystemEnvironmentAtoms<R, E>(
       idleTtlMs: BROWSE_IDLE_TTL_MS,
       staleTimeMs: 0,
     }),
+    searchDirectories: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:filesystem:search-directories",
+      tag: WS_METHODS.filesystemSearchDirectories,
+      idleTtlMs: BROWSE_IDLE_TTL_MS,
+    }),
   };
 }
