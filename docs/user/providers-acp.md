@@ -39,6 +39,48 @@ credentials and skills remain managed by the installed agent or its wrapper. Mod
 options come from ACP, including model IDs that contain JSON. T3 Code launches the executable directly
 without expanding shell expressions.
 
+### DeepSeek Harness agent presets
+
+When running T3 Code from a checkout on macOS or Linux, the optional
+`scripts/dsh-acp.mjs` launcher adds Standard, PTC, Minimal, Creator, and
+DeepSeek Stack presets to DeepSeek Harness's ACP configuration. It requires
+an installed DSH `0.2.2-rc.1` on the server's PATH. Add a Local ACP command
+whose executable is the absolute path to `scripts/bin/dsh` in that checkout,
+with no arguments; the `dsh` name keeps the DeepSeek Harness icon. The checkout must remain available
+while using this provider.
+
+Packaged desktop builds carry the same launcher outside the app archive, at
+`Contents/Resources/dsh/bin/dsh` on macOS or `resources/dsh/bin/dsh` on Linux,
+with the skills beside it. Point the Local ACP command at that path to use the
+presets without a checkout. When the app was launched from Finder, add the Node
+and `dsh` install directories to the provider instance's `PATH` environment
+override.
+
+Choose **Agent preset** in the thread's model options before sending its first
+message. The choice list comes from DSH's preset registry, so it follows the
+launcher's preset rows instead of a fixed list. DSH locks the preset after the
+first turn; start another thread to use a different preset. Saved threads
+restore their selection. Threads created with the ordinary DSH ACP command have
+no saved preset and must continue using that command.
+
+**DeepSeek Stack** is the mode that packages
+[aicodeking/deepseek-stack](https://github.com/aicodeking/deepseek-stack). The
+agent picks the `ds-*` skill that fits each request before it starts: a bug
+loads `ds-tdd`, a multi-file change `ds-plan-loop`, a review `ds-review-loop`,
+an explanation `ds-explain`, a PR `ds-pr`, and so on. It loads `ds-verify-loop`
+when a check fails, `ds-unstick` when the same failure returns after two fixes,
+and `ds-review-loop` before reporting a change that touches more than one file.
+Name a skill in your message, or type `/ds-tdd` and the like, to choose it
+yourself. Your own project and user skills stay available alongside the pack.
+For planning and review, use the highest reasoning effort the model offers. The
+skills ship with T3 Code and work offline.
+
+The launcher loads DSH's shipped preset plugins and preserves its ACP model
+configuration, credentials, and persistence. It does not modify the installed
+DSH package. Creator uses the ACP profile's editable configuration. DSH's Web
+pages, visual plugin interfaces, interactive questions, and other features
+without ACP equivalents are not exposed by this launcher.
+
 ## Where agents run
 
 Registry agents always run on the machine that hosts your T3 Code server. That stays true when you

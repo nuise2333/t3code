@@ -1,0 +1,6 @@
+#!/bin/sh
+# Finder-launched apps get a minimal PATH; keep Homebrew and /usr/local visible
+# so `node` and the installed `dsh` resolve.
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+exec node "$(dirname "$0")/../dsh-acp.mjs" "$@"

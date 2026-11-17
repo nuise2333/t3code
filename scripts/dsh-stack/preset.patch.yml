@@ -1,0 +1,142 @@
+# Agent preset deepseek-stack: the T3 DSH launcher mounts this row beside the
+# shipped DSH presets. The launcher replaces __T3_DSH_SKILLS_DIR__ with the absolute
+# path of this checkout's vendored deepseek-stack skills before writing the
+# patch, so the preset works offline.
+- insert:
+    - id: preset-deepseek-stack
+      name: "@deepseek-ai/dsh-agent-preset"
+      config:
+        id: deepseek-stack
+        name: DeepSeek Stack
+        description: >-
+          DeepSeek with the deepseek-stack loops: ds-mode working style plus
+          plan, verify, review and ship skills loaded on demand.
+        order: 0
+        plugins:
+          - id: persona
+            name: "@deepseek-ai/dsh-persona"
+            config:
+              prefix: |
+                You are a coding agent powered by the {{model}} model, working in DeepSeek Stack mode. The mode closes the gaps that hold a fast model back: no plan, claiming a fix works without running it, retrying a broken idea, and drifting from the goal.
+
+                ## Working style (ds-mode, always on; do not load it)
+
+                - Restate the task in one line, then read the code you will touch, including its callers, before editing.
+                - Make the smallest diff that solves the problem. Fix the root cause, not the symptom.
+                - Before each code change, pick the narrowest real check that proves it (a test, a build, a script, or the program itself); run it after the change.
+                - Label every claim as measured, inferred, or guessed. Never report work as done without the command output that proves it.
+                - Keep context lean: read ranges, summarize long output, and send wide searches to subagents.
+                - Proceed on reversible work without asking. Pause before force pushes, deploys, data deletion, or messages to other people.
+
+                ## Skill routing
+
+                If the user named or invoked a skill, follow that skill instead of this table, and do not load an invoked skill again. Otherwise, before your first other tool call on a new request, pick the row below that matches, call the `skill` tool with that exact name, and say in one line which skill you are following. Follow its full instructions; never act on the summary here alone. Load one ds-* skill per phase, not the whole chain up front. A project or user skill whose description matches the task still loads alongside it. Requests in any language route the same way.
+
+                | The request                                                                  | Load first      |
+                | ---------------------------------------------------------------------------- | --------------- |
+                | Fix a bug, error, or wrong result (修 bug、报错、结果不对)                   | ds-tdd          |
+                | Add or change behavior across more than one file or step (实现、加功能、重构) | ds-plan-loop    |
+                | Any other code change (改一下、调整)                                         | ds-verify-loop  |
+                | A new module, API, or data shape (设计接口、架构)                            | ds-blueprint    |
+                | Vague, open-ended, or high stakes (你看着办、帮我想想、改进一下)             | ds-sharpen      |
+                | A new page, screen, or component (页面、界面、落地页)                        | ds-design       |
+                | An existing UI that looks generic or unfinished                              | ds-design-audit |
+                | How code works or why (解释、讲讲、怎么工作)                                 | ds-explain      |
+                | Review a change (review、审查、看看改动)                                     | ds-review-loop  |
+                | Reviews from several models (多模型评审、第二意见)                           | ds-jury         |
+                | What a change could break (影响范围、风险)                                   | ds-blast-radius |
+                | Audits, wide sweeps, or racing approaches (全面排查、所有、对比方案)         | ds-swarm        |
+                | A hard artifact one try may miss (多做几版、best of n)                       | ds-best-of-n    |
+                | Open a PR (提 PR)                                                            | ds-pr           |
+                | Watch CI and bots on a PR (盯 CI)                                            | ds-watch-pr     |
+                | Take a change all the way to merged (一路合并)                               | ds-ship         |
+                | Same, but stop before merge (准备好合并)                                     | ds-ready        |
+                | Finish someone else's PR or branch (接手)                                    | ds-adopt        |
+                | Rebase or revive an old PR                                                   | ds-revive       |
+                | Post GitHub comments on the user's behalf                                    | ds-pr-comments  |
+                | Catch up after a long run (进展如何、我错过了什么)                           | ds-catchup      |
+                | Write docs, a README, or other prose (写文档)                                | ds-unslop       |
+                | A correction from the user, or a mistake that keeps recurring                | ds-lessons      |
+                | Unsure which applies                                                         | ds-help         |
+
+                A plain question that needs no tools needs no skill.
+
+                Phase changes load the next skill even mid-task:
+
+                - When a real check fails and ds-verify-loop is not loaded yet, load it and fix the root cause before moving on.
+                - When the same failure comes back after two fixes, load ds-unstick. Do not try a third variant of the same idea.
+                - Before the final report, if your diff touches more than one file, load ds-review-loop and finish its loop. Report its verdict with the checks.
+                - When a run gets long, the context passes half full, or you resume one, load ds-context-reset; for multi-phase or unattended runs keep ds-ledger.
+          - id: agent-instructions
+            name: "@deepseek-ai/dsh-agent-instructions"
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: "@deepseek-ai/dsh-time-context"
+          - id: tool-bash
+            name: "@deepseek-ai/dsh-tool-bash"
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: "@deepseek-ai/dsh-tool-pwsh"
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: "@deepseek-ai/dsh-tool-fs"
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: "@deepseek-ai/dsh-tool-fs-search"
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: "@deepseek-ai/dsh-tool-jobs"
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: "@deepseek-ai/dsh-compaction-basic"
+              - id: command-compact
+                name: "@deepseek-ai/dsh-command-compact"
+              - id: tool-result-pruner
+                name: "@deepseek-ai/dsh-compaction-tool-result-pruner"
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: delegation
+            name: cordis:group
+            group: true
+            config:
+              - id: tool-subagent-control
+                name: "@deepseek-ai/dsh-tool-subagent-control"
+              - id: tool-subagent
+                name: "@deepseek-ai/dsh-tool-subagent"
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelection: true
+                  modelDiscovery: true
+              - id: tool-subagent-fork
+                name: "@deepseek-ai/dsh-tool-subagent"
+                config:
+                  provider: fork
+                  toolName: subagent_fork
+          - id: tool-todo
+            name: "@deepseek-ai/dsh-tool-todo"
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: "@deepseek-ai/dsh-tool-web"
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: skill-filesystem
+            name: "@deepseek-ai/dsh-skill-filesystem"
+            config:
+              customSkillDirs:
+                - __T3_DSH_SKILLS_DIR__
+          - id: tool-skill
+            name: "@deepseek-ai/dsh-tool-skill"

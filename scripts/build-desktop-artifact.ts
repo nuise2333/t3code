@@ -1090,6 +1090,15 @@ export const WSL_RUNTIME_EXTRA_RESOURCES = [
   WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE,
   WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE,
 ] as const;
+// The DeepSeek Stack launcher spawns `dsh` and reads its vendored skills, so it
+// needs real paths; a copy inside app.asar is neither executable nor readable by
+// the spawned Node process.
+export const DESKTOP_DSH_EXTRA_RESOURCES = [
+  { from: "scripts/dsh-acp.mjs", to: "dsh/dsh-acp.mjs" },
+  { from: "scripts/lib/dsh-acp-presets.mjs", to: "dsh/lib/dsh-acp-presets.mjs" },
+  { from: "scripts/dsh-stack", to: "dsh/dsh-stack" },
+  { from: "scripts/bin/dsh", to: "dsh/bin/dsh" },
+] as const;
 export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/cursor-sdk",
@@ -2802,6 +2811,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       : { asarUnpack: ["**/node_modules/@transcribe-cpp/**/*.{dylib,so,so.*}"] }),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
+      ...(platform === "win" ? [] : DESKTOP_DSH_EXTRA_RESOURCES),
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
@@ -3799,6 +3809,20 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   }
   if (options.platform !== "win") {
     yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+    const stageDshDir = path.join(stageAppDir, "scripts");
+    yield* fs.makeDirectory(path.join(stageDshDir, "lib"), { recursive: true });
+    yield* fs.makeDirectory(path.join(stageDshDir, "bin"), { recursive: true });
+    yield* fs.copyFile(
+      path.join(repoRoot, "scripts/dsh-acp.mjs"),
+      path.join(stageDshDir, "dsh-acp.mjs"),
+    );
+    yield* fs.copyFile(
+      path.join(repoRoot, "scripts/lib/dsh-acp-presets.mjs"),
+      path.join(stageDshDir, "lib/dsh-acp-presets.mjs"),
+    );
+    yield* fs.copy(path.join(repoRoot, "scripts/dsh-stack"), path.join(stageDshDir, "dsh-stack"));
+    yield* fs.copyFile(path.join(repoRoot, "scripts/bin/dsh"), path.join(stageDshDir, "bin/dsh"));
+    yield* fs.chmod(path.join(stageDshDir, "bin/dsh"), 0o755);
   }
   yield* stageResourceMonitor({
     repoRoot,
