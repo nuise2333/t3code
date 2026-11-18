@@ -3144,6 +3144,7 @@ export const OrchestrationV2Command = Schema.Union([
     /** Only the server sets this, from its launch routing decision. */
     routing: Schema.optional(RouteDecision),
     /** Only the server sets these, from the launch or the user's defaults. */
+    agentTeam: Schema.optional(ThreadAgentTeam),
     tokenSaver: Schema.optional(ThreadTokenSaver),
     council: Schema.optional(ThreadCouncil),
     importedNativeThread: Schema.optional(
@@ -3963,6 +3964,8 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
    * With a group, `modelSelection` is a placeholder the server replaces with the member it picks.
    */
   routing: Schema.optional(LaunchRoutingRequest),
+  /** The team the new thread leads; absent uses the user's default team kind, null none. */
+  agentTeam: Schema.optional(Schema.NullOr(ThreadAgentTeam)),
   /** The new thread's token saver; absent uses the user's default, null starts it off. */
   tokenSaver: Schema.optional(Schema.NullOr(TokenSaverSettings)),
   /** The new thread's Council; absent uses the user's default, null starts it off. */

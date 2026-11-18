@@ -1,5 +1,6 @@
 import {
   isProviderAvailable,
+  type AutoTeamKind,
   resolveProjectProviderInstanceEnabled,
   type ModelSelection,
   type ProjectId,
@@ -864,6 +865,82 @@ export function chooseAutoModel(input: {
     skipped,
     skippedByReason,
   };
+}
+
+/**
+ * A worker's model for an automatic team, from every ready instance. Cheap takes the cheapest
+ * model at the task's tier or above; Balanced the cheapest one tier higher; Best the cheapest at
+ * the highest tier on offer. Null when no model in the table can run here.
+ */
+export function chooseTeamWorkerModel(input: {
+  readonly kind: AutoTeamKind;
+  readonly table: RoutingTable;
+  readonly taskClass: RoutingTaskClass;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+  readonly projectId: ProjectId | null;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId> | undefined;
+  readonly now: number;
+}): { readonly selection: ModelSelection; readonly tier: RoutingTier } | null {
+  const candidates: Array<{
+    readonly provider: ServerProvider;
+    readonly slug: string;
+    readonly tier: RoutingTier;
+    readonly relativeCost: number;
+  }> = [];
+  for (const row of input.table.rows) {
+    const tier = row.tierByClass?.[input.taskClass];
+    if (!isCandidateRow(row) || tier === undefined || row.relativeCost === undefined) continue;
+    for (const provider of input.providers) {
+      const resolves = (candidate: ProviderModel) =>
+        tierRowFor(input.table, provider.driver, candidate) === row;
+      const exact = findModel(provider, row.model);
+      const model = exact !== undefined && resolves(exact) ? exact : provider.models.find(resolves);
+      if (model === undefined) continue;
+      if (premiumByDefault(model.capabilities?.optionDescriptors ?? [])) continue;
+      const reason = memberSkipReason({
+        ...input,
+        member: { instanceId: provider.instanceId, model: model.slug },
+        provider,
+        runnableInstanceIds: input.runnableInstanceIds,
+      });
+      if (reason !== null) continue;
+      candidates.push({ provider, slug: model.slug, tier, relativeCost: row.relativeCost });
+    }
+  }
+  if (candidates.length === 0) return null;
+  const rank = (tier: RoutingTier) => TIER_ORDER.indexOf(tier);
+  const desired = rank(DESIRED_TIER[input.taskClass]);
+  const available = [...new Set(candidates.map((candidate) => rank(candidate.tier)))].sort(
+    (a, b) => a - b,
+  );
+  const atOrAbove = (floor: number) => available.find((level) => level >= floor);
+  const level =
+    input.kind === "best"
+      ? available.at(-1)
+      : input.kind === "balanced"
+        ? (atOrAbove(Math.min(desired + 1, rank("S"))) ?? atOrAbove(desired) ?? available.at(-1))
+        : (atOrAbove(desired) ?? available.at(-1));
+  const chosen = candidates
+    .filter((candidate) => rank(candidate.tier) === level)
+    .map((candidate) => ({
+      candidate,
+      ...quotaRank(candidate.provider, candidate.slug, input.now),
+    }))
+    .sort(
+      (a, b) =>
+        a.candidate.relativeCost - b.candidate.relativeCost ||
+        a.bucket - b.bucket ||
+        b.score - a.score,
+    )[0]?.candidate;
+  return chosen === undefined
+    ? null
+    : {
+        selection: { instanceId: chosen.provider.instanceId, model: chosen.slug },
+        tier: chosen.tier,
+      };
 }
 
 /**

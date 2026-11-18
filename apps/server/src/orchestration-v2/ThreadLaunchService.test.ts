@@ -3285,16 +3285,19 @@ describe("effort routing", () => {
       serverSettings: {
         tokenSaverDefault: { packs: ["caveman", "quiet-tools"], level: "lite" },
         councilDefaults: { target: 8.5, maxRounds: 5, reviewers: 3, newThreads: true },
+        agentTeamDefault: "balanced",
       },
     });
     return Effect.gen(function* () {
       const { thread } = yield* launchedThread(planLaunch("assist-defaults"));
+      assert.deepStrictEqual(thread.agentTeam, { id: "auto-balanced", name: "Balanced team" });
       assert.deepStrictEqual(thread.tokenSaver?.packs, ["caveman", "quiet-tools"]);
       assert.include(thread.council, { target: 8.5, maxRounds: 5, reviewers: 3 });
       // The launch's own choice wins, and null starts it off.
       const { thread: chosen } = yield* launchedThread(
-        planLaunch("assist-chosen", { tokenSaver: null, council: null }),
+        planLaunch("assist-chosen", { tokenSaver: null, council: null, agentTeam: null }),
       );
+      assert.isUndefined(chosen.agentTeam);
       assert.isUndefined(chosen.tokenSaver);
       assert.isUndefined(chosen.council);
       // An agent's thread starts without the user's defaults.
@@ -3302,6 +3305,7 @@ describe("effort routing", () => {
         planLaunch("assist-agent", { createdBy: "agent", creationSource: "mcp" }),
       );
       assert.isUndefined(agents.tokenSaver);
+      assert.isUndefined(agents.agentTeam);
       assert.isUndefined(agents.council);
     }).pipe(Effect.provide(harness.layer));
   });

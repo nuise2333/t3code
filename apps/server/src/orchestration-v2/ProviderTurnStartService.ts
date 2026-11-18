@@ -898,7 +898,9 @@ export const layer: Layer.Layer<
       const assistBlocks = [
         agentTeam === null || teamSettings === null
           ? null
-          : AgentTeam.agentTeamLeadPrompt(agentTeam, teamSettings.agentTeamLeadGuidance),
+          : agentTeam.kind === "auto"
+            ? AgentTeam.autoTeamLeadPrompt(agentTeam, teamSettings.agentTeamLeadGuidance)
+            : AgentTeam.agentTeamLeadPrompt(agentTeam.team, teamSettings.agentTeamLeadGuidance),
         councilBlock,
         saverBlock,
       ].filter((block): block is string => block !== null);

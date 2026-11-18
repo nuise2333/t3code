@@ -145,6 +145,44 @@ export const RoutingGroup = Schema.Struct({
 });
 export type RoutingGroup = typeof RoutingGroup.Type;
 
+/**
+ * Automatic teams: the thread's model leads, and T3 picks each worker's model for its task, the
+ * cheapest likely to pass, the best value, or the strongest. They need no saved team.
+ */
+export const AutoTeamKind = Schema.Literals(["cheap", "balanced", "best"]);
+export type AutoTeamKind = typeof AutoTeamKind.Type;
+
+export const AUTO_TEAMS: ReadonlyArray<{
+  readonly kind: AutoTeamKind;
+  /** The id a thread's `agentTeam` carries; never a saved group's id. */
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+}> = [
+  {
+    kind: "cheap",
+    id: "auto-cheap",
+    name: "Cheap team",
+    description: "Cheapest model likely to pass",
+  },
+  {
+    kind: "balanced",
+    id: "auto-balanced",
+    name: "Balanced team",
+    description: "Best value for the cost",
+  },
+  {
+    kind: "best",
+    id: "auto-best",
+    name: "Best team",
+    description: "Strongest model for each worker",
+  },
+];
+
+export function autoTeamKind(id: string): AutoTeamKind | null {
+  return AUTO_TEAMS.find((team) => team.id === id)?.kind ?? null;
+}
+
 /** Added to every team lead's turn after the built-in team rules. */
 export const AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH = 2000;
 

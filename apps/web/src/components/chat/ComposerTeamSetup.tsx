@@ -5,15 +5,15 @@ import {
   type ModelSelection,
   type RoutingGroup,
 } from "@t3tools/contracts";
-import { InfoIcon, MoreHorizontalIcon, PlusIcon, UsersIcon, XIcon } from "lucide-react";
-import { memo, useId, useState } from "react";
+import { InfoIcon, MoreHorizontalIcon, PlusIcon, XIcon } from "lucide-react";
+import { memo, useId, useState, type RefObject } from "react";
 
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Popover, PopoverClose, PopoverPopup } from "../ui/popover";
 import {
   Select,
   SelectGroup,
@@ -25,7 +25,6 @@ import {
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 
@@ -144,9 +143,9 @@ function ModelField(props: {
 }
 
 /**
- * The composer's Team control: a people glyph that opens the architect-and-workers setup. The
- * architect leads this thread and delegates to the workers; Save setup keeps it as a team and
- * turns it on here.
+ * Architect & workers, opened from the Team menu: the architect leads this thread and delegates
+ * to the workers; Save setup keeps it as a team and turns it on here. Mounted only while open,
+ * so it starts from the team in use each time.
  */
 export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   readonly teams: ReadonlyArray<RoutingGroup>;
@@ -157,21 +156,30 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   /** The thread's model, which a new setup starts from as its architect. */
   readonly currentSelection: ModelSelection;
   readonly sharedGuidance: string;
-  readonly size?: "sm" | "xs";
+  readonly anchor: RefObject<HTMLElement | null>;
+  readonly onClose: () => void;
   readonly disabledReason?: string | null;
   readonly onSaveTeams: (teams: ReadonlyArray<RoutingGroup>) => void;
   readonly onApply: (team: RoutingGroup) => void;
   readonly onDisable: () => void;
 }) {
-  const size = props.size ?? "sm";
   const floatingProps = useComposerMenuProps();
-  const [open, setOpen] = useState(false);
-  const [profileId, setProfileId] = useState<string>(CUSTOM_TEAM_ID);
-  const [setup, setSetup] = useState<Setup>(() => setupOf(undefined, props.currentSelection));
+  const active = props.active;
+  const initialProfile =
+    active && props.teams.some((team) => team.id === active.id) ? active.id : CUSTOM_TEAM_ID;
+  const [profileId, setProfileId] = useState<string>(initialProfile);
+  const [setup, setSetup] = useState<Setup>(() =>
+    setupOf(
+      props.teams.find((team) => team.id === initialProfile),
+      props.currentSelection,
+    ),
+  );
   const [naming, setNaming] = useState<string | null>(null);
   const guidanceId = useId();
   const parallelId = useId();
-  const active = props.active;
+  const setOpen = (open: boolean) => {
+    if (!open) props.onClose();
+  };
   const profile = props.teams.find((team) => team.id === profileId);
   const named = props.teams.filter((team) => team.id !== CUSTOM_TEAM_ID);
 
@@ -179,12 +187,6 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
     const team = props.teams.find((candidate) => candidate.id === id);
     setProfileId(id);
     setSetup(setupOf(team, props.currentSelection));
-  };
-  const onOpenChange = (next: boolean) => {
-    setOpen(next);
-    if (!next) return;
-    setNaming(null);
-    load(active && props.teams.some((team) => team.id === active.id) ? active.id : CUSTOM_TEAM_ID);
   };
 
   const workers = setup.workers.filter((worker): worker is ModelSelection => worker !== null);
@@ -253,44 +255,15 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
     load(CUSTOM_TEAM_ID);
   };
 
-  const label = active ? `Agent team: ${active.name}` : "Agent team: off";
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <PopoverTrigger
-              render={
-                <ComposerControl
-                  size={size}
-                  className="ps-1.5"
-                  data-composer-agent-team={active ? "on" : "off"}
-                  aria-pressed={active !== null}
-                  aria-label={label}
-                />
-              }
-            />
-          }
-        >
-          <ComposerControlIcon icon={UsersIcon} size={size} />
-          {active ? (
-            <span data-composer-control-label className="max-w-32 truncate">
-              {active.name}
-            </span>
-          ) : null}
-        </TooltipTrigger>
-        <TooltipPopup side="top">
-          {active
-            ? `${label}. The architect plans and delegates to the workers.`
-            : (props.disabledReason ?? `${label}. Set up an architect and workers.`)}
-        </TooltipPopup>
-      </Tooltip>
+    <Popover open onOpenChange={setOpen}>
       <PopoverPopup
         side="top"
         align="start"
         padding="compact"
         className="w-96"
         aria-label="Architect & workers"
+        anchor={props.anchor}
         {...floatingProps}
       >
         <form

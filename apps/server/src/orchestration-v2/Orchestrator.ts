@@ -3802,6 +3802,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : { delegatedRole: command.delegatedRole }),
           }),
       ...(command.routing === undefined ? {} : { routing: command.routing }),
+      ...(command.agentTeam === undefined ? {} : { agentTeam: command.agentTeam }),
       ...(command.tokenSaver === undefined ? {} : { tokenSaver: command.tokenSaver }),
       ...(command.council === undefined ? {} : { council: command.council }),
       lineage: {

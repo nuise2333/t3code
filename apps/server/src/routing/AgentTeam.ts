@@ -1,14 +1,28 @@
-import type {
-  ModelSelection,
-  OrchestratorMcpTarget,
-  RouteDecision,
-  RoutingGroup,
-  ThreadAgentTeam,
+import {
+  AUTO_TEAMS,
+  autoTeamKind,
+  type AutoTeamKind,
+  type ModelSelection,
+  type OrchestratorMcpTarget,
+  type RouteDecision,
+  type RoutingGroup,
+  type ThreadAgentTeam,
 } from "@t3tools/contracts";
-import { threadAgentTeam } from "@t3tools/shared/agentTeam";
+import { threadAgentTeamRef } from "@t3tools/shared/agentTeam";
+
+/** A saved team with its members, or an automatic team whose workers T3 picks per task. */
+export type ActiveTeam =
+  | { readonly kind: "saved"; readonly team: RoutingGroup }
+  | {
+      readonly kind: "auto";
+      readonly auto: AutoTeamKind;
+      readonly id: string;
+      readonly name: string;
+      readonly description: string;
+    };
 
 /**
- * The team a thread leads, and only while that team still exists. One the user turned on after
+ * The team a thread leads, and only while a saved team still exists. One the user turned on after
  * launch is led by the thread's model; one it launched through, only while it keeps that member.
  */
 export function activeAgentTeam(input: {
@@ -16,8 +30,39 @@ export function activeAgentTeam(input: {
   readonly agentTeam: ThreadAgentTeam | null | undefined;
   readonly modelSelection: Pick<ModelSelection, "instanceId" | "model">;
   readonly groups: ReadonlyArray<RoutingGroup>;
-}): RoutingGroup | null {
-  return threadAgentTeam(input);
+}): ActiveTeam | null {
+  const ref = threadAgentTeamRef(input);
+  if (ref === null) return null;
+  const auto = autoTeamKind(ref.id);
+  const autoTeam = AUTO_TEAMS.find((team) => team.kind === auto);
+  if (auto !== null && autoTeam) {
+    return {
+      kind: "auto",
+      auto,
+      id: autoTeam.id,
+      name: autoTeam.name,
+      description: autoTeam.description,
+    };
+  }
+  const team = input.groups.find((group) => group.id === ref.id);
+  return team?.team === true ? { kind: "saved", team } : null;
+}
+
+export const activeTeamName = (team: ActiveTeam) =>
+  team.kind === "saved" ? team.team.name : team.name;
+
+/** An automatic team's rules: the lead leaves the model out and T3 picks one per task. */
+export function autoTeamLeadPrompt(
+  team: Extract<ActiveTeam, { kind: "auto" }>,
+  guidance: string,
+): string {
+  const extra = guidance.trim();
+  return [
+    `<t3_code_agent_team name="${escapeAttribute(team.name)}">`,
+    `You lead the automatic agent team "${team.name}" the user picked for this thread. Plan the work, split it into self-contained tasks, and hand each to a worker with \`delegate_task\`. Leave \`target\` out: T3 picks each worker's model for its task (${team.description.toLowerCase()}). Name a model only when the user asks for one. Independent tasks run in parallel. Check each result, then answer the user yourself; do small steps yourself.`,
+    ...(extra === "" ? [] : ["", "Lead guidance from the user:", extra]),
+    "</t3_code_agent_team>",
+  ].join("\n");
 }
 
 function memberLabel(member: ModelSelection): string {

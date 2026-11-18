@@ -6,6 +6,8 @@ import { Atom } from "effect/reactivity";
  * with the user's defaults; null starts it off. Kept in memory: a reload falls back to defaults.
  */
 export interface DraftThreadAssists {
+  /** An automatic team or none; a saved team is picked as the draft's routing group. */
+  readonly agentTeam?: import("@t3tools/contracts").ThreadAgentTeam | null;
   readonly tokenSaver?: TokenSaverSettings | null;
   readonly council?: CouncilSettings | null;
 }
