@@ -230,6 +230,8 @@ describe("searchSettings", () => {
       ["model group", "routing-groups"],
       ["failover", "routing-groups"],
       ["group preset", "routing-groups"],
+      ["agent team", "agent-teams"],
+      ["lead guidance", "agent-teams"],
     ] as const) {
       expect(searchSettings(title)[0]?.id, title).toBe(id);
     }

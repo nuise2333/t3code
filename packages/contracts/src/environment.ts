@@ -130,6 +130,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   routingGroupQuota: Schema.optionalKey(Schema.Boolean),
   /** Stores a scheduled task's `routingGroupId`; older servers drop it, so clients offer groups there only when set. */
   scheduledTaskRoutingGroups: Schema.optionalKey(Schema.Boolean),
+  /** Keeps a routing group's `team` and leads team threads; clients show Agent teams only when set. */
+  agentTeams: Schema.optionalKey(Schema.Boolean),
   /** Serves `server.crossVendorModel`; clients hide "Find the cause" where it is absent. */
   crossVendorModel: Schema.optionalKey(Schema.Boolean),
   /** Serves `server.routingSummary`; the Usage page shows its Routing section only when set. */

@@ -213,6 +213,7 @@ export function ComposerControlsBar(props: {
       : (routingGroups.find((group) => group.id === draftRoutingGroupId) ?? {
           id: draftRoutingGroupId,
           name: "Missing group",
+          team: false,
           summary: null,
         });
   const clearPickedGroup = () => {
@@ -298,7 +299,9 @@ export function ComposerControlsBar(props: {
     ? {
         suffix: null,
         detail: pickedGroup.summary
-          ? `Routing group: a usable member of ${pickedGroup.summary}`
+          ? pickedGroup.team
+            ? `Agent team: ${pickedGroup.summary}`
+            : `Routing group: a usable member of ${pickedGroup.summary}`
           : "This routing group no longer exists",
       }
     : routedGroup
@@ -379,7 +382,11 @@ export function ComposerControlsBar(props: {
       }
       effortColumn={
         pickedGroup ? (
-          <ComposerRoutingGroupColumn name={pickedGroup.name} summary={pickedGroup.summary} />
+          <ComposerRoutingGroupColumn
+            name={pickedGroup.name}
+            summary={pickedGroup.summary}
+            team={pickedGroup.team}
+          />
         ) : (
           <ComposerEffortColumn
             traits={traitsInput}

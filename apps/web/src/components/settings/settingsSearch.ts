@@ -1022,6 +1022,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "agent-teams",
+    title: "Agent teams",
+    to: "/settings/providers",
+    searchTerms: [
+      "agent team lead leader workers delegate subagents orchestrate architect multi agent crew lead guidance",
+    ],
+    providerSettingsOnly: true,
+  },
+  {
     id: "text-generators",
     title: "Text generators",
     to: "/settings/providers",

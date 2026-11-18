@@ -1113,6 +1113,14 @@ export function EnvironmentProviderSettings({
         readOnly={readOnly}
       />
 
+      <RoutingGroupsSettings
+        key={`agent-teams:${environmentId}`}
+        kind="team"
+        environmentId={environmentId}
+        providers={serverProviders}
+        readOnly={readOnly}
+      />
+
       <SettingsSection title="Advanced">
         <SettingsRow
           id={searchableSetting("provider-health-check-interval").id}

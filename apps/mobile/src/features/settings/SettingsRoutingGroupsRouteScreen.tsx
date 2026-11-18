@@ -11,6 +11,7 @@ import {
 import {
   moveListItem,
   newRoutingGroupId,
+  plainRoutingGroups,
   ROUTING_TASK_CLASS_LABELS,
   ROUTING_TASK_CLASSES,
   routingGroupProblems,
@@ -151,12 +152,14 @@ function EnvironmentRoutingGroups(props: {
   const { target, canWrite } = props;
   const settings = config.settings;
   const providers = config.providers;
-  const groups = settings.routingGroups;
+  // Agent teams are edited in web and desktop Settings; this list keeps them as they are.
+  const groups = plainRoutingGroups(settings.routingGroups);
+  const teams = settings.routingGroups.filter((group) => group.team === true);
   const rules = settings.routingGroupRules;
   const problems = routingGroupProblems({ groups, rules, providers });
   const seed = seedMember(config);
   const saveGroups = (next: ReadonlyArray<RoutingGroup>) =>
-    void write(target.environmentId, { routingGroups: next });
+    void write(target.environmentId, { routingGroups: [...next, ...teams] });
   const setRule = (taskClass: RoutingTaskClass, groupId: string | null) =>
     void write(target.environmentId, {
       routingGroupRules: withRoutingGroupRule(rules, taskClass, groupId),
@@ -178,7 +181,7 @@ function EnvironmentRoutingGroups(props: {
           memberIndex: 0,
           group: {
             id: newRoutingGroupId(name, [
-              ...groups.map((group) => group.id),
+              ...settings.routingGroups.map((group) => group.id),
               ...Object.values(rules),
             ]),
             name,

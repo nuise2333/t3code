@@ -703,6 +703,19 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   routingGroups: Schema.optional(
     Schema.Array(Schema.Struct({ id: RoutingGroupId, name: Schema.String })),
   ),
+  /** The agent team this thread leads; `delegate_task` accepts only these members. */
+  agentTeam: Schema.optional(
+    Schema.Struct({
+      name: Schema.String,
+      members: Schema.Array(
+        Schema.Struct({
+          providerInstanceId: ProviderInstanceId,
+          model: Schema.String,
+          options: Schema.optional(Schema.Array(ProviderOptionSelection)),
+        }),
+      ),
+    }),
+  ),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,
     asyncPolling: Schema.Boolean,

@@ -37,6 +37,8 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   showFavorites?: boolean;
   showRoutingGroups?: boolean;
+  /** "Routing groups", "Agent teams", or both, by what the tab lists. */
+  routingGroupsLabel?: string;
   disabledInstanceIds?: ReadonlySet<ProviderInstanceId>;
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
@@ -131,7 +133,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                           className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
                           onClick={() => handleSelect("groups")}
                           type="button"
-                          aria-label="Routing groups"
+                          aria-label={props.routingGroupsLabel ?? "Routing groups"}
                           aria-pressed={props.selectedInstanceId === "groups"}
                         >
                           <ListOrderedIcon className="size-5 shrink-0" aria-hidden />
@@ -143,7 +145,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                       sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                       align="center"
                     >
-                      Routing groups
+                      {props.routingGroupsLabel ?? "Routing groups"}
                     </TooltipPopup>
                   </Tooltip>
                 </div>

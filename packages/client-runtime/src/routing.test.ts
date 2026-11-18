@@ -121,6 +121,7 @@ describe("routing groups", () => {
   it("names the group, the chosen model and the skipped members as launched", () => {
     expect(routedGroupDisplay({ routing, selection: group.members[1], providers })).toStrictEqual({
       groupName: "Fast",
+      team: false,
       label: "Fast → GPT 6",
       skipped: "Skipped: Claude Opus (usage limit)",
     });
@@ -128,6 +129,10 @@ describe("routing groups", () => {
     expect(
       routedGroupDisplay({ routing: byQuota, selection: group.members[1], providers })?.label,
     ).toBe("Fast (by quota) → GPT 6");
+    const asTeam: RouteDecision = { ...routed, group: { ...groupDecision, team: true } };
+    expect(
+      routedGroupDisplay({ routing: asTeam, selection: group.members[1], providers }),
+    ).toMatchObject({ team: true, label: "Team Fast, led by GPT 6" });
   });
 
   it("drops the label after a manual pick", () => {
@@ -147,8 +152,23 @@ describe("routing groups", () => {
         providers,
       });
     expect(offered({ newThread: true })).toStrictEqual([
-      { id: "fast", name: "Fast", summary: "Claude Opus, GPT 6", placeholder: group.members[0] },
+      {
+        id: "fast",
+        name: "Fast",
+        team: false,
+        summary: "Claude Opus, GPT 6",
+        placeholder: group.members[0],
+      },
     ]);
+    expect(
+      pickerRoutingGroups({
+        newThread: true,
+        multiModel: false,
+        capability: true,
+        groups: [{ ...group, team: true }],
+        providers,
+      })[0],
+    ).toMatchObject({ team: true, summary: "Claude Opus leads GPT 6" });
     expect(offered({ newThread: false })).toStrictEqual([]);
     expect(offered({ newThread: true, multiModel: true })).toStrictEqual([]);
     expect(offered({ newThread: true, capability: false })).toStrictEqual([]);

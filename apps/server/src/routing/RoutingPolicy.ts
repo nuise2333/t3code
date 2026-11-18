@@ -259,6 +259,7 @@ const make = Effect.gen(function* () {
       name: group.name,
       via: input.via,
       ...(group.rank === "quota" ? { rank: "quota" as const } : {}),
+      ...(group.team === true ? { team: true as const } : {}),
       chosen: resolution.index,
       member: { instanceId: resolution.selection.instanceId, model: resolution.selection.model },
       skipped: resolution.skipped,

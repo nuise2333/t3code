@@ -35,7 +35,12 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { MAX_ROUTING_GROUPS, RoutingGroup, RoutingGroupRules } from "./routing.ts";
+import {
+  AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH,
+  MAX_ROUTING_GROUPS,
+  RoutingGroup,
+  RoutingGroupRules,
+} from "./routing.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
@@ -1521,6 +1526,12 @@ export const ServerSettings = Schema.Struct({
     Schema.catchDecoding(() => Effect.succeedSome({})),
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  /** Text every agent team's lead follows after the built-in team rules; empty for none. */
+  agentTeamLeadGuidance: Schema.String.pipe(
+    Schema.check(Schema.isMaxLength(AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH)),
+    Schema.catchDecoding(() => Effect.succeedSome("")),
+    Schema.withDecodingDefault(Effect.succeed("")),
+  ),
   sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1966,6 +1977,9 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   /** Replaces every rule; omit a class to clear it. */
   routingGroupRules: Schema.optionalKey(RoutingGroupRules),
+  agentTeamLeadGuidance: Schema.optionalKey(
+    Schema.String.check(Schema.isMaxLength(AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH)),
+  ),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

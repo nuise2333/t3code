@@ -128,8 +128,16 @@ export const RoutingGroup = Schema.Struct({
   strategy: Schema.Literal("order"),
   /** Not a strategy value: older clients drop groups with an unknown strategy, then save the list. */
   rank: Schema.optionalKey(Schema.Literals(["order", "quota"])),
+  /**
+   * An agent team: the member a thread launches on leads, and delegates only to members. Settings
+   * lists teams apart from groups; the server keeps the key when a client saves a group without it.
+   */
+  team: Schema.optionalKey(Schema.Literal(true)),
 });
 export type RoutingGroup = typeof RoutingGroup.Type;
+
+/** Added to every team lead's turn after the built-in team rules. */
+export const AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH = 2000;
 
 /** Group ids by task class; consulted only for launches that ask for Auto. */
 export const RoutingGroupRules = Schema.Struct({
@@ -163,6 +171,8 @@ export const RouteGroupDecision = Schema.Struct({
   name: TrimmedNonEmptyString,
   via: Schema.Literals(["picker", "rule"]),
   rank: Schema.optionalKey(Schema.Literal("quota")),
+  /** The group was an agent team at launch, so the thread leads it while it keeps `member`. */
+  team: Schema.optionalKey(Schema.Literal(true)),
   chosen: NonNegativeInt,
   /** Members as they were at launch, so later group edits do not relabel this thread. */
   member: RouteGroupMember,

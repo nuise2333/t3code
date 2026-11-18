@@ -22,7 +22,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { ListOrderedIcon, CheckIcon } from "lucide-react";
+import { ListOrderedIcon, CheckIcon, UsersIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
@@ -404,6 +404,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   });
   const routingGroups = props.onRoutingGroupSelect ? (props.routingGroups ?? []) : [];
   const showRoutingGroups = routingGroups.length > 0;
+  const routingGroupsLabel = !routingGroups.some((group) => group.team)
+    ? "Routing groups"
+    : routingGroups.every((group) => group.team)
+      ? "Agent teams"
+      : "Groups and teams";
   const activeRoutingGroupKey =
     props.activeRoutingGroupId != null
       ? modelPickerRoutingGroupKey(props.activeRoutingGroupId)
@@ -855,7 +860,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         next === "favorites"
           ? "Favorites"
           : next === "groups"
-            ? "Routing groups"
+            ? routingGroupsLabel
             : (entryByInstanceId.get(next)?.displayName ?? next),
         "model-picker",
       );
@@ -913,6 +918,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             instanceEntries={sidebarInstanceEntries}
             showFavorites
             showRoutingGroups={showRoutingGroups}
+            routingGroupsLabel={routingGroupsLabel}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds
               ? {
@@ -1089,10 +1095,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       value={modelKey}
                       className="group relative w-full !min-w-0 max-w-full cursor-pointer"
                     >
-                      <ListOrderedIcon
-                        className="size-4 shrink-0 text-muted-foreground"
-                        aria-hidden="true"
-                      />
+                      {routingGroup.team ? (
+                        <UsersIcon
+                          className="size-4 shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <ListOrderedIcon
+                          className="size-4 shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                      )}
                       <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
                         <span className="min-w-0 shrink-0 truncate text-sm leading-snug">
                           {routingGroup.name}

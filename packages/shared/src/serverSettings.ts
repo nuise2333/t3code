@@ -390,15 +390,22 @@ function translateLegacyAutoRoutingPatch(patch: ServerSettingsPatch): ServerSett
   return { ...rest, autoRouting: { enabled: autoRoutingEnabled, ...rest.autoRouting } };
 }
 
-/** Clients that predate `rank` save a group without it; an edited group keeps its stored rank. */
-function keepRoutingGroupRanks(
+/**
+ * Clients that predate `rank` or `team` save a group without them; an edited group keeps its
+ * stored keys. A team never becomes a plain group: Settings deletes it instead.
+ */
+function keepRoutingGroupKeys(
   current: ServerSettings["routingGroups"],
   patched: NonNullable<ServerSettingsPatch["routingGroups"]>,
 ): ServerSettings["routingGroups"] {
   return patched.map((group) => {
-    if (group.rank !== undefined) return group;
-    const rank = current.find((saved) => saved.id === group.id)?.rank;
-    return rank === undefined ? group : { ...group, rank };
+    const saved = current.find((entry) => entry.id === group.id);
+    if (saved === undefined) return group;
+    return {
+      ...group,
+      ...(group.rank === undefined && saved.rank !== undefined ? { rank: saved.rank } : {}),
+      ...(saved.team === true ? { team: true as const } : {}),
+    };
   });
 }
 
@@ -566,7 +573,7 @@ export function applyServerSettingsPatch(
       ? { providerInstances: patch.providerInstances }
       : {}),
     ...(patch.routingGroups !== undefined
-      ? { routingGroups: keepRoutingGroupRanks(current.routingGroups, patch.routingGroups) }
+      ? { routingGroups: keepRoutingGroupKeys(current.routingGroups, patch.routingGroups) }
       : {}),
     ...(patch.routingGroupRules !== undefined
       ? { routingGroupRules: patch.routingGroupRules }

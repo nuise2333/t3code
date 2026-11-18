@@ -138,13 +138,18 @@ describe("serverSettings helpers", () => {
     expect(patched.routingGroupRules).toEqual({ hard: "deep" });
   });
 
-  it("keeps a stored rank when a client that predates it saves the group", () => {
+  it("keeps a stored rank and team when a client that predates them saves the group", () => {
     const member = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-fake-1" };
     const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       routingGroups: [
         { id: "spread", name: "Spread", members: [member], strategy: "order", rank: "quota" },
+        { id: "crew", name: "Crew", members: [member], strategy: "order", team: true },
       ],
     });
+    const resaved = applyServerSettingsPatch(saved, {
+      routingGroups: [{ id: "crew", name: "Crew", members: [member], strategy: "order" }],
+    });
+    expect(resaved.routingGroups[0]?.team).toBe(true);
     const renamed = applyServerSettingsPatch(saved, {
       routingGroups: [
         { id: "spread", name: "Spread out", members: [member], strategy: "order" },

@@ -37,6 +37,7 @@ import { withTurnStartReservation, withWorkspaceLease } from "../workspace/works
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
+import * as AgentTeam from "../routing/AgentTeam.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { makeRestoreMissingWorktree } from "../workspace/restoreMissingWorktree.ts";
 import * as EventSink from "./EventSink.ts";
@@ -197,6 +198,7 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     const restoreMissingWorktree = yield* makeRestoreMissingWorktree;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
 
@@ -831,7 +833,7 @@ export const layer: Layer.Layer<
       });
       let effectiveHandoffs = handoffs;
       let resumeFellBack = false;
-      const userText = projectComposerContextForProvider({
+      const requestText = projectComposerContextForProvider({
         text: providerMessage.text,
         records: providerMessage.context?.records ?? [],
       });
@@ -841,6 +843,23 @@ export const layer: Layer.Layer<
         session.driver === "claudeAgent" ||
         session.providerSession.capabilities.turns.supportsNativeGoals === true;
       const goalCommand = goalDriver && parseGoalCommand(providerMessage) !== null;
+      // A team lead gets its members and the user's guidance on every turn; commands stay verbatim.
+      const teamSettings =
+        goalCommand || requestText.trimStart().startsWith("/")
+          ? null
+          : yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
+      const agentTeam =
+        teamSettings === null
+          ? null
+          : AgentTeam.activeAgentTeam({
+              routing: projection.thread.routing,
+              modelSelection: run.modelSelection,
+              groups: teamSettings.routingGroups,
+            });
+      const userText =
+        agentTeam === null || teamSettings === null
+          ? requestText
+          : `${AgentTeam.agentTeamLeadPrompt(agentTeam, teamSettings.agentTeamLeadGuidance)}\n\n${requestText}`;
       // The provider turn marks cancellation work delivered; restart continuations use their own text or resume natively.
       const noteContinuation = isRestartNoteContinuation(
         run,

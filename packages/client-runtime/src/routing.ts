@@ -388,6 +388,8 @@ export function routingMemberLabel(
 
 export interface RoutedGroupDisplay {
   readonly groupName: string;
+  /** The thread leads this agent team. */
+  readonly team: boolean;
   /** Such as "Fast → GPT-6.1", or "Fast (by quota) → GPT-6.1". */
   readonly label: string;
   /** Such as "Skipped: Opus 5.5 (usage limit)"; null when the first member ran. */
@@ -415,9 +417,14 @@ export function routedGroupDisplay(input: {
     (skip) =>
       `${routingMemberLabel(skip, input.providers)} (${ROUTING_SKIP_REASON_LABELS[skip.reason]})`,
   );
+  const lead = routingMemberLabel(input.selection, input.providers);
   return {
     groupName: decision.name,
-    label: `${decision.name}${decision.rank === "quota" ? " (by quota)" : ""} → ${routingMemberLabel(input.selection, input.providers)}`,
+    team: decision.team === true,
+    label:
+      decision.team === true
+        ? `Team ${decision.name}, led by ${lead}`
+        : `${decision.name}${decision.rank === "quota" ? " (by quota)" : ""} → ${lead}`,
     skipped: skipped.length > 0 ? `Skipped: ${skipped.join(", ")}` : null,
   };
 }
@@ -553,6 +560,8 @@ export function withRoutingGroupRule(
 export interface PickerRoutingGroup {
   readonly id: string;
   readonly name: string;
+  /** An agent team: the placeholder leads and delegates to the members. */
+  readonly team: boolean;
   /** Member models in order, such as "Opus 5.5, GPT-6". */
   readonly summary: string;
   readonly placeholder: ModelSelection;
@@ -587,11 +596,37 @@ export function pickerRoutingGroups(input: {
       {
         id: group.id,
         name: group.name,
-        summary: group.members
-          .map((member) => routingMemberLabel(member, input.providers))
-          .join(", "),
+        team: group.team === true,
+        summary:
+          group.team === true
+            ? agentTeamSummary(group, placeholder, input.providers)
+            : group.members.map((member) => routingMemberLabel(member, input.providers)).join(", "),
         placeholder,
       },
     ];
   });
+}
+
+/** Such as "Opus 5.5 leads GPT-6.1, Gemini 4"; a lone member leads itself. */
+export function agentTeamSummary(
+  team: Pick<RoutingGroup, "members">,
+  lead: Pick<ModelSelection, "instanceId" | "model"> | undefined,
+  providers: ReadonlyArray<ModelNameSource>,
+): string {
+  const leader = lead ?? team.members[0];
+  if (!leader) return "";
+  const others = team.members.filter(
+    (member) => member.instanceId !== leader.instanceId || member.model !== leader.model,
+  );
+  const leadLabel = routingMemberLabel(leader, providers);
+  return others.length === 0
+    ? `${leadLabel} leads`
+    : `${leadLabel} leads ${others.map((member) => routingMemberLabel(member, providers)).join(", ")}`;
+}
+
+/** Plain routing groups; agent teams are edited and listed apart. */
+export function plainRoutingGroups(
+  groups: ReadonlyArray<RoutingGroup>,
+): ReadonlyArray<RoutingGroup> {
+  return groups.filter((group) => group.team !== true);
 }

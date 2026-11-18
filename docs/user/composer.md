@@ -204,6 +204,22 @@ With Auto effort on, a group can also be chosen by the kind of first message:
 set **Auto rules** under the groups, and a new thread left on Auto starts through
 that kind's group instead of only picking an effort.
 
+## Agent teams
+
+An agent team is a lead model and the models it may hand work to, each with its
+own options such as effort. Create one in **Settings → Providers → Agent teams**
+on web and desktop; the first model leads, and the next one leads if the first
+can't run. Pick the team from a new thread's model picker. The lead plans the
+work, delegates each task to a team model as a delegated task, checks the
+results, and answers you. It can delegate only to the team's models.
+
+**Lead guidance** under the teams is added to every lead's instructions from its
+next turn, for example "you only lead; never edit files yourself".
+
+Picking another model in the thread leaves the team, and deleting a team stops
+its threads from leading it. Mobile starts threads with a team and shows it, but
+teams are edited on web and desktop.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

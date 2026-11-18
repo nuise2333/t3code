@@ -1,4 +1,5 @@
 import {
+  AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH,
   type EnvironmentId,
   MAX_ROUTING_GROUP_MEMBERS,
   MAX_ROUTING_GROUPS,
@@ -7,6 +8,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import {
+  agentTeamSummary,
   moveListItem,
   newRoutingGroupId,
   ROUTING_TASK_CLASS_LABELS,
@@ -23,7 +25,7 @@ import {
 import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { ArrowDownIcon, ArrowUpIcon, MoreVertical, PlusIcon, XIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance, selectsPlanAgent } from "../../modelSelection";
@@ -55,6 +57,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Menu, MenuItem, MenuItemDetail, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Textarea } from "../ui/textarea";
 import { searchableSetting } from "./settingsSearch";
 import { SETTINGS_PICKER_TRIGGER_CLASSNAME, SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -76,24 +79,32 @@ type Editing = {
 /**
  * Ordered model lists a new thread can launch through, and the task classes that use one when a
  * thread asks for Auto. Groups live with the environment because its provider instances do.
+ *
+ * Agent teams are groups with `team` set: the member a thread starts on leads and delegates to
+ * the others. Each kind gets its own section; a save keeps the other kind's entries.
  */
 export function RoutingGroupsSettings({
   environmentId,
   providers,
   readOnly,
+  kind = "group",
 }: {
   readonly environmentId: EnvironmentId;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly readOnly: boolean;
+  readonly kind?: "group" | "team";
 }) {
+  const teams = kind === "team";
   const settings = useEnvironmentSettings(environmentId);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const capabilities = useAtomValue(serverEnvironment.configValueAtom(environmentId))?.environment
     .capabilities;
-  const supported = capabilities?.routingGroups === true;
+  const supported =
+    capabilities?.routingGroups === true && (!teams || capabilities.agentTeams === true);
   const quotaSupported = capabilities?.routingGroupQuota === true;
   const [editing, setEditing] = useState<Editing | null>(null);
   const [deleting, setDeleting] = useState<RoutingGroup | null>(null);
+  const guidanceEdited = useRef(false);
   // Read only while confirming, so the section holds no live subscription otherwise.
   const deletingTasks = useEnvironmentQuery(
     deleting !== null && capabilities?.scheduledTaskRoutingGroups === true
@@ -102,8 +113,11 @@ export function RoutingGroupsSettings({
   ).data?.tasks.filter((task) => task.routingGroupId === deleting?.id).length;
   if (!supported) return null;
 
-  const groups = settings.routingGroups;
-  const rules = settings.routingGroupRules;
+  const allGroups = settings.routingGroups;
+  const otherKind = allGroups.filter((group) => (group.team === true) !== teams);
+  const groups = allGroups.filter((group) => (group.team === true) === teams);
+  // Auto rules name plain groups only; a team is picked for a thread.
+  const rules = teams ? {} : settings.routingGroupRules;
   const problems = routingGroupProblems({ groups, rules, providers });
   const entries = providerInstanceEntriesFor(providers, settings, null);
   const firstReady = entries.find(isProviderInstancePickerReady);
@@ -125,66 +139,82 @@ export function RoutingGroupsSettings({
       })),
     ),
   );
-  const saveGroups = (next: ReadonlyArray<RoutingGroup>) => updateSettings({ routingGroups: next });
+  const saveGroups = (next: ReadonlyArray<RoutingGroup>) =>
+    updateSettings({ routingGroups: teams ? [...otherKind, ...next] : [...next, ...otherKind] });
   const deletingRules = deleting ? rulesUsingRoutingGroup(rules, deleting.id) : [];
 
   return (
     <>
       <SettingsSection
-        {...searchableSetting("routing-groups")}
+        {...searchableSetting(teams ? "agent-teams" : "routing-groups")}
         headerAction={
-          !readOnly && seedMember && groups.length < MAX_ROUTING_GROUPS ? (
+          !readOnly && seedMember && allGroups.length < MAX_ROUTING_GROUPS ? (
             <div className="flex items-center gap-2">
-              <Menu>
-                <MenuTrigger render={<Button size="xs" variant="outline" />}>
-                  Add from preset
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  {presets.map(({ preset, group, skipped, disabledReason }) => (
-                    <MenuItem
-                      key={preset.id}
-                      disabled={group === null}
-                      title={preset.description}
-                      onClick={() => {
-                        if (group === null) return;
-                        setEditing({
-                          index: null,
-                          group,
-                          note:
-                            skipped.length > 0
-                              ? `${preset.description} Left out, as none of your ready providers offer it right now: ${skipped.join(", ")}.`
-                              : preset.description,
-                        });
-                      }}
-                    >
-                      {preset.name}
-                      {disabledReason ? <MenuItemDetail>No models set up</MenuItemDetail> : null}
-                    </MenuItem>
-                  ))}
-                </MenuPopup>
-              </Menu>
+              {teams ? null : (
+                <Menu>
+                  <MenuTrigger render={<Button size="xs" variant="outline" />}>
+                    Add from preset
+                  </MenuTrigger>
+                  <MenuPopup align="end">
+                    {presets.map(({ preset, group, skipped, disabledReason }) => (
+                      <MenuItem
+                        key={preset.id}
+                        disabled={group === null}
+                        title={preset.description}
+                        onClick={() => {
+                          if (group === null) return;
+                          setEditing({
+                            index: null,
+                            group,
+                            note:
+                              skipped.length > 0
+                                ? `${preset.description} Left out, as none of your ready providers offer it right now: ${skipped.join(", ")}.`
+                                : preset.description,
+                          });
+                        }}
+                      >
+                        {preset.name}
+                        {disabledReason ? <MenuItemDetail>No models set up</MenuItemDetail> : null}
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              )}
               <Button
                 size="xs"
                 variant="outline"
                 onClick={() =>
                   setEditing({
                     index: null,
-                    group: { id: "", name: "", strategy: "order", members: [seedMember] },
+                    group: {
+                      id: "",
+                      name: "",
+                      strategy: "order",
+                      members: [seedMember],
+                      ...(teams ? { team: true as const } : {}),
+                    },
                   })
                 }
               >
                 <PlusIcon className="size-3" aria-hidden />
-                Add group
+                {teams ? "Add team" : "Add group"}
               </Button>
             </div>
           ) : null
         }
       >
         {groups.length === 0 ? (
-          <SettingsRow
-            title="No routing groups yet"
-            description="An ordered list of models. Pick it in a new thread's model picker and the thread starts on the first one that is set up, has usage left, and supports its permissions and plan mode."
-          />
+          teams ? (
+            <SettingsRow
+              title="No agent teams yet"
+              description="A lead model and the models it may hand tasks to. Pick the team in a new thread's model picker: the lead plans the work and delegates each task to a team member."
+            />
+          ) : (
+            <SettingsRow
+              title="No routing groups yet"
+              description="An ordered list of models. Pick it in a new thread's model picker and the thread starts on the first one that is set up, has usage left, and supports its permissions and plan mode."
+            />
+          )
         ) : null}
         {groups.map((group, index) => {
           const missing = problems.missingMembers.get(group.id);
@@ -194,13 +224,15 @@ export function RoutingGroupsSettings({
               title={group.name}
               description={
                 <span className="block truncate">
-                  {group.members
-                    .map((member, memberIndex) =>
-                      missing?.includes(memberIndex)
-                        ? `${member.model} (provider removed)`
-                        : routingMemberLabel(member, providers),
-                    )
-                    .join(" → ")}
+                  {teams && !missing
+                    ? agentTeamSummary(group, undefined, providers)
+                    : group.members
+                        .map((member, memberIndex) =>
+                          missing?.includes(memberIndex)
+                            ? `${member.model} (provider removed)`
+                            : routingMemberLabel(member, providers),
+                        )
+                        .join(" → ")}
                 </span>
               }
               control={
@@ -249,7 +281,34 @@ export function RoutingGroupsSettings({
             />
           );
         })}
-        {groups.length > 0 || problems.missingRuleGroups.length > 0
+        {teams ? (
+          <SettingsRow
+            title="Lead guidance"
+            description="Added to the built-in team rules for every team's lead, from its next turn."
+          >
+            <div className="mt-3 max-w-2xl pb-3.5">
+              <Textarea
+                key={settings.agentTeamLeadGuidance}
+                aria-label="Lead guidance"
+                rows={3}
+                maxLength={AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH}
+                disabled={readOnly}
+                defaultValue={settings.agentTeamLeadGuidance}
+                placeholder="Leave empty for the built-in rules. For example: you only lead; never edit files yourself."
+                onChange={() => {
+                  guidanceEdited.current = true;
+                }}
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (guidanceEdited.current && value !== settings.agentTeamLeadGuidance)
+                    updateSettings({ agentTeamLeadGuidance: value });
+                  guidanceEdited.current = false;
+                }}
+              />
+            </div>
+          </SettingsRow>
+        ) : null}
+        {!teams && (groups.length > 0 || problems.missingRuleGroups.length > 0)
           ? ROUTING_TASK_CLASSES.map((taskClass) => {
               const groupId = rules[taskClass] ?? null;
               const isMissing = problems.missingRuleGroups.includes(taskClass);
@@ -328,8 +387,11 @@ export function RoutingGroupsSettings({
           editing={editing}
           providers={providers}
           seedMember={seedMember}
-          quotaSupported={quotaSupported}
-          takenIds={[...groups.map((group) => group.id), ...Object.values(rules)]}
+          quotaSupported={quotaSupported && !teams}
+          takenIds={[
+            ...allGroups.map((group) => group.id),
+            ...Object.values(settings.routingGroupRules),
+          ]}
           onClose={() => setEditing(null)}
           onSave={(group) => {
             saveGroups(
@@ -351,7 +413,9 @@ export function RoutingGroupsSettings({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Threads that already started through it keep their model.
+              {teams
+                ? "Threads that already started with it keep their model and stop leading a team."
+                : "Threads that already started through it keep their model."}
               {deletingRules.length > 0
                 ? ` ${deletingRules.length === 1 ? "One Auto rule uses" : `${deletingRules.length} Auto rules use`} it; those launches fail until you change the rule.`
                 : ""}
@@ -403,6 +467,7 @@ function RoutingGroupDialog({
   const [name, setName] = useState(editing.group.name);
   const [members, setMembers] = useState<ReadonlyArray<ModelSelection>>(editing.group.members);
   const [rank, setRank] = useState<RoutingGroupRank>(editing.group.rank ?? "order");
+  const team = editing.group.team === true;
   const entries = providerInstanceEntriesFor(providers, settings, null);
   const trimmedName = name.trim();
   const canSave =
@@ -418,12 +483,20 @@ function RoutingGroupDialog({
       <DialogPopup className="max-w-xl">
         <DialogHeader>
           <DialogTitle>
-            {editing.index === null ? "Add routing group" : "Edit routing group"}
+            {team
+              ? editing.index === null
+                ? "Add agent team"
+                : "Edit agent team"
+              : editing.index === null
+                ? "Add routing group"
+                : "Edit routing group"}
           </DialogTitle>
           <DialogDescription>
-            {rank === "quota"
-              ? "A new thread picked with this group starts on the model whose subscription has the most usage left to spend per hour before it resets. It decides once, when the thread starts."
-              : "A new thread picked with this group starts on the first model that can run it, top to bottom. It decides once, when the thread starts."}
+            {team
+              ? "A new thread picked with this team starts on the first model that can run it. That model leads: it plans the work and delegates tasks to the team's models, each with the options set here."
+              : rank === "quota"
+                ? "A new thread picked with this group starts on the model whose subscription has the most usage left to spend per hour before it resets. It decides once, when the thread starts."
+                : "A new thread picked with this group starts on the first model that can run it, top to bottom. It decides once, when the thread starts."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -442,6 +515,7 @@ function RoutingGroupDialog({
                 name: trimmedName,
                 strategy: "order",
                 ...(quotaSupported ? { rank } : {}),
+                ...(team ? { team: true as const } : {}),
                 members,
               });
             }}
@@ -450,7 +524,7 @@ function RoutingGroupDialog({
               <Label htmlFor={`${formId}-name`}>Name</Label>
               <Input
                 id={`${formId}-name`}
-                placeholder="Fast"
+                placeholder={team ? "Reviewers" : "Fast"}
                 maxLength={64}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
@@ -477,7 +551,13 @@ function RoutingGroupDialog({
               </div>
             ) : null}
             <div className="grid gap-2">
-              <Label>{rank === "quota" ? "Models, ties in order" : "Models, in order"}</Label>
+              <Label>
+                {team
+                  ? "Models; the first leads, the next leads if it can't run"
+                  : rank === "quota"
+                    ? "Models, ties in order"
+                    : "Models, in order"}
+              </Label>
               {members.map((member, index) => {
                 const entry = entries.find(
                   (candidate) => candidate.instanceId === member.instanceId,
@@ -488,8 +568,10 @@ function RoutingGroupDialog({
                     key={index}
                     className="flex flex-wrap items-center gap-2"
                   >
-                    <span className="w-5 text-muted-foreground text-xs tabular-nums">
-                      {index + 1}.
+                    <span
+                      className={`${team ? "w-9" : "w-5"} text-muted-foreground text-xs tabular-nums`}
+                    >
+                      {team && index === 0 ? "Lead" : `${index + 1}.`}
                     </span>
                     <ProviderModelPicker
                       environmentId={environmentId}

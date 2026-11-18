@@ -598,19 +598,33 @@ function RoutedGroupNote(props: { display: RoutedGroupDisplay }) {
 }
 
 /** Stands in for the effort column while a routing group is picked: the group sets each member. */
-export function ComposerRoutingGroupColumn(props: { name: string; summary: string | null }) {
+export function ComposerRoutingGroupColumn(props: {
+  name: string;
+  summary: string | null;
+  team: boolean;
+}) {
   return (
     <>
       <div className="shrink-0 px-3 pt-2.5">
         <div className="flex h-8.25 -translate-y-px items-center gap-2 border-b border-border/70 pb-1.5 text-sm">
-          <span className="text-muted-foreground">Routing group</span>
+          <span className="text-muted-foreground">
+            {props.team ? "Agent team" : "Routing group"}
+          </span>
           <span className="ms-auto min-w-0 truncate text-muted-foreground text-xs">
             {props.name}
           </span>
         </div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3 pt-2.5 pb-1.5 text-muted-foreground text-xs">
-        {props.summary ? (
+        {props.summary === null ? (
+          <p>This group no longer exists. Pick a model or another group.</p>
+        ) : props.team ? (
+          <>
+            <p>The lead plans the work and delegates tasks to the team's models:</p>
+            <p className="text-foreground">{props.summary}</p>
+            <p>Each model keeps the options set in Settings. Pick a model to leave the team.</p>
+          </>
+        ) : (
           <>
             <p>Starts on a usable member, ranked as the group is set in Settings:</p>
             <p className="text-foreground">{props.summary}</p>
@@ -618,8 +632,6 @@ export function ComposerRoutingGroupColumn(props: { name: string; summary: strin
               Each member keeps the options set in Settings. Pick a model to choose it yourself.
             </p>
           </>
-        ) : (
-          <p>This group no longer exists. Pick a model or another group.</p>
         )}
       </div>
     </>
