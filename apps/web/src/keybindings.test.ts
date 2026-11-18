@@ -265,6 +265,27 @@ describe("thread undo shortcut", () => {
   });
 });
 
+describe("reading view shortcuts", () => {
+  it("take zoom from the preview only while the reader has focus", () => {
+    const resolve = (input: ShortcutEventLike, readerFocus: boolean) =>
+      resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        // The reader sits inside the right panel, so its focus is also preview focus.
+        context: { previewFocus: true, readerFocus },
+      });
+    const cases: Array<[ShortcutEventLike, KeybindingCommand, KeybindingCommand]> = [
+      [event({ key: "=", metaKey: true }), "reader.zoomIn", "preview.zoomIn"],
+      [event({ key: "+", code: "Minus", metaKey: true }), "reader.zoomIn", "preview.zoomIn"],
+      [event({ key: "-", metaKey: true }), "reader.zoomOut", "preview.zoomOut"],
+      [event({ key: "0", metaKey: true }), "reader.resetZoom", "preview.resetZoom"],
+    ];
+    for (const [input, inReader, elsewhere] of cases) {
+      assert.strictEqual(resolve(input, true), inReader, input.key);
+      assert.strictEqual(resolve(input, false), elsewhere, input.key);
+    }
+  });
+});
+
 describe("split/new/close terminal shortcuts", () => {
   it("supports when expressions", () => {
     const keybindings = compile([

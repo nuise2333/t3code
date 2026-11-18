@@ -59,16 +59,28 @@ function isSurfaceLauncherKey(event: KeyboardEvent): boolean {
   return key !== null && (launcherKeys?.includes(key) ?? false);
 }
 
+/** Whether an `aria-keyshortcuts` value names this unmodified key, such as "J K" or "Space Shift+Space". */
+export function ariaShortcutsClaimKey(
+  shortcuts: string,
+  event: Pick<KeyboardEvent, "key" | "shiftKey">,
+): boolean {
+  const token =
+    event.key === " "
+      ? event.shiftKey
+        ? "SHIFT+SPACE"
+        : "SPACE"
+      : event.shiftKey
+        ? null
+        : event.key.toUpperCase();
+  return token !== null && shortcuts.toUpperCase().split(/\s+/).includes(token);
+}
+
 function isKeyClaimedInPath(event: KeyboardEvent): boolean {
-  if (event.shiftKey) return false;
-  const key = event.key.toUpperCase();
-  return event
-    .composedPath()
-    .some(
-      (target) =>
-        target instanceof Element &&
-        (target.getAttribute("aria-keyshortcuts")?.split(/\s+/).includes(key) ?? false),
-    );
+  return event.composedPath().some((target) => {
+    if (!(target instanceof Element)) return false;
+    const shortcuts = target.getAttribute("aria-keyshortcuts");
+    return shortcuts !== null && ariaShortcutsClaimKey(shortcuts, event);
+  });
 }
 
 /** `Control+Alt+Shift+Meta+Key`, in that order, as `data-local-shortcuts` lists them. */

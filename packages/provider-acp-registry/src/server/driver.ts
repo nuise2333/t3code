@@ -1,4 +1,6 @@
 import {
+  bundledAcpIconUrlForAgentId,
+  bundledAcpIconUrlForCommand,
   officialAcpRegistryIconUrlForAgentId,
   ProviderDriverKind,
   resolveOfficialAcpRegistryIconUrl,
@@ -230,8 +232,9 @@ function baseSnapshot(
 ): ServerProvider {
   const iconUrl =
     input.settings.source === "local"
-      ? null
-      : (resolveOfficialAcpRegistryIconUrl(input.probe?.probe.icon) ??
+      ? bundledAcpIconUrlForCommand(input.settings.commandPath)
+      : (bundledAcpIconUrlForAgentId(input.settings.agentId) ??
+        resolveOfficialAcpRegistryIconUrl(input.probe?.probe.icon) ??
         officialAcpRegistryIconUrlForAgentId(input.settings.agentId));
   return {
     instanceId: input.instanceId,

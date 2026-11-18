@@ -1,5 +1,10 @@
 import { getResolvedOrResolveTheme, registerCustomTheme, type DiffsTheme } from "@pierre/diffs";
 
+import {
+  READER_SYNTAX_THEME,
+  READER_SYNTAX_THEME_NAME,
+} from "../reader/markdown/readerSyntaxTheme";
+
 /** pierre-light with every syntax color darkened until it reads on every light code surface. */
 export const READABLE_LIGHT_THEME_NAME = "t3-light";
 
@@ -74,3 +79,5 @@ registerCustomTheme(
   },
   "zed",
 );
+
+registerCustomTheme(READER_SYNTAX_THEME_NAME, () => Promise.resolve(READER_SYNTAX_THEME), "zed");

@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { Defs, LinearGradient, Path, Stop, Svg } from "react-native-svg";
+import { Defs, LinearGradient, Path, Stop, Svg, SvgXml } from "react-native-svg";
 import { View } from "react-native";
 import {
   normalizeProviderAccentColor,
@@ -7,7 +7,7 @@ import {
   providerInstanceInitials,
 } from "@t3tools/client-runtime/state/provider-instance-display";
 import { useId, useState } from "react";
-import { resolveOfficialAcpRegistryIconUrl } from "@t3tools/contracts";
+import { bundledAcpIconSvg, resolveOfficialAcpRegistryIconUrl } from "@t3tools/contracts";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { AppText as Text } from "./ui/AppText";
 import { cn } from "../lib/cn";
@@ -31,6 +31,26 @@ function AcpRegistryFallbackIcon(props: { readonly color: string; readonly size:
 }
 
 function AcpRegistryProviderIcon(props: {
+  readonly color: string;
+  readonly iconUrl: string | null | undefined;
+  readonly size: number;
+}) {
+  // expo-image does not reliably decode SVG data URLs, so bundled marks draw through react-native-svg.
+  const bundled = bundledAcpIconSvg(props.iconUrl);
+  if (bundled) {
+    return (
+      <SvgXml
+        xml={bundled.svg}
+        width={props.size}
+        height={props.size}
+        {...(bundled.fullColor ? {} : { fill: props.color })}
+      />
+    );
+  }
+  return <AcpRegistryRemoteIcon {...props} />;
+}
+
+function AcpRegistryRemoteIcon(props: {
   readonly color: string;
   readonly iconUrl: string | null | undefined;
   readonly size: number;

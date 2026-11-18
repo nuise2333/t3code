@@ -7,6 +7,7 @@ import {
   type SupportedLanguages,
 } from "@pierre/diffs";
 
+import { READER_SYNTAX_THEME_NAME } from "../reader/markdown/readerSyntaxTheme";
 import { DIFF_THEME_NAMES } from "./diffRendering";
 
 // Highlights has no lexer for these dialects, so they use their base language's.
@@ -28,8 +29,8 @@ export function getSyntaxHighlighterPromise(language: string): Promise<DiffsHigh
   if (cached) return cached;
 
   const promise = getSharedHighlighter({
-    // Both palettes, so switching appearance never needs a new highlighter.
-    themes: Object.values(DIFF_THEME_NAMES),
+    // Every palette, so switching appearance never needs a new highlighter.
+    themes: [...Object.values(DIFF_THEME_NAMES), READER_SYNTAX_THEME_NAME],
     langs: [language as SupportedLanguages],
     preferredHighlighter: PREFERRED_HIGHLIGHTER,
   }).catch((error) => {

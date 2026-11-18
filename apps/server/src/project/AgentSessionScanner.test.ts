@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - FIFO gates must be released with a synchronous
 // open on the main thread, because the Effect FileSystem queues behind the pinned libuv pool.
+import { buildResponseLanguageInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -3356,6 +3357,8 @@ describe("parseAgentSessionTranscript", () => {
   });
 
   it("uses the canonical Codex event when its turn has generated response context", () => {
+    // T3 appends the response-language block to every Codex turn input.
+    const reminder = buildResponseLanguageInstructions("简体中文");
     const thread = AgentSessionScanner.parseAgentSessionTranscript({
       contents: [
         encodeTranscriptRecord({ type: "session_meta", payload: { id: "codex-session" } }),
@@ -3391,7 +3394,7 @@ describe("parseAgentSessionTranscript", () => {
           type: "event_msg",
           payload: {
             type: "user_message",
-            message: "Do something here so it looks like a real project.",
+            message: `Do something here so it looks like a real project.\n${reminder}`,
           },
         }),
         encodeTranscriptRecord({
@@ -3405,6 +3408,7 @@ describe("parseAgentSessionTranscript", () => {
                 type: "input_text",
                 text: "Do something here so it looks like a real project.",
               },
+              { type: "input_text", text: reminder },
             ],
           },
         }),

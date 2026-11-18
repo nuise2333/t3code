@@ -63,7 +63,7 @@ export function MarkdownMermaidCodeBlock({
         <RenderErrorBoundary resetKeys={[code, theme]} fallback={children}>
           <Suspense
             fallback={
-              <pre className="invisible" aria-hidden>
+              <pre className="invisible" aria-hidden data-thread-find-ignore>
                 {code}
               </pre>
             }

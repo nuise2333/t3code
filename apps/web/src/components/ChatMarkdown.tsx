@@ -20,6 +20,7 @@ import {
   CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS,
   CHAT_MARKDOWN_REHYPE_PLUGINS,
   decodeMarkdownLinkEscapes,
+  READER_MARKDOWN_REHYPE_PLUGINS,
   remarkAssistantInsights,
 } from "@t3tools/shared/markdownPipeline";
 import { useAtomValue } from "@effect/atom-react";
@@ -92,7 +93,7 @@ import type {
   Options as ReactMarkdownOptions,
 } from "react-markdown";
 import { createIncrementalMarkdownPlugin } from "../markdown-incremental";
-import type { Pluggable, PluggableList } from "unified";
+import type { PluggableList } from "unified";
 import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
@@ -100,7 +101,6 @@ import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { AssistantCitationEmbed } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import { mathKind } from "@t3tools/shared/markdownMath";
-import remarkMath from "remark-math";
 import {
   artifactTemplateFromHastProperties,
   renderCodexInlineDirectivesAsMarkdown,
@@ -229,6 +229,18 @@ import {
   nodeToPlainText,
 } from "./chat/MarkdownCodeBlock.logic";
 import { reportMarkdownActionFailure } from "./chat/markdownActionFailure";
+import { orderedListMarkerDigits, orderedListMarkerNumbers } from "./ChatMarkdown.logic";
+import { READER_REMARK_PLUGINS, REMARK_MATH } from "../reader/markdown/readerRemarkPlugins";
+import { READER_SYNTAX_THEME_NAME } from "../reader/markdown/readerSyntaxTheme";
+import { isReaderFigureParagraph, readerCodeLanguageLabel } from "../reader/readerBlocks";
+import { ensureReaderFonts } from "../reader/readerFonts";
+import { ReaderOrderedList } from "../reader/ReaderOrderedList";
+import { ReaderTable } from "../reader/ReaderTable";
+import {
+  ReaderListItemContent,
+  ReaderParagraph,
+  type ReaderInlineComponents,
+} from "../reader/ReaderTypeset";
 
 const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
 
@@ -263,6 +275,13 @@ interface ChatMarkdownProps {
   /** The change request's repository, when it can differ from the checkout at `cwd`. */
   sourceControlMediaRepository?: string | undefined;
   headingLevelOffset?: number | undefined;
+  /** The reading view: scoped by the `markdown-reader` class and the renderer's `reader` flag. */
+  variant?: "reader" | undefined;
+  /**
+   * A fragment inside a reading view that is already there, such as a block of the Markdown
+   * file editor: the root drops its own reader and sizing classes and inherits the page's.
+   */
+  bare?: boolean | undefined;
 }
 
 export interface ChatMarkdownContextReference {
@@ -340,16 +359,10 @@ const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
 function orderedListGutterStyle(
   itemValues: ReadonlyArray<unknown>,
   start: unknown,
-): { "--list-gutter": string } | undefined {
-  const parsedStart = Number.parseInt(String(start ?? 1), 10);
-  let number = Number.isNaN(parsedStart) ? 1 : parsedStart;
-  let markerWidth = String(number).length;
-  for (const value of itemValues) {
-    const written = Number.parseInt(String(value ?? ""), 10);
-    if (!Number.isNaN(written)) number = written;
-    markerWidth = Math.max(markerWidth, String(number).length);
-    number += 1;
-  }
+  reader: boolean,
+): { "--list-gutter": string } | { "--reader-ol-digits": number } | undefined {
+  const markerWidth = orderedListMarkerDigits(itemValues, start);
+  if (reader) return { "--reader-ol-digits": markerWidth };
   if (markerWidth <= 1) return undefined;
   return { "--list-gutter": `${markerWidth + 2}ch` };
 }
@@ -407,6 +420,13 @@ function normalizeMarkdownLinkHrefKey(href: string): string {
 // Heading ids are added after sanitizing, which would prefix them a second time.
 const CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS = [
   ...CHAT_MARKDOWN_REHYPE_PLUGINS,
+  rehypeHeadingIds,
+  rehypeTextDirection,
+  rehypeChipPunctuation,
+] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
+const READER_MARKDOWN_RENDER_REHYPE_PLUGINS = [
+  ...READER_MARKDOWN_REHYPE_PLUGINS,
   rehypeHeadingIds,
   rehypeTextDirection,
   rehypeChipPunctuation,
@@ -526,6 +546,7 @@ function useChatMarkdownState({
   headingLevelOffset = 0,
   sourceControlMedia = false,
   sourceControlMediaRepository,
+  variant,
 }: ChatMarkdownProps) {
   const resolvedTheme = useRenderedAppearance();
   const markdownRef = useRef<HTMLElement>(null);
@@ -1001,6 +1022,7 @@ function useChatMarkdownState({
     resolveThreadPullRequest,
     resolvedTheme,
     pullRequestsEnabled,
+    reader: variant === "reader",
     skills,
     threadRef,
     updateThreadPullRequestLink,
@@ -1033,17 +1055,30 @@ const CITATION_ENDS_BLOCK = new RegExp(
 function markdownHeadingRenderer(level: 1 | 2 | 3 | 4 | 5 | 6) {
   const Tag = `h${level}` as const;
   return function MarkdownHeading({
-    node: _node,
+    node,
     ...props
   }: ComponentProps<typeof Tag> & ReactMarkdownExtraProps) {
-    const { headingLevelOffset } = use(ChatMarkdownRendererContext);
-    return (
-      <Tag
-        {...props}
-        aria-level={headingLevelOffset > 0 ? Math.min(level + headingLevelOffset, 6) : undefined}
-      />
-    );
+    const { headingLevelOffset, reader, isStreaming } = use(ChatMarkdownRendererContext);
+    const ariaLevel = headingLevelOffset > 0 ? Math.min(level + headingLevelOffset, 6) : undefined;
+    if (reader) {
+      return (
+        <ReaderParagraph
+          {...props}
+          as={Tag}
+          aria-level={ariaLevel}
+          node={node}
+          components={readerInlineComponents()}
+          isEnabled={!isStreaming}
+        />
+      );
+    }
+    return <Tag {...props} aria-level={ariaLevel} />;
   };
+}
+
+// Annotated, so the overrides that hand the map on do not make its own type circular.
+function readerInlineComponents(): ReaderInlineComponents {
+  return CHAT_MARKDOWN_COMPONENTS;
 }
 
 const CHAT_MARKDOWN_COMPONENTS = {
@@ -1063,12 +1098,29 @@ const CHAT_MARKDOWN_COMPONENTS = {
     }
     return <div {...props}>{children}</div>;
   },
-  p: function MarkdownParagraph({ node: _node, children, ...props }) {
-    const { skills, threadRef, environmentId } = use(ChatMarkdownRendererContext);
+  p: function MarkdownParagraph({ node, children, className, ...props }) {
+    const { skills, threadRef, environmentId, reader, isStreaming } = use(
+      ChatMarkdownRendererContext,
+    );
+    const content = renderSkillInlineMarkdownChildren(children, skills, threadRef, environmentId);
+    if (!reader) {
+      return (
+        <p {...props} className={className}>
+          {content}
+        </p>
+      );
+    }
+    const isFigure = isReaderFigureParagraph(node);
     return (
-      <p {...props}>
-        {renderSkillInlineMarkdownChildren(children, skills, threadRef, environmentId)}
-      </p>
+      <ReaderParagraph
+        {...props}
+        className={isFigure ? cn(className, "reader-figure") : className}
+        node={node}
+        components={readerInlineComponents()}
+        isEnabled={!isFigure && !isStreaming}
+      >
+        {content}
+      </ReaderParagraph>
     );
   },
   blockquote: function MarkdownBlockquote({ node: _node, children, ...props }) {
@@ -1101,18 +1153,37 @@ const CHAT_MARKDOWN_COMPONENTS = {
       node?.children?.flatMap((child) =>
         child.type === "element" && child.tagName === "li" ? [child.properties.value] : [],
       ) ?? [];
-    const gutterStyle = orderedListGutterStyle(itemValues, start);
-    return (
-      <ol {...props} start={start} style={gutterStyle ? { ...style, ...gutterStyle } : style} />
-    );
+    const { reader } = use(ChatMarkdownRendererContext);
+    const gutterStyle = orderedListGutterStyle(itemValues, start, reader);
+    const listStyle = gutterStyle ? { ...style, ...gutterStyle } : style;
+    if (reader) {
+      const labels = orderedListMarkerNumbers(itemValues, start).map((number) => `${number}.`);
+      return <ReaderOrderedList {...props} start={start} style={listStyle} labels={labels} />;
+    }
+    return <ol {...props} start={start} style={listStyle} />;
   },
   li: function MarkdownListItem({ node, children, ...props }) {
-    const { skills, threadRef, environmentId } = use(ChatMarkdownRendererContext);
+    const { skills, threadRef, environmentId, reader, isStreaming } = use(
+      ChatMarkdownRendererContext,
+    );
     // Resolve checkbox markers by offset to avoid rerendering list items on every streamed token.
     const isTaskItem = String(props.className ?? "").includes("task-list-item");
+    const renderInline = (inline: ReactNode) =>
+      renderSkillInlineMarkdownChildren(inline, skills, threadRef, environmentId);
     return (
       <li {...props} data-list-item-offset={isTaskItem ? node?.position?.start.offset : undefined}>
-        {renderSkillInlineMarkdownChildren(children, skills, threadRef, environmentId)}
+        {reader ? (
+          <ReaderListItemContent
+            node={node}
+            components={readerInlineComponents()}
+            isEnabled={!isStreaming}
+            renderInline={renderInline}
+          >
+            {children}
+          </ReaderListItemContent>
+        ) : (
+          renderInline(children)
+        )}
       </li>
     );
   },
@@ -1168,6 +1239,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       updateThreadPullRequestLink,
       fileLinkChip,
       renderContextReference,
+      reader,
     } = use(ChatMarkdownRendererContext);
     const text = use(ChatMarkdownTextContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
@@ -1366,7 +1438,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
             });
           }}
         >
-          {faviconHost && hasText && !isPullRequestAutolink ? (
+          {faviconHost && hasText && !isPullRequestAutolink && !reader ? (
             <MarkdownExternalLinkContent host={faviconHost} plainText={plainHastText(node)}>
               {linkChildren}
             </MarkdownExternalLinkContent>
@@ -1478,6 +1550,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       renderContextReference,
       fileLinkChip,
       resolvedTheme,
+      reader,
     } = use(ChatMarkdownRendererContext);
     const imageExpand = use(MarkdownLinkContext) ? undefined : expandMedia;
     const contextReference = typeof src === "string" ? parseComposerContextHref(src) : null;
@@ -1658,10 +1731,18 @@ const CHAT_MARKDOWN_COMPONENTS = {
         />
       );
     }
-    return <ChatMarkdownImageFallback alt={altText} copyMarkdown={copyMarkdown} kind={kind} />;
+    return (
+      <ChatMarkdownImageFallback
+        alt={altText}
+        copyMarkdown={copyMarkdown}
+        kind={kind}
+        isAltOnly={reader}
+      />
+    );
   },
   table: function MarkdownTableRenderer({ node: _node, ...props }) {
-    return <MarkdownTable {...props} />;
+    const { reader } = use(ChatMarkdownRendererContext);
+    return reader ? <ReaderTable {...props} /> : <MarkdownTable {...props} />;
   },
   details: function MarkdownDetailsRenderer({ node: _node, children, open: detailsOpen, dir }) {
     return (
@@ -1679,8 +1760,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
       onRunShellCommand,
       inline,
       mathEnabled,
+      reader,
     } = use(ChatMarkdownRendererContext);
     const text = use(ChatMarkdownTextContext);
+    const codeThemeName = reader ? READER_SYNTAX_THEME_NAME : diffThemeName;
     const codeBlock = extractCodeBlock(children);
     if (!codeBlock) {
       return <pre {...props}>{children}</pre>;
@@ -1699,7 +1782,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
     const highlightedCode = (
       <RenderErrorBoundary
-        resetKeys={[codeBlock.code, language, diffThemeName, isStreaming]}
+        resetKeys={[codeBlock.code, language, codeThemeName, isStreaming]}
         fallback={<pre {...props}>{children}</pre>}
       >
         <Suspense
@@ -1712,14 +1795,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
           <SuspenseShikiCodeBlock
             className={codeBlock.className}
             code={codeBlock.code}
-            themeName={diffThemeName}
+            themeName={codeThemeName}
             isStreaming={isStreaming}
           />
         </Suspense>
       </RenderErrorBoundary>
     );
     if (language === "mermaid") {
-      return (
+      const diagram = (
         <MarkdownMermaidCodeBlock
           code={codeBlock.code}
           fenceTitle={fenceTitle}
@@ -1735,8 +1818,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
           {highlightedCode}
         </MarkdownMermaidCodeBlock>
       );
+      return reader ? <div className="reader-codeblock">{diagram}</div> : diagram;
     }
-    return (
+    const block = (
       <MarkdownCodeBlock
         code={codeBlock.code}
         language={language}
@@ -1748,14 +1832,26 @@ const CHAT_MARKDOWN_COMPONENTS = {
             : undefined
         }
         isStreaming={isStreaming}
+        wrapByDefault={reader ? true : undefined}
       >
         {highlightedCode}
       </MarkdownCodeBlock>
     );
+    if (!reader) return block;
+    const label = readerCodeLanguageLabel(codeBlock.className);
+    return (
+      <div className="reader-codeblock">
+        {label ? (
+          <span className="reader-code-label select-none" aria-hidden="true">
+            <span>{label}</span>
+          </span>
+        ) : null}
+        {block}
+      </div>
+    );
   },
 } satisfies Components;
 
-const REMARK_MATH: Pluggable = [remarkMath, { singleDollarTextMath: true }];
 // Shared lists, so every message with the same options shares a processor and its cache.
 const CHAT_MARKDOWN_REMARK_PLUGIN_SETS = {
   plain: CHAT_MARKDOWN_REMARK_PLUGINS,
@@ -1831,6 +1927,17 @@ const MarkdownSource = memo(function MarkdownSource({
   return <ChatMarkdownTextContext value={text}>{element}</ChatMarkdownTextContext>;
 });
 
+const CHAT_MARKDOWN_ROOT_CLASS =
+  "chat-markdown w-full min-w-0 [overflow-wrap:anywhere] [word-break:break-word]";
+const CHAT_MARKDOWN_BLOCK_CLASS =
+  "text-sm leading-relaxed text-foreground/[calc(90%+var(--appearance-contrast-boost)/10)]";
+/** The classes of a reading view's root, for a surface that renders one itself (the file editor). */
+export const READER_ROOT_CLASS = cn(
+  CHAT_MARKDOWN_ROOT_CLASS,
+  CHAT_MARKDOWN_BLOCK_CLASS,
+  "markdown-reader",
+);
+
 function ChatMarkdown({
   text,
   className,
@@ -1839,10 +1946,17 @@ function ChatMarkdown({
   parseRawHtml = true,
   extraRemarkPlugins = EMPTY_REMARK_PLUGINS,
   renderInsights = false,
+  variant,
+  bare = false,
   ...props
 }: ChatMarkdownProps) {
   const { componentState, handleCopy, markdownRef, localMediaPreview, closeLocalMediaPreview } =
-    useChatMarkdownState({ text, inline, ...props });
+    useChatMarkdownState({ text, inline, variant, ...props });
+  const reader = variant === "reader";
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the desktop's system reading fonts with document.fonts the first time a reading view mounts
+  useEffect(() => {
+    if (reader) void ensureReaderFonts();
+  }, [reader]);
   const hasInsights = renderInsights && text.includes("★ Insight");
   // Streaming re-renders only the last block; offsets for task edits need the whole text.
   const streamingBlocks =
@@ -1880,19 +1994,23 @@ function ChatMarkdown({
         hasInsights
           ? withExtraPlugins(INSIGHT_REMARK_PLUGINS, sharedRemarkPlugins)
           : sharedRemarkPlugins,
-        extraRemarkPlugins,
+        reader ? withExtraPlugins(extraRemarkPlugins, READER_REMARK_PLUGINS) : extraRemarkPlugins,
       );
   const blocks = streamingBlocks ?? [text];
 
   return (
     <Root
       ref={bindMarkdownRef}
-      className={cn(
-        "chat-markdown w-full min-w-0 [overflow-wrap:anywhere] [word-break:break-word]",
-        !inline &&
-          "text-sm leading-relaxed text-foreground/[calc(90%+var(--appearance-contrast-boost)/10)]",
-        className,
-      )}
+      className={
+        bare
+          ? className
+          : cn(
+              CHAT_MARKDOWN_ROOT_CLASS,
+              !inline && CHAT_MARKDOWN_BLOCK_CLASS,
+              reader && "markdown-reader",
+              className,
+            )
+      }
       data-streaming={componentState.isStreaming ? "" : undefined}
       onCopy={handleCopy}
     >
@@ -1904,9 +2022,11 @@ function ChatMarkdown({
             text={source}
             remarkPlugins={remarkPlugins}
             rehypePlugins={
-              parseRawHtml
-                ? CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS
-                : CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS
+              !parseRawHtml
+                ? CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS
+                : reader
+                  ? READER_MARKDOWN_RENDER_REHYPE_PLUGINS
+                  : CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS
             }
             shared={!uncachedPlugins}
             // Every block before the last is finished, so its parse can be reused.

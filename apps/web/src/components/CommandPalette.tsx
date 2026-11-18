@@ -62,6 +62,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   CornerLeftUpIcon,
+  FileDownIcon,
   FileSearchIcon,
   FilesIcon,
   FolderGit2Icon,
@@ -69,6 +70,7 @@ import {
   FolderPlusIcon,
   MessageSquareDashedIcon,
   LinkIcon,
+  ListTreeIcon,
   MessageSquareIcon,
   PaletteIcon,
   RotateCcwIcon,
@@ -80,9 +82,14 @@ import {
   SquarePenIcon,
   TextSearchIcon,
   UserPlusIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
 } from "lucide-react";
 import { openThreadFind } from "./chat/threadFindStore";
 import { dispatchPreviewAction } from "./preview/previewActionBus";
+import { toggleActiveReaderOutline } from "../reader/navigation/readerOutlineStore";
+import { exportShownReader, zoomReader } from "../shortcuts/readerCommands";
+import { activeReader } from "../shortcuts/readerFocus";
 import { previewBridge } from "./preview/previewBridge";
 import {
   useDeferredValue,
@@ -438,6 +445,8 @@ function OpenCommandPaletteDialog(props: {
       },
   );
   const linkedThreadSearch = initialSearch.linkedThreadSearch;
+  // Read as the palette opens, while focus is still where the user was reading.
+  const [readerShown] = useState(() => activeReader() !== null);
   // Rows were captured when the palette opened; drop any hidden since then.
   const hiddenKeys = useHiddenThreadKeys();
   const linkedEnvironmentId = linkedThreadSearch?.linkedThreads?.environmentId ?? null;
@@ -1410,6 +1419,60 @@ function OpenCommandPaletteDialog(props: {
         dispatchPreviewAction("find");
       },
     });
+  }
+
+  if (readerShown) {
+    actionItems.push(
+      {
+        kind: "action",
+        value: "action:reader-zoom-in",
+        title: "Zoom in reading view",
+        searchTerms: ["zoom", "reader", "reading", "markdown", "larger"],
+        icon: <ZoomInIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "reader.zoomIn",
+        run: async () => zoomReader("in"),
+      },
+      {
+        kind: "action",
+        value: "action:reader-zoom-out",
+        title: "Zoom out reading view",
+        searchTerms: ["zoom", "reader", "reading", "markdown", "smaller"],
+        icon: <ZoomOutIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "reader.zoomOut",
+        run: async () => zoomReader("out"),
+      },
+      {
+        kind: "action",
+        value: "action:reader-reset-zoom",
+        title: "Reset reading zoom",
+        searchTerms: ["zoom", "reader", "reading", "markdown", "reset", "100"],
+        icon: <RotateCcwIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "reader.resetZoom",
+        run: async () => zoomReader("reset"),
+      },
+      {
+        kind: "action",
+        value: "action:reader-toggle-outline",
+        title: "Toggle outline",
+        searchTerms: ["outline", "headings", "contents", "reader", "reading", "markdown"],
+        icon: <ListTreeIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "reader.toggleOutline",
+        run: async () => {
+          toggleActiveReaderOutline();
+        },
+      },
+      {
+        kind: "action",
+        value: "action:reader-export-pdf",
+        title: "Export reading view as PDF",
+        searchTerms: ["export", "pdf", "print", "save", "reader", "reading", "markdown"],
+        icon: <FileDownIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "reader.exportPdf",
+        run: async () => {
+          exportShownReader(previewPanelThreadRef);
+        },
+      },
+    );
   }
 
   const promptLinkTarget = paletteRouteTarget

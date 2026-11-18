@@ -38,7 +38,7 @@ type AgentStartHook = (
     model?: { api: string };
     ui: { notify: (message: string, severity: string) => void };
   },
-) => Promise<{ systemPrompt: string } | undefined>;
+) => Promise<{ systemPrompt: string; message?: unknown } | undefined>;
 
 export async function loadMcpBridge(
   options: {
@@ -52,6 +52,7 @@ export async function loadMcpBridge(
   } = {},
 ) {
   const handlers = new Map<string, AgentStartHook>();
+  const commands = new Map<string, (args: string) => Promise<void>>();
   const tools: RegisteredTool[] = [];
   const requests: Array<{ readonly method: string; readonly params?: unknown }> = [];
   let activeTools = ["read"];
@@ -127,7 +128,8 @@ export async function loadMcpBridge(
     },
     pi: {
       on: (name: string, handler: AgentStartHook) => handlers.set(name, handler),
-      registerCommand: () => {},
+      registerCommand: (name: string, command: { handler: (args: string) => Promise<void> }) =>
+        commands.set(name, command.handler),
       registerTool: (tool: RegisteredTool) => {
         if (options.allowsTool && !options.allowsTool(tool.name)) return;
         const index = tools.findIndex((current) => current.name === tool.name);
@@ -157,6 +159,7 @@ export async function loadMcpBridge(
   });
   return {
     handlers,
+    commands,
     tools,
     setBridgeSourcePath: (path: string) => {
       bridgeSourcePath = path;

@@ -1,11 +1,13 @@
 import type {
   Event as OpenCodeEvent,
+  FilePartInput,
   Message as OpenCodeMessage,
   Part as OpenCodePart,
   PermissionRequest,
   PermissionRuleset,
   QuestionRequest,
   Session as OpenCodeSession,
+  TextPartInput,
   Todo as OpenCodeTodo,
   ToolPart,
 } from "@opencode-ai/sdk/v2";
@@ -64,7 +66,10 @@ import {
 } from "@t3tools/provider-core/server/nativeProtocolLogging";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildResponseLanguageInstructions,
+  buildRuntimeInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
 import { readableProviderErrorMessage } from "./providerErrorMessage.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -3459,22 +3464,40 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           };
         });
 
+        const readResponseLanguage = host.settings.get.pipe(
+          Effect.map((settings) => settings.responseLanguage),
+          Effect.orElseSucceed(() => ""),
+        );
+
         // OpenCode runs each step with the agent and system prompt of the latest
         // user message, so every prompt in a turn, steers included, repeats them.
-        const turnPromptOptions = (turn: ActiveOpenCodeTurn) => {
+        const turnPromptOptions = (
+          turn: ActiveOpenCodeTurn,
+          responseLanguage: string,
+          parts: Array<TextPartInput | FilePartInput>,
+        ) => {
           const agent =
             getModelSelectionStringOptionValue(turn.modelSelection, "agent") ??
             (turn.runtimePolicy.interactionMode === "plan" ? "plan" : undefined);
           const variant = getModelSelectionStringOptionValue(turn.modelSelection, "variant");
+          const reminder = buildResponseLanguageInstructions(responseLanguage);
           return {
             ...(agent === undefined ? {} : { agent }),
             ...(variant === undefined ? {} : { variant }),
             system: [
               orchestrationSystemPrompt,
-              buildRuntimeInstructions({ harness: "OpenCode", model: turn.modelSelection.model }),
+              buildRuntimeInstructions({
+                harness: "OpenCode",
+                model: turn.modelSelection.model,
+                responseLanguage,
+              }),
             ]
               .filter(Boolean)
               .join("\n\n"),
+            parts:
+              reminder.length === 0
+                ? parts
+                : [...parts, { type: "text" as const, text: reminder, synthetic: true }],
           };
         };
 
@@ -3501,8 +3524,9 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             ...(selectedVariant === undefined ? {} : { variant: selectedVariant }),
           };
           const text = payload.parts
-            ?.filter((part) => part.type === "text")
-            .map((part) => part.text)
+            ?.flatMap((part) =>
+              part.type === "text" && part.synthetic !== true ? [part.text] : [],
+            )
             .join("\n")
             .trim();
           const match = text?.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
@@ -3916,8 +3940,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   sessionID: sessionId,
                   messageID: turn.admissionMessageId!,
                   model: parsedModel,
-                  ...turnPromptOptions(turn),
-                  parts,
+                  ...turnPromptOptions(turn, yield* readResponseLanguage, parts),
                 },
                 admissionAbortController!,
               ).pipe(
@@ -4061,8 +4084,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   sessionID: sessionId,
                   messageID: turn.admissionMessageId,
                   model: parsedModel,
-                  ...turnPromptOptions(turn),
-                  parts,
+                  ...turnPromptOptions(turn, yield* readResponseLanguage, parts),
                 },
                 admissionAbortController!,
               ).pipe(

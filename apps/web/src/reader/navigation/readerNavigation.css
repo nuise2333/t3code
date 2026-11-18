@@ -1,0 +1,113 @@
+/* The reading view's frame: the scrolled document and its outline. */
+
+[data-reader-surface] {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 0%;
+}
+
+/* The reader keeps its own anchor (readerScroll.ts); the browser's would move the view first. */
+[data-reader-surface] > * > [data-slot="scroll-area-viewport"] {
+  overflow-anchor: none;
+}
+
+/* A grid lets the document's own `min-height: 100%` fill a short page with paper. */
+[data-reader-surface-content] {
+  display: grid;
+  min-height: 100%;
+}
+
+[data-reader-outline] {
+  display: flex;
+  width: 224px;
+  min-height: 0;
+  flex: none;
+  flex-direction: column;
+  border-inline-start: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+[data-reader-outline][data-mode="overlay"] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: 10;
+  width: min(280px, 85%);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 25%);
+}
+
+[data-reader-outline-title] {
+  padding: 12px 16px 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+[data-reader-outline-list] {
+  margin: 0;
+  padding: 0 8px 12px;
+  list-style: none;
+}
+
+[data-reader-outline-item] {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+[data-reader-outline-item]:hover {
+  background: var(--accent);
+}
+
+[data-reader-outline-item]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+[data-reader-outline-item][data-depth="1"] {
+  padding-inline-start: 20px;
+}
+
+[data-reader-outline-item][data-depth="2"] {
+  padding-inline-start: 32px;
+}
+
+[data-reader-outline-item][data-depth="3"] {
+  padding-inline-start: 44px;
+}
+
+[data-reader-outline-item][data-depth="4"],
+[data-reader-outline-item][data-depth="5"] {
+  padding-inline-start: 56px;
+}
+
+[data-reader-outline-item]:not([data-depth="0"]) {
+  color: var(--muted-foreground);
+}
+
+[data-reader-outline-item][aria-current="location"] {
+  background: var(--accent);
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+/* The find bar sits at the scope's top end, where the outline is: keep the two apart. */
+[data-reader-find-scope]:has([data-reader-outline][data-mode="column"]) > [data-reader-find-bar] {
+  inset-inline-end: calc(224px + 12px);
+}
+
+[data-reader-find-scope]:has(> [data-reader-find-bar]) [data-reader-outline][data-mode="overlay"] {
+  inset-block-start: 52px;
+}

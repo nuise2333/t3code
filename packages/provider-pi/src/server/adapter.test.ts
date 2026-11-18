@@ -43,6 +43,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { handoffBudget } from "@t3tools/provider-core/server/handoffBudget";
+import { buildResponseLanguageInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { toolOutputImages, compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
@@ -54,7 +55,10 @@ import {
 } from "./adapter.ts";
 import { makePiRpcConnection, type PiRpcRecord } from "./rpc.ts";
 import { loadMcpBridge } from "./mcpBridge.testkit.ts";
-import { PI_T3_SERVICE_TIER_COMMAND } from "./mcpExtensionSource.ts";
+import {
+  PI_T3_RESPONSE_LANGUAGE_COMMAND,
+  PI_T3_SERVICE_TIER_COMMAND,
+} from "./mcpExtensionSource.ts";
 import { turnItemOutputText } from "../../../client-runtime/src/work-log/itemDetail.ts";
 
 const layerTest = Layer.mergeAll(
@@ -180,6 +184,7 @@ interface FakePi {
   readonly promptModels: ReadonlyArray<string>;
   /** T3 extension's service tier as each prompt was sent; Pi resets it with each session. */
   readonly promptServiceTiers: ReadonlyArray<string | null>;
+  readonly promptResponseLanguages: ReadonlyArray<string | null>;
   /** Pi reloads extensions without the adapter seeing it, e.g. a user extension's ctx.newSession(). */
   readonly reloadExtensions: () => void;
   /** Pi before 0.99 acknowledges prompts without a disposition. */
@@ -243,9 +248,12 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
   const promptModels: Array<string> = [];
   const promptServiceTiers: Array<string | null> = [];
   let serviceTier: string | null = null;
+  const promptResponseLanguages: Array<string | null> = [];
+  let responseLanguage: string | null = null;
   let promptDisposition = true;
   let currentModel = "default";
   const serviceTierCommand = `/${PI_T3_SERVICE_TIER_COMMAND}`;
+  const responseLanguageCommand = `/${PI_T3_RESPONSE_LANGUAGE_COMMAND}`;
 
   const emit = (record: PiRpcRecord, chunkBytes?: number) =>
     Effect.gen(function* () {
@@ -299,6 +307,11 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
           serviceTier = String(record["message"]).slice(serviceTierCommand.length).trim() || null;
           return promptDisposition ? { ...base, data: { disposition: "handled" } } : base;
         }
+        if (String(record["message"]).startsWith(responseLanguageCommand)) {
+          responseLanguage =
+            String(record["message"]).slice(responseLanguageCommand.length).trim() || null;
+          return promptDisposition ? { ...base, data: { disposition: "handled" } } : base;
+        }
         if (isCompacting) {
           return { ...base, success: false, error: PI_COMPACTING_PROMPT_ERROR };
         }
@@ -321,13 +334,17 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
         if (!cancelled) {
           sessionFile = `/fake/new-${++sessionGeneration}.jsonl`;
           serviceTier = null;
+          responseLanguage = null;
         }
         return { ...base, data: { cancelled } };
       }
       case "switch_session": {
         const cancelled = vetoSwitch;
         vetoSwitch = false;
-        if (!cancelled) serviceTier = null;
+        if (!cancelled) {
+          serviceTier = null;
+          responseLanguage = null;
+        }
         return { ...base, data: { cancelled } };
       }
       case "get_entries":
@@ -360,11 +377,13 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
         const record = decodeJsonLine(line) as PiRpcRecord;
         if (
           record["type"] === "prompt" &&
-          !String(record["message"]).startsWith(serviceTierCommand)
+          !String(record["message"]).startsWith(serviceTierCommand) &&
+          !String(record["message"]).startsWith(responseLanguageCommand)
         ) {
           promptThinkingLevels.push(thinkingLevel);
           promptModels.push(currentModel);
           promptServiceTiers.push(serviceTier);
+          promptResponseLanguages.push(responseLanguage);
         }
         allRequests.push(record);
         yield* Queue.offer(requests, record);
@@ -426,8 +445,10 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
     promptThinkingLevels,
     promptModels,
     promptServiceTiers,
+    promptResponseLanguages,
     reloadExtensions: () => {
       serviceTier = null;
+      responseLanguage = null;
     },
     omitPromptDisposition: () => {
       promptDisposition = false;
@@ -2490,6 +2511,60 @@ describe("PiAdapterV2", () => {
           `/${PI_T3_SERVICE_TIER_COMMAND} priority`,
           `/${PI_T3_SERVICE_TIER_COMMAND} ultrafast`,
           `/${PI_T3_SERVICE_TIER_COMMAND}`,
+        ],
+      );
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("sends the live response language block until it is cleared", () =>
+    Effect.gen(function* () {
+      const host = yield* ProviderHost.ProviderHost;
+      const hostSettings = yield* TestProviderHost.TestProviderHostSettings;
+      const setLanguage = (responseLanguage: string) =>
+        host.settings.get.pipe(
+          Effect.flatMap((settings) => hostSettings.set({ ...settings, responseLanguage })),
+          Effect.orDie,
+        );
+      const fake = yield* makeFakePi;
+      const { runtime, takeEvent } = yield* openRuntime(fake);
+      const providerThread = yield* runtime.ensureThread({
+        threadId: THREAD_ID,
+        modelSelection: modelSelection("default"),
+        runtimePolicy,
+      });
+      const turn = (text: string, ordinal: number) =>
+        Effect.gen(function* () {
+          yield* startTurn(runtime, providerThread, "default", [], text, undefined, ordinal);
+          while (String((yield* fake.takeRequest("prompt"))["message"]).startsWith("/")) {}
+          yield* fake.emit({ type: "agent_start" });
+          yield* fake.emit({ type: "agent_end", messages: [], willRetry: false });
+          yield* fake.emit({ type: "agent_settled" });
+          yield* takeEvent((event) => event.type === "turn.terminal");
+        });
+
+      yield* turn("Unset", 1);
+      yield* setLanguage("简体中文");
+      yield* turn("Chinese", 2);
+      fake.reloadExtensions();
+      yield* turn("Still Chinese", 3);
+      yield* setLanguage("");
+      yield* turn("Cleared", 4);
+      yield* turn("Unset again", 5);
+
+      const block = buildResponseLanguageInstructions("简体中文");
+      assert.deepEqual(fake.promptResponseLanguages, [null, block, block, null, null]);
+      assert.deepEqual(
+        fake
+          .allRequests()
+          .flatMap((request) =>
+            String(request["message"]).startsWith(`/${PI_T3_RESPONSE_LANGUAGE_COMMAND}`)
+              ? [request["message"]]
+              : [],
+          ),
+        [
+          `/${PI_T3_RESPONSE_LANGUAGE_COMMAND} ${block}`,
+          `/${PI_T3_RESPONSE_LANGUAGE_COMMAND} ${block}`,
+          `/${PI_T3_RESPONSE_LANGUAGE_COMMAND}`,
         ],
       );
     }).pipe(Effect.scoped, Effect.provide(layerTest)),

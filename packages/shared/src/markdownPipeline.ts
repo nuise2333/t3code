@@ -351,13 +351,21 @@ function rehypeRawWhenPresent(this: Processor) {
     needsHtmlParser(tree, TOP_SCOPE) ? transform(tree, file) : undefined;
 }
 
-export const CHAT_MARKDOWN_REHYPE_PLUGINS: PluggableList = [
+const rehypePluginsWithSchema = (schema: Parameters<typeof rehypeSanitize>[0]): PluggableList => [
   rehypePreserveBareAnchorPlaceholders,
   rehypeRawWhenPresent,
   rehypePreserveImageSourceMeta,
   rehypeNormalizeLocalEditorLinks,
-  [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
+  [rehypeSanitize, schema],
 ];
+
+export const CHAT_MARKDOWN_REHYPE_PLUGINS = rehypePluginsWithSchema(CHAT_MARKDOWN_SANITIZE_SCHEMA);
+
+/** The reading view also keeps `mark`, which its `==text==` syntax produces. */
+export const READER_MARKDOWN_REHYPE_PLUGINS = rehypePluginsWithSchema({
+  ...CHAT_MARKDOWN_SANITIZE_SCHEMA,
+  tagNames: [...(defaultSchema.tagNames ?? []), "mark"],
+});
 
 const isImageNode = (node: PhrasingContent | undefined): boolean =>
   node?.type === "image" ||

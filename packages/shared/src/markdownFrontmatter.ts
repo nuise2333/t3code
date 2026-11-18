@@ -9,3 +9,8 @@ const LEADING_FRONTMATTER =
 export function maskMarkdownFrontmatter(markdown: string): string {
   return markdown.replace(LEADING_FRONTMATTER, (block) => block.replace(/[^\r\n]/g, " "));
 }
+
+/** End offset of a leading frontmatter block (its closing fence line, without the line ending), or 0. */
+export function markdownFrontmatterEnd(markdown: string): number {
+  return LEADING_FRONTMATTER.exec(markdown)?.[0].length ?? 0;
+}

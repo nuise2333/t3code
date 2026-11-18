@@ -1,6 +1,7 @@
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import { parseDiffFromFile } from "@pierre/diffs";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
+import type { READER_SYNTAX_THEME_NAME } from "../reader/markdown/readerSyntaxTheme";
 import { READABLE_LIGHT_THEME_NAME } from "./readableSyntaxTheme";
 
 // Light mode uses a darker pierre-light so syntax stays readable on every code surface.
@@ -10,6 +11,7 @@ export const DIFF_THEME_NAMES = {
 } as const;
 
 export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES];
+export type CodeBlockThemeName = DiffThemeName | typeof READER_SYNTAX_THEME_NAME;
 
 export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
   return DIFF_THEME_NAMES[theme];

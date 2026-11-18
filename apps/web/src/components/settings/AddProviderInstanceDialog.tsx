@@ -11,6 +11,7 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type { ProviderClientDefinition } from "@t3tools/provider-core/client";
 import {
   type AcpRegistrySearchAgent,
+  bundledAcpIconUrlForAgentId,
   AuthProvidersManageScope,
   ProviderInstanceId,
   ProviderDriverKind,
@@ -305,7 +306,8 @@ export function AddProviderInstanceDialog({
   const handleAcpPrepared = (agent: AcpRegistrySearchAgent) => {
     setDriver(ACP_REGISTRY_DRIVER_KIND);
     const nextLabel = agent.name;
-    const registryIconUrl = resolveOfficialAcpRegistryIconUrl(agent.icon);
+    const registryIconUrl =
+      bundledAcpIconUrlForAgentId(agent.id) ?? resolveOfficialAcpRegistryIconUrl(agent.icon);
     const nextInstanceId = deriveAvailableInstanceId(
       (candidateLabel) => deriveInstanceId(ACP_REGISTRY_DRIVER_KIND, candidateLabel),
       nextLabel,

@@ -1,0 +1,1187 @@
+/* The reading view: rendered Markdown files, scoped to `.chat-markdown.markdown-reader`.
+   The `:root` prefix lifts every rule above the shared `.chat-markdown` rules in index.css,
+   which come later in the cascade. Settings arrive as attributes and variables on the root
+   element (readerAppearance.ts); with none present these rules render the defaults. */
+
+/* Han faces by role. A family name alone cannot ask for Songti Black as the bold of Songti
+   or Kaiti as its italic. A face that is not installed fails to load and the stack moves on. */
+@font-face {
+  font-family: "T3 Reader Han Song";
+  font-weight: 400;
+  src: local("STSongti-SC-Regular"), local("Songti SC Regular");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Song";
+  font-weight: 600;
+  src: local("STSongti-SC-Bold"), local("Songti SC Bold");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Song";
+  font-weight: 700;
+  src: local("STSongti-SC-Black"), local("Songti SC Black");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Song";
+  font-style: italic;
+  font-weight: 400;
+  src: local("STKaitiSC-Regular"), local("Kaiti SC Regular");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Song";
+  font-style: italic;
+  font-weight: 600 700;
+  src: local("STKaitiSC-Bold"), local("Kaiti SC Bold");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Hei";
+  font-weight: 400;
+  src: local("PingFangSC-Regular"), local("PingFang SC Regular");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Hei";
+  font-weight: 600 700;
+  src: local("PingFangSC-Semibold"), local("PingFang SC Semibold");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Hei";
+  font-style: italic;
+  font-weight: 400;
+  src: local("STKaitiSC-Regular"), local("Kaiti SC Regular");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Hei";
+  font-style: italic;
+  font-weight: 600 700;
+  src: local("STKaitiSC-Bold"), local("Kaiti SC Bold");
+}
+
+/* Headings in a named Latin family are set in its regular face beside bold Han. */
+@font-face {
+  font-family: "T3 Reader Han Song Heading";
+  font-weight: 400 700;
+  src: local("STSongti-SC-Bold"), local("Songti SC Bold");
+}
+
+@font-face {
+  font-family: "T3 Reader Han Hei Heading";
+  font-weight: 400 700;
+  src: local("PingFangSC-Semibold"), local("PingFang SC Semibold");
+}
+
+/* Full-width stops and brackets in Songti profiles; bold and italic keep the marks of their own face. */
+@font-face {
+  font-family: "T3 Reader Punct Song";
+  font-weight: 400;
+  src: local("SimSong-Regular"), local("SimSong Regular"), local("SimSong");
+  unicode-range:
+    U+3001-3002, U+3008-3011, U+3014-301B, U+301D-301F, U+FF01, U+FF08-FF09, U+FF0C, U+FF0E,
+    U+FF1A-FF1B, U+FF1F, U+FF3B, U+FF3D, U+FF5B, U+FF5D-FF60;
+}
+
+@font-face {
+  font-family: "T3 Reader Punct Song";
+  font-weight: 600;
+  src: local("SimSong-Bold"), local("SimSong Bold");
+  unicode-range:
+    U+3001-3002, U+3008-3011, U+3014-301B, U+301D-301F, U+FF01, U+FF08-FF09, U+FF0C, U+FF0E,
+    U+FF1A-FF1B, U+FF1F, U+FF3B, U+FF3D, U+FF5B, U+FF5D-FF60;
+}
+
+@font-face {
+  font-family: "T3 Reader Kana Song";
+  font-weight: 400;
+  src: local("HiraMinProN-W3"), local("Hiragino Mincho ProN W3");
+  unicode-range: U+3040-30FF, U+31F0-31FF, U+FF66-FF9F;
+}
+
+@font-face {
+  font-family: "T3 Reader Kana Song";
+  font-weight: 600 700;
+  src: local("HiraginoSans-W6"), local("Hiragino Sans W6");
+  unicode-range: U+3040-30FF, U+31F0-31FF, U+FF66-FF9F;
+}
+
+@font-face {
+  font-family: "T3 Reader Kana Hei";
+  font-weight: 400;
+  src: local("HiraginoSans-W3"), local("Hiragino Sans W3");
+  unicode-range: U+3040-30FF, U+31F0-31FF, U+FF66-FF9F;
+}
+
+@font-face {
+  font-family: "T3 Reader Kana Hei";
+  font-weight: 600 700;
+  src: local("HiraginoSans-W6"), local("Hiragino Sans W6");
+  unicode-range: U+3040-30FF, U+31F0-31FF, U+FF66-FF9F;
+}
+
+/* ---- Root: metrics, fonts, colours, page ---- */
+
+:root .chat-markdown.markdown-reader {
+  --reader-base: var(--reader-font-size, 16px);
+  --reader-line: round(nearest, calc(var(--reader-base) * 1.7), 1px);
+  --reader-gap: round(nearest, calc(var(--reader-base) * 0.75), 1px);
+  /* The size of the block being set: the body size, or a heading's own size. */
+  --reader-block-size: var(--reader-base);
+
+  --reader-font-latin: "T3 Reader Serif", "New York", ui-serif, Charter, "Iowan Old Style", Georgia;
+  --reader-font-han:
+    "T3 Reader Kana Song", "T3 Reader Punct Song", "T3 Reader Han Song", "Songti SC",
+    "Hiragino Mincho ProN", "Apple SD Gothic Neo", "Noto Serif CJK SC", "Source Han Serif SC";
+  --reader-font-generic: serif;
+  --reader-font-body: var(--reader-font-latin), var(--reader-font-han), var(--reader-font-generic);
+  --reader-font-heading: var(--reader-font-body);
+  /* Baselines: the native reader centres each line on the Han face's 1.06 / 0.34 em box and
+     rounds up to a device pixel, Han raised by `--reader-han-raise`; the browser centres on the
+     Latin face's ascent and descent, each rounded to a pixel. These are that face's, in em. */
+  --reader-latin-ascent: 0.9521;
+  --reader-latin-descent: 0.2412;
+  --reader-han-raise: 0.04;
+  /* Bullets and task boxes centre on the Han ink centre of 国田日中, raised as Han is, in em. */
+  --reader-marker-centre: 0.354;
+  --reader-device-px: 1px;
+  /* The native reader draws with macOS font smoothing, which the app turns off elsewhere. */
+  -webkit-font-smoothing: auto;
+  /* AppKit's semibold and bold are wght 568 and 674 on New York's axis; CSS 600 and 700 set
+     them wider. */
+  --reader-heading-weight: 568;
+  --reader-bold-weight: 674;
+  /* A face with no italic stays upright, as CoreText leaves it. */
+  font-synthesis-style: none;
+  --reader-font-mono: "T3 Reader Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  --reader-mono-ascent: 0.9668;
+  --reader-mono-descent: 0.2109;
+  --reader-code-size: round(nearest, calc(var(--reader-base) * 0.88), 1px);
+  /* Lifts a highlight from the Latin face's box to the Han ascent and descent. */
+  --reader-mark-pad: 0.108em 0 0.099em;
+
+  /* Mono, the default theme. */
+  --reader-paper: light-dark(#fafaf8, #262626);
+  --reader-text: light-dark(#313131, #c7c7c7);
+  --reader-heading: light-dark(#000000, #ffffff);
+  --reader-link: light-dark(#000000, #ffffff);
+  --reader-inline-code: light-dark(#000000, #ffffff);
+  --reader-secondary: light-dark(#7c7c7c, #8b8b8b);
+  --reader-rule: light-dark(#d8d8d6, #404040);
+  --reader-code-bg: light-dark(#ededeb, #1d1d1d);
+  --reader-capsule-bg: light-dark(#e5e5e3, #2c2c2c);
+  --reader-table-header-bg: light-dark(#f2f2f0, #2c2c2c);
+  --reader-placeholder-bg: light-dark(#ededeb, #1d1d1d);
+  --reader-mark-bg: light-dark(#f8de72, #544408);
+  --reader-syntax-keyword: light-dark(#000343, #f1f5ff);
+  --reader-syntax-string: light-dark(#004e36, #6ac1a2);
+  --reader-syntax-comment: light-dark(#616a70, #80898f);
+  --reader-syntax-literal: light-dark(#844600, #d68b48);
+  --reader-syntax-type: light-dark(#001e4b, #a4e9ff);
+
+  container: reader / inline-size;
+  min-height: 100%;
+  padding: 32px max(32px, calc(50% - 480px));
+  zoom: var(--reader-zoom, 1);
+  background: var(--reader-paper);
+  color: var(--reader-text);
+  font-family: var(--reader-font-body);
+  font-size: var(--reader-base);
+  line-height: var(--reader-line);
+}
+
+:root[data-reader-limit-width="false"] .chat-markdown.markdown-reader {
+  padding-inline: 32px;
+}
+
+/* ---- Themes ---- */
+
+:root[data-reader-theme="classic"] .chat-markdown.markdown-reader {
+  --reader-paper: light-dark(#ffffff, #1e1e1e);
+  --reader-text: light-dark(#000000, #ffffff);
+  --reader-heading: light-dark(#000000, #ffffff);
+  --reader-link: light-dark(#0068da, #419cff);
+  --reader-inline-code: light-dark(#000000, #ffffff);
+  --reader-secondary: light-dark(rgb(0 0 0 / 49.8%), rgb(255 255 255 / 54.9%));
+  --reader-rule: light-dark(rgb(0 0 0 / 9.8%), rgb(255 255 255 / 9.8%));
+  --reader-code-bg: light-dark(#f4f5f7, #25262a);
+  --reader-capsule-bg: light-dark(#edeef1, #2e2f34);
+  --reader-table-header-bg: light-dark(#f7f7f7, #2b2b2b);
+  --reader-placeholder-bg: light-dark(#f5f5f5, #2e2e2e);
+  --reader-mark-bg: light-dark(#f8de72, #544408);
+  --reader-syntax-keyword: light-dark(#2d2f7e, #d7d0ff);
+  --reader-syntax-string: light-dark(#11704d, #72b792);
+  --reader-syntax-comment: light-dark(#949699, #75777a);
+  --reader-syntax-literal: light-dark(#ae630c, #c78342);
+  --reader-syntax-type: light-dark(#00528c, #86c6f6);
+}
+
+:root[data-reader-theme="one"] .chat-markdown.markdown-reader {
+  --reader-paper: light-dark(#fafafa, #282c34);
+  --reader-text: light-dark(#383a42, #abb2bf);
+  --reader-heading: light-dark(#383a42, #abb2bf);
+  --reader-link: light-dark(#4078f2, #61afef);
+  --reader-inline-code: var(--reader-text);
+  --reader-secondary: light-dark(#a0a1a7, #5c6370);
+  --reader-rule: light-dark(#e5e5e6, #3e4452);
+  --reader-code-bg: light-dark(#f0f0f1, #21252b);
+  --reader-capsule-bg: light-dark(#e8e8ea, #2c313a);
+  --reader-table-header-bg: light-dark(#f0f0f1, #21252b);
+  --reader-placeholder-bg: light-dark(#f0f0f1, #21252b);
+  --reader-mark-bg: light-dark(#f8de72, #504104);
+  --reader-syntax-keyword: light-dark(#a626a4, #c678dd);
+  --reader-syntax-string: light-dark(#50a14f, #98c379);
+  --reader-syntax-comment: light-dark(#a0a1a7, #5c6370);
+  --reader-syntax-literal: light-dark(#986801, #d19a66);
+  --reader-syntax-type: light-dark(#c18401, #e5c07b);
+}
+
+:root[data-reader-theme="solarized"] .chat-markdown.markdown-reader {
+  --reader-paper: light-dark(#fdf6e3, #002b36);
+  --reader-text: light-dark(#657b83, #839496);
+  --reader-heading: light-dark(#586e75, #93a1a1);
+  --reader-link: light-dark(#268bd2, #268bd2);
+  --reader-inline-code: var(--reader-text);
+  --reader-secondary: light-dark(#93a1a1, #586e75);
+  --reader-rule: light-dark(#eee8d5, #073642);
+  --reader-code-bg: light-dark(#eee8d5, #073642);
+  --reader-capsule-bg: light-dark(#e9e2cf, #0a3c49);
+  --reader-table-header-bg: light-dark(#eee8d5, #073642);
+  --reader-placeholder-bg: light-dark(#eee8d5, #073642);
+  --reader-mark-bg: light-dark(#f6dc70, #493a00);
+  --reader-syntax-keyword: light-dark(#859900, #859900);
+  --reader-syntax-string: light-dark(#2aa198, #2aa198);
+  --reader-syntax-comment: light-dark(#93a1a1, #586e75);
+  --reader-syntax-literal: light-dark(#cb4b16, #cb4b16);
+  --reader-syntax-type: light-dark(#b58900, #b58900);
+}
+
+:root[data-reader-theme="app"] .chat-markdown.markdown-reader {
+  --reader-paper: var(--background);
+  --reader-text: var(--foreground);
+  --reader-heading: var(--contrast-foreground, var(--foreground));
+  --reader-link: var(--info-foreground);
+  --reader-inline-code: var(--contrast-foreground, var(--foreground));
+  --reader-secondary: var(--muted-foreground);
+  --reader-rule: var(--border);
+  --reader-code-bg: var(--code-background);
+  --reader-capsule-bg: var(--muted);
+  --reader-table-header-bg: var(--muted);
+  --reader-placeholder-bg: var(--muted);
+  --reader-mark-bg: color-mix(in srgb, var(--warning) 35%, transparent);
+  --reader-syntax-keyword: var(--primary);
+  --reader-syntax-string: var(--success-foreground);
+  --reader-syntax-comment: var(--muted-foreground);
+  --reader-syntax-literal: var(--warning-foreground);
+  --reader-syntax-type: var(--info-foreground);
+}
+
+/* ---- Typography profiles (serif is the default above; book shares its fonts) ---- */
+
+:root[data-reader-typography="sans"] .chat-markdown.markdown-reader,
+:root[data-reader-typography="sans-avenir"] .chat-markdown.markdown-reader {
+  --reader-font-latin: system-ui, -apple-system, "Helvetica Neue", Arial;
+  --reader-font-han:
+    "T3 Reader Kana Hei", "T3 Reader Han Hei", "PingFang SC", "Hiragino Sans",
+    "Apple SD Gothic Neo", "Noto Sans CJK SC", "Source Han Sans SC";
+  --reader-font-generic: sans-serif;
+  --reader-latin-ascent: 0.9668;
+  --reader-latin-descent: 0.2109;
+  --reader-han-raise: 0.02;
+  --reader-marker-centre: 0.377;
+  --reader-heading-weight: 600;
+  --reader-bold-weight: 700;
+  --reader-mark-pad: 0.093em 0 0.129em;
+}
+
+:root[data-reader-typography="sans-avenir"] .chat-markdown.markdown-reader {
+  --reader-font-latin: "Avenir Next", Avenir, system-ui, -apple-system, "Helvetica Neue", Arial;
+  --reader-font-heading:
+    var(--reader-font-latin), "T3 Reader Han Hei Heading", var(--reader-font-han),
+    var(--reader-font-generic);
+  --reader-latin-ascent: 1;
+  --reader-latin-descent: 0.366;
+  --reader-han-raise: 0;
+  --reader-marker-centre: 0.357;
+  --reader-heading-weight: 400;
+  --reader-mark-pad: 0.06em 0 0;
+}
+
+:root[data-reader-typography="serif-charter"] .chat-markdown.markdown-reader {
+  --reader-font-latin: Charter, "Bitstream Charter", "Iowan Old Style", Georgia;
+  --reader-font-heading:
+    var(--reader-font-latin), "T3 Reader Han Song Heading", var(--reader-font-han),
+    var(--reader-font-generic);
+  --reader-latin-ascent: 0.98;
+  --reader-latin-descent: 0.2402;
+  --reader-heading-weight: 400;
+  --reader-bold-weight: 700;
+  --reader-mark-pad: 0.08em 0 0.1em;
+}
+
+:root[data-reader-typography="serif-tc"] .chat-markdown.markdown-reader {
+  --reader-font-han:
+    "T3 Reader Kana Song", "Songti TC", "Songti SC", "Hiragino Mincho ProN", "Apple SD Gothic Neo",
+    "Noto Serif CJK TC", "Source Han Serif TC";
+}
+
+/* ---- Blocks ---- */
+
+:root .chat-markdown.markdown-reader {
+  /* Every block carries its gap below; sibling and nested margins collapse to the larger. */
+  & :is(p, ul, ol, li, dl, blockquote, pre),
+  &
+    :is(
+      .reader-codeblock,
+      .chat-markdown-table-container,
+      .chat-markdown-math-display,
+      [data-markdown-alert]
+    ) {
+    margin: 0 0 var(--reader-gap);
+  }
+
+  /* Paragraph setting by the browser. A typeset paragraph marks itself `data-reader-typeset`
+     and takes over alignment, spacing, and breaking. */
+  & :is(p, li, dd):not([data-reader-typeset]) {
+    text-align: justify;
+    hyphens: auto;
+    hyphenate-limit-chars: 5 2 3;
+    text-autospace: normal;
+    text-spacing-trim: trim-start;
+  }
+
+  & :is(h1, h2, h3, h4, h5, h6) {
+    --reader-block-size: round(
+      nearest,
+      calc(var(--reader-base) * var(--reader-heading-scale)),
+      1px
+    );
+    margin: round(nearest, calc(var(--reader-block-size) * 0.8), 1px) 0
+      round(nearest, calc(var(--reader-block-size) * 0.4), 1px);
+    color: var(--reader-heading);
+    font-family: var(--reader-font-heading);
+    font-size: var(--reader-block-size);
+    font-weight: var(--reader-heading-weight);
+    line-height: round(nearest, calc(var(--reader-block-size) * 1.7), 1px);
+    text-align: start;
+  }
+
+  & h1 {
+    --reader-heading-scale: 1.6;
+  }
+
+  & h2 {
+    --reader-heading-scale: 1.5;
+  }
+
+  & h3 {
+    --reader-heading-scale: 1.4;
+  }
+
+  & h4 {
+    --reader-heading-scale: 1.3;
+  }
+
+  & h5 {
+    --reader-heading-scale: 1.2;
+  }
+
+  & h6 {
+    --reader-heading-scale: 1.1;
+  }
+
+  & :is(strong, b) {
+    font-weight: var(--reader-bold-weight);
+  }
+
+  /* Asking for italic drops a heading's semibold; bold survives it. */
+  & :is(h1, h2, h3, h4, h5, h6) :is(em, i) {
+    font-weight: 400;
+  }
+
+  & :is(h1, h2, h3, h4, h5, h6) :is(:is(em, i) :is(strong, b), :is(strong, b) :is(em, i)) {
+    font-weight: var(--reader-bold-weight);
+  }
+
+  & > :first-child,
+  & hr + :is(h1, h2, h3, h4, h5, h6) {
+    margin-top: 0;
+  }
+
+  /* The rule's block holds its own air, so neighbours add none. */
+  & hr {
+    height: 25px;
+    margin: 0;
+    border: 0;
+    background: linear-gradient(var(--reader-rule), var(--reader-rule)) center / 100% 1px no-repeat;
+  }
+
+  /* ---- Lists ---- */
+
+  & :is(ul, ol) {
+    --reader-list-slot: calc(var(--reader-base) * 0.78);
+    --reader-list-indent: calc(var(--reader-base) * 0.5 + var(--reader-list-slot) + 8px);
+    padding: 0;
+    list-style: none;
+  }
+
+  /* The list measures the ink of its labels; until it has, a tabular digit is about one `ch`. */
+  & ol {
+    --reader-list-slot: var(--reader-ol-slot, calc(var(--reader-ol-digits, 1) * 1ch + 0.17em));
+  }
+
+  & li {
+    position: relative;
+    padding-left: var(--reader-list-indent);
+  }
+
+  /* Item text is an anonymous box with no margin, so the block after it brings the gap. */
+  & li > :is(ul, ol, blockquote, pre, .reader-codeblock, .chat-markdown-table-container) {
+    margin-top: var(--reader-gap);
+  }
+
+  & ul > li::before {
+    position: absolute;
+    top: calc(var(--reader-snapped-baseline) - (var(--reader-marker-centre) + 0.15) * 1em);
+    left: calc(var(--reader-base) * 0.5 + (var(--reader-list-slot) - 0.3em) / 2);
+    width: 0.3em;
+    height: 0.3em;
+    border-radius: 50%;
+    background: currentcolor;
+    content: "";
+  }
+
+  & ol > li::before {
+    position: absolute;
+    top: var(--reader-baseline-shift);
+    right: calc(100% - var(--reader-list-indent) + 8px - var(--reader-ol-trim, 0px));
+    content: counter(list-item) ".";
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Task boxes take the bullet's slot; a numbered item keeps its number and shows no box. */
+  & ul > li.task-list-item::before {
+    content: none;
+  }
+
+  & li.task-list-item > input[type="checkbox"],
+  & li.task-list-item > p:first-child > input[type="checkbox"],
+  & li.task-list-item > .reader-flow:first-child > input[type="checkbox"] {
+    position: relative;
+    width: 0.78em;
+    height: 0.78em;
+    margin: 0 0.4em 0 0;
+    border: max(1px, 0.07em) solid currentcolor;
+    border-radius: 0;
+    background: none;
+    color: inherit;
+    opacity: 1;
+    vertical-align: -0.08em;
+    appearance: none;
+
+    &:enabled {
+      cursor: pointer;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--reader-link);
+      outline-offset: 2px;
+    }
+
+    &:checked::after {
+      position: absolute;
+      inset: calc(-1 * max(1px, 0.07em));
+      background: currentcolor;
+      content: "";
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M22 52 44 74 78 26' fill='none' stroke='%23000' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+        center / 100% 100% no-repeat;
+    }
+  }
+
+  & ol > li.task-list-item > input[type="checkbox"],
+  & ol > li.task-list-item > p:first-child > input[type="checkbox"],
+  & ol > li.task-list-item > .reader-flow:first-child > input[type="checkbox"] {
+    display: none;
+  }
+
+  & ul > li.task-list-item > input[type="checkbox"],
+  & ul > li.task-list-item > p:first-child > input[type="checkbox"],
+  & ul > li.task-list-item > .reader-flow:first-child > input[type="checkbox"] {
+    position: absolute;
+    top: calc(var(--reader-snapped-baseline) - (var(--reader-marker-centre) + 0.39) * 1em);
+    left: calc(var(--reader-base) * 0.5);
+    margin: 0;
+  }
+
+  /* ---- Blockquotes: one bar per level beside each block, broken by the gaps ---- */
+
+  & blockquote {
+    --reader-quote-step: calc(var(--reader-base) * 0.5 + 20px);
+    --reader-quote-depth: 1;
+    padding: 0 0 0 var(--reader-quote-step);
+    border: 0;
+    color: inherit;
+  }
+
+  & blockquote blockquote {
+    --reader-quote-depth: 2;
+  }
+
+  & blockquote blockquote blockquote {
+    --reader-quote-depth: 3;
+  }
+
+  & blockquote blockquote blockquote blockquote {
+    --reader-quote-depth: 4;
+  }
+
+  & blockquote blockquote blockquote blockquote blockquote {
+    --reader-quote-depth: 5;
+  }
+
+  & blockquote > :not(blockquote, hr, ul, ol) {
+    position: relative;
+  }
+
+  & blockquote > :not(blockquote, hr, ul, ol)::before,
+  & blockquote > :is(ul, ol) > li::after {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--reader-base) * 0.5 - var(--reader-quote-step) * var(--reader-quote-depth));
+    width: calc(var(--reader-quote-step) * (var(--reader-quote-depth) - 1) + 3px);
+    background: repeating-linear-gradient(
+      to right,
+      var(--reader-rule) 0 3px,
+      transparent 3px var(--reader-quote-step)
+    );
+    content: "";
+    pointer-events: none;
+  }
+
+  /* ---- Code ---- */
+
+  & :not(pre) > code {
+    border: 0;
+    border-radius: 0;
+    background: none;
+    padding: 0;
+    color: var(--reader-inline-code);
+    font-family: var(--reader-font-mono);
+    font-size: round(nearest, calc(var(--reader-block-size) * 0.88), 1px);
+    /* Code keeps the regular upright mono face inside headings, bold and italic. */
+    font-style: normal;
+    font-weight: 400;
+    /* The mono face's taller ascent must not grow the line box. */
+    line-height: 0;
+    hyphens: none;
+  }
+
+  & :is(h1, h2, h3, h4, h5, h6, a) code {
+    color: inherit;
+  }
+
+  & pre {
+    max-width: none;
+    margin-inline: calc(-1 * var(--reader-gap));
+    padding: var(--reader-gap);
+    border: 0;
+    border-radius: calc(var(--reader-base) * 0.45);
+    background: var(--reader-code-bg);
+    color: var(--reader-text);
+    font-family: var(--reader-font-mono);
+    font-size: round(nearest, calc(var(--reader-base) * 0.88), 1px);
+    line-height: var(--reader-line);
+    tab-size: 4;
+  }
+
+  & pre code {
+    font-family: inherit;
+    font-size: inherit;
+  }
+
+  /* Code lines centre the mono face's own ascent and descent in the body line box. */
+  & .reader-codeblock {
+    --reader-code-ascent: round(
+      nearest,
+      calc(var(--reader-mono-ascent) * var(--reader-code-size)),
+      var(--reader-device-px)
+    );
+    --reader-code-descent: round(
+      nearest,
+      calc(var(--reader-mono-descent) * var(--reader-code-size)),
+      var(--reader-device-px)
+    );
+    --reader-code-shift: calc(
+      round(
+          up,
+          calc(
+            var(--reader-line) / 2 + (var(--reader-mono-ascent) - var(--reader-mono-descent)) / 2 *
+              var(--reader-code-size)
+          ),
+          var(--reader-device-px)
+        ) -
+        round(
+          down,
+          calc((var(--reader-line) - var(--reader-code-ascent) - var(--reader-code-descent)) / 2),
+          var(--reader-device-px)
+        ) -
+        var(--reader-code-ascent)
+    );
+    position: relative;
+    hyphens: manual;
+    text-align: start;
+    text-indent: 0;
+  }
+
+  & .reader-codeblock :is(pre > code, .reader-code-label > span) {
+    position: relative;
+    top: var(--reader-code-shift);
+  }
+
+  /* The background bleeds one gap past the column so code lines up with body text. */
+  & .reader-codeblock > .chat-markdown-codeblock {
+    margin: 0 calc(-1 * var(--reader-gap));
+    padding: var(--reader-gap);
+    border: 0;
+    border-radius: calc(var(--reader-base) * 0.45);
+    background: var(--reader-code-bg);
+    color: var(--reader-text);
+    line-height: var(--reader-line);
+  }
+
+  & .reader-codeblock pre {
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  & .reader-codeblock .chat-markdown-shiki .shiki {
+    color: var(--reader-text) !important;
+  }
+
+  /* Code wraps at any character, and a space is a column like any other: it never hangs. */
+  & .reader-codeblock [data-wrap="true"] pre {
+    white-space: break-spaces;
+    word-break: break-all;
+    line-break: anywhere;
+  }
+
+  /* The label sits on the first code line's baseline: the outer box carries the code strut. */
+  & .reader-code-label {
+    position: absolute;
+    top: var(--reader-gap);
+    right: 0;
+    z-index: 1;
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--reader-secondary);
+    font-family: var(--reader-font-mono);
+    font-size: round(nearest, calc(var(--reader-base) * 0.88), 1px);
+    line-height: var(--reader-line);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  & .reader-code-label > span {
+    font-size: round(
+      nearest,
+      calc(round(nearest, calc(var(--reader-base) * 0.88), 1px) * 0.75),
+      1px
+    );
+    line-height: 1;
+  }
+
+  /* Block actions float over the corner and reserve no space. */
+  & .reader-codeblock .chat-markdown-codeblock-header,
+  & .reader-codeblock > div:not(.chat-markdown-codeblock) > div:first-child {
+    position: absolute;
+    top: 4px;
+    right: calc(4px - var(--reader-gap));
+    z-index: 2;
+    padding: 2px;
+    border-radius: 6px;
+    background: var(--reader-code-bg);
+    opacity: 0;
+  }
+
+  & .reader-codeblock .chat-markdown-codeblock-header > :not([role="toolbar"]) {
+    display: none;
+  }
+
+  & .reader-codeblock:is(:hover, :focus-within) {
+    & .chat-markdown-codeblock-header,
+    & > div:not(.chat-markdown-codeblock) > div:first-child {
+      opacity: 1;
+    }
+
+    & > .reader-code-label {
+      visibility: hidden;
+    }
+  }
+
+  @media (hover: none) {
+    & .reader-codeblock .chat-markdown-codeblock-header,
+    & .reader-codeblock > div:not(.chat-markdown-codeblock) > div:first-child {
+      opacity: 1;
+    }
+
+    & .reader-codeblock > .reader-code-label {
+      visibility: hidden;
+    }
+  }
+
+  /* A rendered diagram keeps the block gap and 8px of air, without the code box. */
+  & .reader-codeblock > div:not(.chat-markdown-codeblock) {
+    margin: 0;
+    padding-block: 8px;
+    border: 0;
+  }
+
+  & .chat-markdown-math-display {
+    padding-block: 5px;
+    text-align: start;
+    text-indent: 0;
+  }
+
+  /* ---- Tables ---- */
+
+  & .chat-markdown-table-container {
+    position: relative;
+    hyphens: manual;
+    text-align: start;
+    text-indent: 0;
+  }
+
+  & .chat-markdown-table-container > div:last-child {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 2;
+    margin: 0;
+    border-radius: 6px;
+    background: var(--reader-paper);
+    opacity: 0;
+  }
+
+  & .chat-markdown-table-container:is(:hover, :focus-within) > div:last-child {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    & .chat-markdown-table-container > div:last-child {
+      opacity: 1;
+    }
+  }
+
+  & table {
+    width: auto;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: var(--reader-text);
+    font-size: var(--reader-base);
+    /* The Latin face's size-specific tracking, which the table measures (ReaderTable.tsx). */
+    letter-spacing: var(--reader-cell-tracking, normal);
+    line-height: var(--reader-line);
+  }
+
+  & table code {
+    letter-spacing: normal;
+  }
+
+  /* Each cell on one line, so the table can read its columns' natural widths. */
+  & table.reader-table-natural {
+    width: max-content !important;
+    table-layout: auto !important;
+
+    & col {
+      width: auto !important;
+    }
+
+    & :is(th, td) {
+      white-space: nowrap;
+    }
+  }
+
+  /* Rules are inset shadows, so they sit inside the rows and never change a row's height. */
+  & :is(th, td) {
+    --reader-rule-top: 0px;
+    --reader-rule-bottom: 0px;
+    --reader-rule-left: 0px;
+    --reader-rule-color: var(--reader-text);
+    --reader-rule-left-color: var(--reader-text);
+    max-width: none;
+    /* Cell text is set by the browser: the padding moves it onto the native baseline. */
+    padding: calc(8px + var(--reader-baseline-shift)) 8px calc(8px - var(--reader-baseline-shift));
+    border: 0;
+    box-shadow:
+      inset 0 var(--reader-rule-top) 0 0 var(--reader-rule-color),
+      inset 0 calc(-1 * var(--reader-rule-bottom)) 0 0 var(--reader-rule-color),
+      inset var(--reader-rule-left) 0 0 0 var(--reader-rule-left-color);
+    font-weight: 400;
+    text-wrap: wrap;
+  }
+
+  & thead th {
+    color: var(--reader-heading);
+  }
+
+  & :is(th, td)[align="center"] {
+    text-align: center;
+  }
+
+  & :is(th, td)[align="right"] {
+    text-align: right;
+  }
+
+  /* ---- Images ---- */
+
+  & img {
+    max-width: 100%;
+    max-height: 100cqw;
+  }
+
+  & p.reader-figure {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--reader-gap);
+    text-indent: 0;
+  }
+
+  & p.reader-figure > br {
+    display: none;
+  }
+
+  /* Natural size, never enlarged, fitted into a column-wide square: authored sizes do not apply. */
+  & p.reader-figure img {
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 100cqw !important;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* An image that cannot be shown keeps a column-wide 120px placeholder with its alt text. */
+  & p.reader-figure > [role="alert"] {
+    width: 100%;
+    max-width: none;
+    height: 120px;
+    aspect-ratio: auto;
+    border: 1px solid var(--reader-rule);
+    border-radius: 6px;
+    background: var(--reader-placeholder-bg);
+  }
+
+  & p.reader-figure > [role="alert"] > span {
+    padding: 0;
+    color: var(--reader-secondary);
+    font-family: system-ui, sans-serif;
+    font-size: 12px;
+    line-height: normal;
+  }
+
+  & p.reader-figure > [role="alert"] svg {
+    display: none;
+  }
+
+  /* ---- Inline ---- */
+
+  & a:not(.chat-markdown-file-link, :has([data-slot="context-chip-label"])) {
+    background-image: none;
+    color: var(--reader-link);
+    text-decoration: underline max(0.5px, 0.07em)
+      color-mix(in srgb, var(--reader-link) 40%, transparent);
+    text-decoration-skip-ink: auto;
+    text-underline-offset: 0.17em;
+
+    &:is(:hover, :focus-visible) {
+      text-decoration-color: currentcolor;
+    }
+  }
+
+  & mark {
+    padding: var(--reader-mark-pad);
+    border-radius: 0;
+    background: var(--reader-mark-bg);
+    box-decoration-break: clone;
+    color: inherit;
+  }
+
+  & :is(del, s) {
+    text-decoration: line-through max(0.5px, 0.05em);
+  }
+
+  /* Raised and lowered by position, so a script never changes the line pitch. */
+  & :is(sub, sup) {
+    position: relative;
+    font-size: round(nearest, calc(var(--reader-block-size) * 0.7), 1px);
+    line-height: 0;
+    vertical-align: baseline;
+  }
+
+  & sup {
+    top: calc(var(--reader-block-size) * -0.363);
+  }
+
+  & sub {
+    top: calc(var(--reader-block-size) * 0.247);
+  }
+
+  /* ---- Footnotes: plain numbered notes after the last block ---- */
+
+  & section[data-footnotes] {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  & section[data-footnotes] > h2 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  & section[data-footnotes] > ol {
+    --reader-list-indent: calc(var(--reader-base) * 1.8);
+  }
+
+  /* 0.255 = the 0.363 rise less what the smaller face already gains inside the line box. */
+  & section[data-footnotes] > ol > li::before {
+    top: calc(var(--reader-base) * -0.255);
+    right: calc(100% - var(--reader-base) * 1.5);
+    content: counter(list-item);
+    font-size: round(nearest, calc(var(--reader-base) * 0.7), 1px);
+  }
+
+  & a:is([data-footnote-ref], [data-footnote-backref]) {
+    display: inline;
+    min-width: 0;
+    border-radius: 0;
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    text-decoration: none;
+  }
+
+  & a[data-footnote-backref] {
+    position: absolute;
+    margin-left: 0.3em;
+    color: var(--reader-secondary);
+    opacity: 0;
+  }
+
+  & li:is(:hover, :focus-within) > p > a[data-footnote-backref] {
+    opacity: 1;
+  }
+
+  /* ---- Other blocks ---- */
+
+  & div:has(> [data-markdown-details]) {
+    margin: 0 0 var(--reader-gap);
+    border-color: var(--reader-rule);
+  }
+
+  & [data-markdown-details-summary] {
+    color: var(--reader-heading);
+    font-size: inherit;
+  }
+
+  & [data-markdown-details-content] {
+    color: inherit;
+  }
+}
+
+/* ---- Typeset paragraphs (ReaderTypeset.tsx): the engine's lines, placed as computed ---- */
+
+:root .chat-markdown.markdown-reader {
+  /* Text set directly in a list item; boxless until it is typeset, so the item lays out as before. */
+  & .reader-flow {
+    display: contents;
+  }
+
+  & .reader-flow[data-reader-typeset] {
+    display: block;
+  }
+
+  /* The engine measures raw advances and chooses every break, so nothing here may respace,
+     trim or wrap the text. */
+  & [data-reader-typeset] {
+    hyphens: manual;
+    text-align: start;
+    text-autospace: no-autospace;
+    text-indent: 0;
+    text-spacing-trim: space-all;
+    white-space: nowrap;
+  }
+
+  /* Generated content never enters copied text or a text search: the line ends and the hyphen
+     of a broken word are drawn, not written. A `br` or a block per line would add newlines. */
+  & .reader-eol::after {
+    content: "\a";
+    white-space: pre;
+  }
+
+  & .reader-hyphen::after {
+    content: "-";
+  }
+
+  & .reader-atom {
+    display: inline-block;
+  }
+
+  /* Inline math sits on the text baseline and grows the line only when it does not fit. */
+  & [data-markdown-math="inline"] {
+    vertical-align: baseline;
+  }
+
+  /* No scroller or padding of its own: its baseline is then the formula's. */
+  & [data-markdown-math="inline"] > span {
+    overflow: visible;
+    padding: 0;
+  }
+
+  & .reader-atom:has(> [data-markdown-math="inline"]) {
+    line-height: 0;
+  }
+
+  & :is(.reader-lat, .reader-han, .reader-atom) {
+    position: relative;
+    top: var(--reader-baseline-shift);
+  }
+
+  /* Where the native baseline falls in the line box, and how far below the browser's it is.
+     The browser rounds the face's ascent and descent to device pixels and floors the half
+     leading to one; the native reader centres the 1.4 em Han box and ceils to a device pixel. */
+  & :is(.reader-lat, .reader-han, .reader-atom, li, th, td) {
+    --reader-raise: 0;
+    --reader-snapped-baseline: round(
+      up,
+      calc(0.5lh + (0.36 - var(--reader-raise)) * var(--reader-block-size)),
+      var(--reader-device-px)
+    );
+    --reader-browser-ascent: round(
+      nearest,
+      calc(var(--reader-latin-ascent) * var(--reader-block-size)),
+      var(--reader-device-px)
+    );
+    --reader-browser-descent: round(
+      nearest,
+      calc(var(--reader-latin-descent) * var(--reader-block-size)),
+      var(--reader-device-px)
+    );
+    --reader-baseline-shift: calc(
+      var(--reader-snapped-baseline) -
+        round(
+          down,
+          calc((1lh - var(--reader-browser-ascent) - var(--reader-browser-descent)) / 2),
+          var(--reader-device-px)
+        ) -
+        var(--reader-browser-ascent)
+    );
+  }
+
+  & .reader-han {
+    --reader-raise: var(--reader-han-raise);
+  }
+}
+
+@media (resolution >= 2x) {
+  :root .chat-markdown.markdown-reader {
+    --reader-device-px: 0.5px;
+  }
+}
+
+/* ---- Settings ---- */
+
+:root[data-reader-justify="false"] .chat-markdown.markdown-reader {
+  & :is(p, li, dd):not([data-reader-typeset]) {
+    text-align: start;
+  }
+}
+
+/* Under 20em of column the page sets ragged right, still hyphenated. */
+@container reader (width < 20em) {
+  :root .chat-markdown.markdown-reader :is(p, li, dd):not([data-reader-typeset]) {
+    text-align: start;
+  }
+}
+
+/* Book: every body paragraph indents two ems and consecutive ones close up. */
+:root[data-reader-typography="book"] .chat-markdown.markdown-reader {
+  & > p:not(.reader-figure, [data-reader-typeset]) {
+    text-indent: 2em;
+  }
+
+  & > p:not(.reader-figure) > * {
+    text-indent: 0;
+  }
+
+  & > p:not(.reader-figure):has(+ p:not(.reader-figure)) {
+    margin-bottom: 0;
+  }
+}
+
+/* Booktabs: heavy rules above and below, a light one under the header. */
+:root:not([data-reader-table-style="grid"]) .chat-markdown.markdown-reader {
+  & thead > tr:first-child > * {
+    --reader-rule-top: 0.08em;
+  }
+
+  /* The header rule is centred on the boundary: half in the header row, half in the first body row. */
+  & thead > tr:last-child > * {
+    --reader-rule-bottom: 0.025em;
+  }
+
+  & tbody > tr:first-child > * {
+    --reader-rule-top: 0.025em;
+  }
+
+  & tbody > tr:last-child > *,
+  & table:not(:has(tbody)) thead > tr:last-child > * {
+    --reader-rule-bottom: 0.08em;
+  }
+}
+
+:root[data-reader-table-style="grid"] .chat-markdown.markdown-reader {
+  & table {
+    overflow: hidden;
+    border-radius: 0.25em;
+    outline: 0.05em solid color-mix(in srgb, var(--reader-text) 30%, transparent);
+    outline-offset: -0.05em;
+  }
+
+  & thead :is(th, td) {
+    background: var(--reader-table-header-bg);
+  }
+
+  & :is(th, td) {
+    --reader-rule-color: color-mix(in srgb, var(--reader-text) 15%, transparent);
+    --reader-rule-left-color: color-mix(in srgb, var(--reader-text) 15%, transparent);
+  }
+
+  & :is(th, td) + :is(th, td) {
+    --reader-rule-left: max(0.5px, 0.03em);
+  }
+
+  & tr + tr > * {
+    --reader-rule-top: max(0.5px, 0.03em);
+  }
+
+  & tbody > tr:first-child > * {
+    --reader-rule-top: 0.05em;
+    --reader-rule-color: color-mix(in srgb, var(--reader-text) 30%, transparent);
+  }
+}

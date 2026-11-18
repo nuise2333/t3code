@@ -119,6 +119,7 @@ function ChatMarkdownMediaUnavailableLabel(props: {
   readonly alt: string;
   readonly kind?: "image" | "video" | "audio" | undefined;
   readonly detail?: string | undefined;
+  readonly isAltOnly?: boolean | undefined;
 }) {
   const label =
     props.kind === "audio"
@@ -126,6 +127,14 @@ function ChatMarkdownMediaUnavailableLabel(props: {
       : props.kind === "video"
         ? "Video unavailable"
         : "Image unavailable";
+  // The reading view's placeholder box already says the image is missing; it shows the alt text.
+  if (props.isAltOnly && props.alt) {
+    return (
+      <span data-thread-find-ignore aria-label={`${label}: ${props.alt}`}>
+        {props.alt}
+      </span>
+    );
+  }
   return (
     <span data-thread-find-ignore className="inline-flex items-center gap-1.5">
       <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
@@ -140,6 +149,7 @@ export function ChatMarkdownImageFallback(props: {
   readonly kind?: "image" | "video" | "audio";
   readonly actionsSource?: MediaActionSource | undefined;
   readonly detail?: string | undefined;
+  readonly isAltOnly?: boolean | undefined;
 }) {
   const content = (
     <span
@@ -149,7 +159,12 @@ export function ChatMarkdownImageFallback(props: {
         "rounded-md border border-border/40 bg-muted/40 px-2 py-1 text-xs text-muted-foreground",
       )}
     >
-      <ChatMarkdownMediaUnavailableLabel alt={props.alt} kind={props.kind} detail={props.detail} />
+      <ChatMarkdownMediaUnavailableLabel
+        alt={props.alt}
+        kind={props.kind}
+        detail={props.detail}
+        isAltOnly={props.isAltOnly}
+      />
     </span>
   );
   return props.actionsSource ? (

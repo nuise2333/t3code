@@ -10,6 +10,7 @@ import {
   editAutoSettleDaysField,
   failAutoSettleDaysField,
   getChangedBrowserSettingLabels,
+  getChangedReaderSettingLabels,
   hasChangedBackgroundActivitySettings,
   syncAutoSettleDaysField,
 } from "./SettingsPanels.logic";
@@ -170,5 +171,25 @@ describe("auto-settle days field", () => {
   it("keeps a draft in progress when the saved value changes underneath it", () => {
     const typing = type(autoSettleDaysField(14), "4");
     expect(syncAutoSettleDaysField(typing, 30)).toMatchObject({ saved: 30, draft: "4" });
+  });
+});
+
+describe("getChangedReaderSettingLabels", () => {
+  it("names every reader setting, so restore defaults lists each one it resets", () => {
+    expect(getChangedReaderSettingLabels(DEFAULT_UNIFIED_SETTINGS)).toEqual([]);
+    const readerKeys = Object.keys(DEFAULT_UNIFIED_SETTINGS).filter((key) =>
+      key.startsWith("reader"),
+    );
+    expect(
+      getChangedReaderSettingLabels({
+        readerTypography: "book",
+        readerFontSize: 18,
+        readerJustify: false,
+        readerLimitWidth: false,
+        readerTheme: "app",
+        readerTableStyle: "grid",
+        readerZoom: 120,
+      }),
+    ).toHaveLength(readerKeys.length);
   });
 });

@@ -197,6 +197,45 @@ export const TerminalFontSize = Schema.Int.check(
 export type TerminalFontSize = typeof TerminalFontSize.Type;
 const DEFAULT_TERMINAL_FONT_SIZE: TerminalFontSize = 12;
 
+/** Font pairing of the reading view. "book" indents paragraphs instead of spacing them. */
+export const ReaderTypography = Schema.Literals([
+  "serif",
+  "sans",
+  "serif-charter",
+  "sans-avenir",
+  "serif-tc",
+  "book",
+]);
+export type ReaderTypography = typeof ReaderTypography.Type;
+const DEFAULT_READER_TYPOGRAPHY: ReaderTypography = "serif";
+
+export const MIN_READER_FONT_SIZE = 12;
+export const MAX_READER_FONT_SIZE = 28;
+export const ReaderFontSize = Schema.Int.check(
+  Schema.isBetween({ minimum: MIN_READER_FONT_SIZE, maximum: MAX_READER_FONT_SIZE }),
+);
+export type ReaderFontSize = typeof ReaderFontSize.Type;
+const DEFAULT_READER_FONT_SIZE: ReaderFontSize = 16;
+
+/** Each has a light and a dark half; "app" uses the app theme's own colors instead. */
+export const ReaderTheme = Schema.Literals(["mono", "classic", "one", "solarized", "app"]);
+export type ReaderTheme = typeof ReaderTheme.Type;
+const DEFAULT_READER_THEME: ReaderTheme = "mono";
+
+export const ReaderTableStyle = Schema.Literals(["booktabs", "grid"]);
+export type ReaderTableStyle = typeof ReaderTableStyle.Type;
+const DEFAULT_READER_TABLE_STYLE: ReaderTableStyle = "booktabs";
+
+export const MIN_READER_ZOOM = 80;
+export const MAX_READER_ZOOM = 200;
+export const READER_ZOOM_STEP = 10;
+/** Reading view zoom in percent. */
+export const ReaderZoom = Schema.Int.check(
+  Schema.isBetween({ minimum: MIN_READER_ZOOM, maximum: MAX_READER_ZOOM }),
+);
+export type ReaderZoom = typeof ReaderZoom.Type;
+const DEFAULT_READER_ZOOM: ReaderZoom = 100;
+
 // "artwork" follows the running channel and shows nothing on Latest. The fixed artwork
 // modes let any channel opt into a specific channel's art.
 export const EnvironmentIdentificationMode = Schema.Literals([
@@ -598,6 +637,20 @@ export const ClientSettingsSchema = Schema.Struct({
   // Opt-in TeX typesetting in rendered Markdown. Off keeps math parsing and
   // KaTeX out of the render path entirely.
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // The reading view: rendered Markdown files and Markdown attachments, never chat.
+  readerTypography: ReaderTypography.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_READER_TYPOGRAPHY)),
+  ),
+  readerFontSize: ReaderFontSize.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_READER_FONT_SIZE)),
+  ),
+  readerJustify: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  readerLimitWidth: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  readerTheme: ReaderTheme.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_READER_THEME))),
+  readerTableStyle: ReaderTableStyle.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_READER_TABLE_STYLE)),
+  ),
+  readerZoom: ReaderZoom.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_READER_ZOOM))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -1048,6 +1101,8 @@ export const ObservabilitySettings = Schema.Struct({
   otlpLogsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
+
+export const ResponseLanguage = TrimmedString.check(Schema.isMaxLength(80));
 
 export const SourceControlWritingStyleMode = Schema.Literals([
   "repo_conventions",
@@ -1546,6 +1601,8 @@ export const ServerSettings = Schema.Struct({
     ),
   ),
   threadTitleInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /** Natural language agents reply in, such as "简体中文". Empty leaves it to the agent. */
+  responseLanguage: ResponseLanguage.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   branchNamingMode: BranchNamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("static" as const)),
   ),
@@ -1939,6 +1996,7 @@ export const ServerSettingsPatch = Schema.Struct({
   ghqCloneLayout: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   threadTitleInstructions: Schema.optionalKey(TrimmedString),
+  responseLanguage: Schema.optionalKey(ResponseLanguage),
   branchNamingMode: Schema.optionalKey(BranchNamingMode),
   branchNamePrefix: Schema.optionalKey(TrimmedString),
   branchNameInstructions: Schema.optionalKey(TrimmedString),
@@ -2128,5 +2186,12 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
+  readerTypography: Schema.optionalKey(ReaderTypography),
+  readerFontSize: Schema.optionalKey(ReaderFontSize),
+  readerJustify: Schema.optionalKey(Schema.Boolean),
+  readerLimitWidth: Schema.optionalKey(Schema.Boolean),
+  readerTheme: Schema.optionalKey(ReaderTheme),
+  readerTableStyle: Schema.optionalKey(ReaderTableStyle),
+  readerZoom: Schema.optionalKey(ReaderZoom),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

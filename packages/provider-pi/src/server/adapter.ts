@@ -43,6 +43,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
 import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
+import { buildResponseLanguageInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { parsePiCompactCommand, type PiCompactCommand } from "./commands.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -74,7 +75,11 @@ import {
   materializePiT3McpExtension,
   resolvePiLaunchArgs,
 } from "./mcpInjection.ts";
-import { PI_FILE_CHANGE_TOOLS, PI_T3_SERVICE_TIER_COMMAND } from "./mcpExtensionSource.ts";
+import {
+  PI_FILE_CHANGE_TOOLS,
+  PI_T3_RESPONSE_LANGUAGE_COMMAND,
+  PI_T3_SERVICE_TIER_COMMAND,
+} from "./mcpExtensionSource.ts";
 import { PI_STANDARD_SERVICE_TIER } from "./modelCapabilities.ts";
 
 export const PI_PROVIDER = ProviderDriverKind.make("pi");
@@ -610,6 +615,8 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
       // Pi reloads extensions (resetting the tier) on paths the adapter cannot see, so a chosen tier
       // is resent every turn; Standard sends a clear only when an earlier tier may still be set.
       let serviceTierMayBeSet = false;
+      // Same reload hazard as the tier: a set language is resent every turn.
+      let responseLanguageMayBeSet = false;
       let appliedSessionName: string | null = null;
       const outOfTurnExtensionErrors: Array<PiRpcRecord> = [];
       let lastKnownLeaf: string | null = null;
@@ -2981,6 +2988,24 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         }
       });
 
+      const applyResponseLanguage = Effect.fnUntraced(function* () {
+        const instructions = yield* host.settings.get.pipe(
+          Effect.map((settings) => buildResponseLanguageInstructions(settings.responseLanguage)),
+          Effect.orElseSucceed(() => ""),
+        );
+        if (instructions === "" && !responseLanguageMayBeSet) return;
+        responseLanguageMayBeSet = true;
+        const result = yield* request({
+          type: "prompt",
+          message: `/${PI_T3_RESPONSE_LANGUAGE_COMMAND} ${instructions}`.trimEnd(),
+        });
+        const disposition = recordString(result, "disposition");
+        if (disposition !== undefined && disposition !== "handled") {
+          return yield* protocolError("T3 Code's Pi extension did not apply the response language");
+        }
+        responseLanguageMayBeSet = instructions !== "";
+      });
+
       const resolvePromptPayload = Effect.fnUntraced(function* (
         text: string,
         attachments: ReadonlyArray<ChatAttachment>,
@@ -3095,7 +3120,10 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             const continuation =
               turnInput.message.createdBy === "agent" &&
               turnInput.message.creationSource === "provider";
-            if (!continuation) yield* applySelection(turnInput.modelSelection);
+            if (!continuation) {
+              yield* applySelection(turnInput.modelSelection);
+              yield* applyResponseLanguage();
+            }
             if (turnInput.appThread.title !== appliedSessionName) {
               yield* request({
                 type: "set_session_name",

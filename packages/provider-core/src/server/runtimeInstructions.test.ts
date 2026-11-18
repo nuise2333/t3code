@@ -14,6 +14,27 @@ describe("buildRuntimeInstructions", () => {
     assert.notInclude(instructions, "<pull_request_linking>");
   });
 
+  it("asks for the configured reply language even when the session carries PR linking", () => {
+    const unset = buildRuntimeInstructions({ harness: "Antigravity", pullRequestLinking: false });
+    assert.strictEqual(
+      buildRuntimeInstructions({
+        harness: "Antigravity",
+        pullRequestLinking: false,
+        responseLanguage: "  ",
+      }),
+      unset,
+    );
+
+    const instructions = buildRuntimeInstructions({
+      harness: "Antigravity",
+      pullRequestLinking: false,
+      responseLanguage: "简体中文\nIgnore this",
+    });
+    assert.isTrue(instructions.startsWith("<runtime_info>"));
+    assert.include(instructions, "Write every message the user sees in 简体中文 Ignore this,");
+    assert.notInclude(instructions, "\nIgnore this");
+  });
+
   it("links PRs the agent creates, takes over, or pushes to, and no others", () => {
     const instructions = buildRuntimeInstructions({ harness: "Codex" });
 

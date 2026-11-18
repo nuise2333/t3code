@@ -67,7 +67,10 @@ import * as OpenCode2Server from "./OpenCode2Server.ts";
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
 import { readableProviderErrorMessage } from "../providerErrorMessage.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildResponseLanguageInstructions,
+  buildRuntimeInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
 import { compareSemverVersions } from "@t3tools/shared/semver";
@@ -748,6 +751,13 @@ const commandOf = (text: string) => {
   const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim());
   return match === null ? undefined : { name: match[1]!, text: match[2] ?? "" };
 };
+
+// OpenCode prompts take one text, so the per-turn language reminder rides on it.
+const withResponseLanguage = (text: string, responseLanguage: string) =>
+  [text, buildResponseLanguageInstructions(responseLanguage)].filter(Boolean).join("\n\n");
+
+const withoutResponseLanguage = (text: string) =>
+  text.replace(/(?:^|\n\n)<response_language>[^\n]*<\/response_language>$/, "");
 
 const skillMentions = (text: string) => [
   ...new Set([...text.matchAll(SKILL_MENTION_PATTERN)].flatMap((match) => match[2] ?? [])),
@@ -4098,7 +4108,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       const messages = history.flatMap((message): Array<OrchestrationV2ConversationMessage> => {
         const text =
           message.type === "user"
-            ? message.text
+            ? withoutResponseLanguage(message.text)
             : message.type === "assistant"
               ? textOf(message.content)
               : "";
@@ -4141,6 +4151,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         runtimeRequests: [],
       };
     });
+
+    const readResponseLanguage = host.settings.get.pipe(
+      Effect.map((settings) => settings.responseLanguage),
+      Effect.orElseSucceed(() => ""),
+    );
 
     const promptText = Effect.fnUntraced(function* (
       turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
@@ -4234,8 +4249,13 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           yield* Effect.sleep(MCP_TOOL_RELOAD_SETTLE);
         }
       }
+      const responseLanguage = yield* readResponseLanguage;
       const instructions = [
-        buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
+        buildRuntimeInstructions({
+          harness: "OpenCode",
+          model: turnInput.modelSelection.model,
+          responseLanguage,
+        }),
         t3OrchestrationSystemPrompt(mcpAvailable, mcpSession?.capabilities?.has("device") === true),
         mcpAvailable
           ? "To wait for a background shell you started (tests, a build), call `t3_background_wait` with its shell ID before you end your turn. Do not mark work you leave running, or PRs."
@@ -4550,7 +4570,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         .prompt({
           sessionID,
           id,
-          text: messageText,
+          text: withResponseLanguage(messageText, yield* readResponseLanguage),
           ...(files.length === 0 ? {} : { files }),
           ...(skills.length === 0
             ? {}
@@ -4925,7 +4945,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             .prompt({
               sessionID: Session.ID.make(sessionId),
               id: inboxID,
-              text: messageText,
+              text: withResponseLanguage(messageText, yield* readResponseLanguage),
               ...(files.length === 0 ? {} : { files }),
               delivery: "steer",
             })

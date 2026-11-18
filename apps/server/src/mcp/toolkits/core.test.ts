@@ -638,6 +638,7 @@ it("keeps MCP preference output allowlisted and Unicode-bounded", () => {
   const settings = {
     ...DEFAULT_SERVER_SETTINGS,
     privateCredential: "must-not-escape",
+    responseLanguage: "简体中文",
     sourceControlWritingStyle: {
       ...DEFAULT_SERVER_SETTINGS.sourceControlWritingStyle,
       customInstructions: "🙂".repeat(4001),
@@ -646,6 +647,7 @@ it("keeps MCP preference output allowlisted and Unicode-bounded", () => {
   const result = EnvironmentHandlers.preferences(settings);
   expect(result).not.toHaveProperty("privateCredential");
   expect(result).not.toHaveProperty("providers");
+  expect(result.responseLanguage).toBe("简体中文");
   expect(result.sourceControlWritingStyle).toMatchObject({
     customInstructions: "🙂".repeat(4000),
     truncated: true,

@@ -8,6 +8,7 @@ export const T3_MCP_BEARER_ENV = "T3_MCP_BEARER_TOKEN";
 export const T3_PI_RUNTIME_MODE_ENV = "T3_PI_RUNTIME_MODE";
 export const T3_PI_MCP_EXTENSION_PATH_ENV = "T3_PI_MCP_EXTENSION_PATH";
 export const PI_T3_SERVICE_TIER_COMMAND = "t3-service-tier";
+export const PI_T3_RESPONSE_LANGUAGE_COMMAND = "t3-response-language";
 
 // These tools trigger file-change approvals, bypassed by Auto-accept edits.
 export const PI_FILE_CHANGE_TOOLS = ["edit", "write"] as const;
@@ -25,6 +26,7 @@ const RUNTIME_MODE_ENV = ${JSON.stringify(T3_PI_RUNTIME_MODE_ENV)};
 const EXTENSION_PATH_ENV = ${JSON.stringify(T3_PI_MCP_EXTENSION_PATH_ENV)};
 const ORCHESTRATION_INSTRUCTIONS = ${JSON.stringify(T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim())};
 const SERVICE_TIER_COMMAND = ${JSON.stringify(PI_T3_SERVICE_TIER_COMMAND)};
+const RESPONSE_LANGUAGE_COMMAND = ${JSON.stringify(PI_T3_RESPONSE_LANGUAGE_COMMAND)};
 const PROTOCOL = "2025-06-18";
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const FILE_CHANGE_TOOLS = new Set(${JSON.stringify(PI_FILE_CHANGE_TOOLS)});
@@ -307,6 +309,15 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     },
   });
 
+  // T3 sends the rendered response-language block before each turn; empty clears it.
+  let responseLanguage = "";
+  pi.registerCommand(RESPONSE_LANGUAGE_COMMAND, {
+    description: "Set the reply language instructions T3 Code adds to the system prompt",
+    handler: async (args) => {
+      responseLanguage = args.trim();
+    },
+  });
+
   pi.on("before_provider_request", (event, ctx) => {
     const payload = event.payload;
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return;
@@ -495,13 +506,21 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // Keep guidance in the system prompt so leading slash commands still expand.
   pi.on("before_agent_start", (event, ctx) => {
     reconcileDiscovery(ctx);
+    const instructions = responseLanguage
+      ? ORCHESTRATION_INSTRUCTIONS + "\\n\\n" + responseLanguage
+      : ORCHESTRATION_INSTRUCTIONS;
+    // Long threads drift from the system prompt, so the block also follows each prompt. Pi keeps it
+    // as a hidden custom message, which T3's user/assistant readback skips.
+    const reminder = responseLanguage
+      ? { message: { customType: "t3_response_language", content: responseLanguage, display: false } }
+      : undefined;
     const sections = event.systemPromptOptions?.sections;
     if (sections && typeof sections === "object" && event.systemPromptOptions?.forceSystemPrompt === undefined) {
       // A full prompt override bypasses Pi's later section rendering.
-      sections.t3_code_orchestration = ORCHESTRATION_INSTRUCTIONS;
-      return undefined;
+      sections.t3_code_orchestration = instructions;
+      return reminder;
     }
-    return { systemPrompt: event.systemPrompt + "\\n\\n" + ORCHESTRATION_INSTRUCTIONS };
+    return { systemPrompt: event.systemPrompt + "\\n\\n" + instructions, ...reminder };
   });
 }
 `;

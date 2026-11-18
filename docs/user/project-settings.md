@@ -190,6 +190,10 @@ resolve in one order: a project override, then the environment setting, then `t3
 built-in default. Leave a setting on **Inherit** to let the next tier decide.
 Browser access changes apply when an agent session next starts.
 
+To have agents reply in another language, enter it in **Settings → Threads → New threads →
+Response language**, such as `简体中文`. It applies to the whole environment from each agent's next
+turn; leave it empty to let agents choose.
+
 New worktrees initialize git submodules recursively. If that step is slow because the repository
 declares many nested submodules, set **Submodules** in **Settings → Worktrees** under Advanced (with the project
 selected to override it there) to **Top level only** to stop at the ones the repository declares

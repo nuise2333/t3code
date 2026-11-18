@@ -341,10 +341,10 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
       if (
         isRichTextBoldShortcut(event, window.getSelection()) &&
         event.target instanceof HTMLElement &&
-        event.target.closest('[data-composer-rich-text="true"]')
+        event.target.closest('[data-composer-rich-text="true"], [data-reader-editor]')
       ) {
-        // The rich-text composer claims Mod+B only to bold selected text;
-        // the toggle stays available everywhere else.
+        // The rich-text composer and the Markdown file editor claim Mod+B only to bold
+        // selected text; the toggle stays available everywhere else.
         return;
       }
       const command = resolveShortcutCommand(event, keybindings, {
