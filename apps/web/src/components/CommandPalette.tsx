@@ -208,6 +208,7 @@ import {
   browseInputEndPaddingClass,
   buildBrowseGroups,
   buildHostAddProjectGroups,
+  homeFolderNameQuery,
   buildRootGroups,
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
@@ -775,13 +776,15 @@ function OpenCommandPaletteDialog(props: {
         })
       : filterFilesystemBrowseEntries(browseEntries, browsePath.filterQuery);
 
-  const folderSearchText =
-    currentView?.searchesFolders === true &&
-    canBrowsePaths &&
-    !isBrowsing &&
-    addProjectCloneFlow === null
-      ? query.trim()
-      : "";
+  const searchesHostFolders =
+    currentView?.searchesFolders === true && canBrowsePaths && addProjectCloneFlow === null;
+  // `~/name` lists the home folder's matches and, below them, the same name across the host.
+  const homeFolderSearchText = isBrowsing ? homeFolderNameQuery(query) : null;
+  const folderSearchText = !searchesHostFolders
+    ? ""
+    : isBrowsing
+      ? (homeFolderSearchText ?? "")
+      : query.trim();
   const isFolderSearch = folderSearchText.length > 0;
   const { resolvedTheme } = useTheme();
   // The same OS index search as the file picker's "This computer" scope.
@@ -797,8 +800,10 @@ function OpenCommandPaletteDialog(props: {
           canReadFiles: browseAccess.canReadFiles,
         })
       : null;
-  const folderSearchAccessError =
-    folderSearchUnavailableReason ?? (isFolderSearch ? hostAddProjectSearch.error : null);
+  // While browsing, host results are extra rows; a missing index only drops them.
+  const folderSearchAccessError = isBrowsing
+    ? null
+    : (folderSearchUnavailableReason ?? (isFolderSearch ? hostAddProjectSearch.error : null));
   const isFolderSearchPending = isFolderSearch && hostAddProjectSearch.isPending;
   const folderSearchHostName = browseEnvironmentIsDesktopLocal ? "this computer" : "the host";
 
@@ -2357,7 +2362,7 @@ function OpenCommandPaletteDialog(props: {
   );
   const hasHostAddProjectQuery = /\S/.test(hostAddProjectSearch.searchedQuery);
   const folderSearchGroups =
-    folderSearchAccessError !== null
+    folderSearchAccessError !== null || (isBrowsing && folderSearchUnavailableReason !== null)
       ? []
       : buildHostAddProjectGroups({
           sections: getProjectFilePickerSections(
@@ -2534,7 +2539,17 @@ function OpenCommandPaletteDialog(props: {
   } else if (addProjectCloneFlow?.step === "confirm") {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
-    displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
+    displayedGroups = relativePathNeedsActiveProject
+      ? []
+      : [
+          ...(folderSearchGroups.length > 0
+            ? browseGroups.filter((group) => group.items.length > 0)
+            : browseGroups),
+          ...folderSearchGroups.map((group) => ({
+            ...group,
+            label: `${group.label} on ${folderSearchHostName}`,
+          })),
+        ];
   } else if (isFolderSearch) {
     displayedGroups = folderSearchGroups;
   }

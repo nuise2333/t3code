@@ -746,6 +746,16 @@ export function buildBrowseGroups(input: {
 }
 
 /** Server ranking is kept, except folders that already are projects drop to the end. */
+/**
+ * The name typed right after the prefilled `~/` in Local folder, which also searches the whole
+ * host: users type a folder's name there without clearing the home prefix first.
+ */
+export function homeFolderNameQuery(query: string): string | null {
+  const match = /^~[\\/]([^\\/]+)$/.exec(query.trim());
+  const name = match?.[1]?.trim() ?? "";
+  return name.length > 0 ? name : null;
+}
+
 /** The folder a host search row adds as a project: a folder itself, or the one holding a file. */
 export function hostSearchProjectFolder(path: string, kind: "file" | "directory"): string {
   if (kind === "directory") return path;

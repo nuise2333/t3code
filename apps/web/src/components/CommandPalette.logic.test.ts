@@ -10,6 +10,7 @@ import {
   buildLinkedThreadActionItems,
   filterPinnedBrowseEntries,
   buildHostAddProjectGroups,
+  homeFolderNameQuery,
   hostSearchProjectFolder,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
@@ -823,6 +824,20 @@ describe("buildHostAddProjectGroups", () => {
     ["C:\\a.txt", "C:\\"],
   ])("finds the folder holding %s", (path, folder) => {
     expect(hostSearchProjectFolder(path, "file")).toBe(folder);
+  });
+});
+
+describe("homeFolderNameQuery", () => {
+  it.each([
+    ["~/t3-code", "t3-code"],
+    [" ~/My Folder ", "My Folder"],
+    ["~\\Projects", "Projects"],
+    ["~/", null],
+    ["~/Projects/t3", null],
+    ["/Users/me", null],
+    ["t3-code", null],
+  ])("reads %j as %j", (query, name) => {
+    expect(homeFolderNameQuery(query)).toBe(name);
   });
 });
 
