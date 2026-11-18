@@ -29,13 +29,20 @@ const escapeAttribute = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 
 /** Rides on every lead turn, so a compacted conversation never loses it. */
-export function agentTeamLeadPrompt(team: RoutingGroup, guidance: string): string {
-  const extra = guidance.trim();
+export function agentTeamLeadPrompt(team: RoutingGroup, sharedGuidance: string): string {
+  // A team's own guidance replaces the one every team shares.
+  const extra = (team.leadGuidance?.trim() || sharedGuidance).trim();
+  const limit = team.maxParallel ?? 0;
   return [
     `<t3_code_agent_team name="${escapeAttribute(team.name)}">`,
     `You lead the agent team "${team.name}" the user picked for this thread. Plan the work, split it into self-contained tasks, and hand each to a member with \`delegate_task\`: set \`target.providerInstanceId\` and \`target.model\` to a member below and leave \`target.options\` out to use its saved settings. Independent tasks run in parallel. Check each result, then answer the user yourself. Delegate only to these members; do small steps yourself.`,
     "Members:",
     ...team.members.map(memberLabel),
+    ...(limit > 0
+      ? [
+          `At most ${limit} ${limit === 1 ? "task runs" : "tasks run"} at once; wait for a result before delegating more.`,
+        ]
+      : []),
     ...(extra === "" ? [] : ["", "Lead guidance from the user:", extra]),
     "</t3_code_agent_team>",
   ].join("\n");

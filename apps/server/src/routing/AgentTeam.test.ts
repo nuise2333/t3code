@@ -127,4 +127,16 @@ describe("agentTeamLeadPrompt", () => {
     expect(prompt).toContain("Lead guidance from the user:\nNever edit files yourself.");
     expect(agentTeamLeadPrompt(team, "")).not.toContain("Lead guidance");
   });
+
+  it("prefers the team's own guidance and states its limit", () => {
+    const own = { ...team, leadGuidance: "Only plan.", maxParallel: 2 };
+    const prompt = agentTeamLeadPrompt(own, "Shared guidance.");
+    expect(prompt).toContain("Lead guidance from the user:\nOnly plan.");
+    expect(prompt).not.toContain("Shared guidance.");
+    expect(prompt).toContain("At most 2 tasks run at once");
+    // Empty guidance and an unlimited team fall back to the shared text and say no limit.
+    const plain = agentTeamLeadPrompt({ ...team, leadGuidance: "", maxParallel: 0 }, "Shared.");
+    expect(plain).toContain("Lead guidance from the user:\nShared.");
+    expect(plain).not.toContain("At most");
+  });
 });

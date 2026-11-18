@@ -133,6 +133,15 @@ export const RoutingGroup = Schema.Struct({
    * lists teams apart from groups; the server keeps the key when a client saves a group without it.
    */
   team: Schema.optionalKey(Schema.Literal(true)),
+  /**
+   * A team's limit on tasks out at once; 0 or absent is unlimited. Clients clear it with 0, so
+   * the server keeps it when an older client saves the team without it.
+   */
+  maxParallel: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(32)),
+  ),
+  /** This team's lead guidance; empty or absent uses the setting every team shares. */
+  leadGuidance: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
 });
 export type RoutingGroup = typeof RoutingGroup.Type;
 
