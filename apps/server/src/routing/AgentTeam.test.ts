@@ -1,7 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import { ProviderInstanceId, type RouteDecision, type RoutingGroup } from "@t3tools/contracts";
 
-import { activeAgentTeam, agentTeamLeadPrompt, agentTeamTarget } from "./AgentTeam.ts";
+import {
+  activeAgentTeam,
+  agentTeamLeadPrompt,
+  agentTeamTarget,
+  autoTeamLeadPrompt,
+} from "./AgentTeam.ts";
 
 const claude = ProviderInstanceId.make("claude_fake");
 const codex = ProviderInstanceId.make("codex_fake");
@@ -36,7 +41,24 @@ const launchedOn = (
   },
 });
 
+const teamId = (active: ReturnType<typeof activeAgentTeam>) =>
+  active === null ? null : active.kind === "saved" ? active.team.id : active.id;
+
 describe("activeAgentTeam", () => {
+  it("reads an automatic team without any saved team", () => {
+    const active = activeAgentTeam({
+      routing: null,
+      agentTeam: { id: "auto-balanced", name: "Balanced team" },
+      modelSelection: { instanceId: codex, model: "gpt-fake" },
+      groups: [],
+    });
+    expect(active).toMatchObject({ kind: "auto", auto: "balanced", name: "Balanced team" });
+    if (active?.kind !== "auto") return;
+    const prompt = autoTeamLeadPrompt(active, "");
+    expect(prompt).toContain("Leave `target` out");
+    expect(prompt).toContain("best value for the cost");
+  });
+
   const lead = { instanceId: claude, model: "opus-fake" };
   const other = { instanceId: codex, model: "gpt-fake" };
 
@@ -50,7 +72,7 @@ describe("activeAgentTeam", () => {
         groups: [team],
         ...input,
       });
-    expect(leads({})?.id).toBe("reviewers");
+    expect(teamId(leads({}))).toBe("reviewers");
     // Picking another model leaves the team.
     expect(leads({ modelSelection: other })).toBeNull();
     // A deleted team, or a group that was not a team at launch, leads nothing.
@@ -64,8 +86,14 @@ describe("activeAgentTeam", () => {
     const turnedOn = { id: "reviewers", name: "Reviewers" };
     // Turned on in a thread that launched on its own: whichever model the thread runs leads.
     expect(
-      activeAgentTeam({ routing: null, agentTeam: turnedOn, modelSelection: other, groups: [team] })
-        ?.id,
+      teamId(
+        activeAgentTeam({
+          routing: null,
+          agentTeam: turnedOn,
+          modelSelection: other,
+          groups: [team],
+        }),
+      ),
     ).toBe("reviewers");
     // Turned off, even in a thread that launched through the team.
     expect(

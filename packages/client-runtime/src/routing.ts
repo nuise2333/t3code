@@ -417,7 +417,7 @@ export function routedGroupDisplay(input: {
     return {
       groupName: input.agentTeam.name,
       team: true,
-      label: `Team ${input.agentTeam.name}, led by ${lead}`,
+      label: `${teamTitle(input.agentTeam.name)}, led by ${lead}`,
       skipped: null,
     };
   }
@@ -439,11 +439,14 @@ export function routedGroupDisplay(input: {
     team: decision.team === true,
     label:
       decision.team === true
-        ? `Team ${decision.name}, led by ${lead}`
+        ? `${teamTitle(decision.name)}, led by ${lead}`
         : `${decision.name}${decision.rank === "quota" ? " (by quota)" : ""} → ${lead}`,
     skipped: skipped.length > 0 ? `Skipped: ${skipped.join(", ")}` : null,
   };
 }
+
+/** "Team Crew", but "Balanced team" stays as it is. */
+const teamTitle = (name: string) => (/\bteam$/i.test(name) ? name : `Team ${name}`);
 
 /** A saved team the composer's Team menu offers. */
 export interface TeamChoice {
@@ -715,20 +718,23 @@ function isoOrNull(value: DateTime.Utc | null): string | null {
  */
 export function agentTeamProgress(input: {
   readonly threadId: string;
-  readonly team: Pick<RoutingGroup, "members">;
+  /** A saved team's members; null for an automatic team, whose workers T3 picks per task. */
+  readonly team: Pick<RoutingGroup, "members"> | null;
   readonly subagents: ReadonlyArray<OrchestrationV2Subagent>;
   readonly providers: ReadonlyArray<ModelNameSource>;
 }): AgentTeamProgress {
   const rows = input.subagents.flatMap((task): AgentTeamTaskRow[] => {
     if (task.threadId !== input.threadId || task.origin !== "app_owned") return [];
-    if (task.workflow !== undefined) return [];
+    if (task.workflow !== undefined || task.councilLens !== undefined) return [];
     const selection = task.modelSelection;
     const member =
       selection &&
-      input.team.members.find(
-        (candidate) =>
-          candidate.instanceId === selection.instanceId && candidate.model === selection.model,
-      );
+      (input.team === null
+        ? selection
+        : input.team.members.find(
+            (candidate) =>
+              candidate.instanceId === selection.instanceId && candidate.model === selection.model,
+          ));
     if (!member) return [];
     return [
       {

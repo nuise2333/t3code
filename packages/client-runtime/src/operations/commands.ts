@@ -204,7 +204,8 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly bootstrap?: StartThreadBootstrap;
   /** Asks the server to pick the effort for a new thread; ignored when the turn joins an existing one. */
   readonly routing?: LaunchRoutingRequest;
-  /** A new thread's token saver and Council; absent uses the user's defaults. */
+  /** A new thread's team, token saver and Council; absent uses the user's defaults. */
+  readonly agentTeam?: import("@t3tools/contracts").ThreadAgentTeam | null;
   readonly tokenSaver?: import("@t3tools/contracts").TokenSaverSettings | null;
   readonly council?: import("@t3tools/contracts").CouncilSettings | null;
   readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
@@ -821,6 +822,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       ...(input.routing === undefined ? {} : { routing: input.routing }),
       ...(input.tokenSaver === undefined ? {} : { tokenSaver: input.tokenSaver }),
       ...(input.council === undefined ? {} : { council: input.council }),
+      ...(input.agentTeam === undefined ? {} : { agentTeam: input.agentTeam }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

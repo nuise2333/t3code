@@ -52,7 +52,7 @@ export function agentTeamBannerItem(input: {
     id: "agent-team",
     variant: "default",
     icon: <UsersIcon />,
-    title: `Team ${input.name}`,
+    title: /\bteam$/i.test(input.name) ? input.name : `Team ${input.name}`,
     description: `${input.summary} · ${agentTeamTally(progress)}`,
     ...(progress.rows.length === 0
       ? {}

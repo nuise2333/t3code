@@ -1377,7 +1377,6 @@ const make = Effect.gen(function* () {
         );
       }
     }
-    if (!settings.routingGroups.some((group) => group.team === true)) return input;
     const { parent } = yield* loadThreadCaller(scope, "delegate_task");
     const team = AgentTeam.activeAgentTeam({
       routing: parent.thread.routing,
@@ -1386,15 +1385,40 @@ const make = Effect.gen(function* () {
       groups: settings.routingGroups,
     });
     if (team === null) return input;
+    const teamName = AgentTeam.activeTeamName(team);
     if (input.routingGroupId !== undefined) {
       return yield* failure(
         "invalid_request",
-        `This thread leads the agent team "${team.name}"; omit routingGroupId and target one of its members.`,
+        `This thread leads the agent team "${teamName}"; omit routingGroupId${team.kind === "saved" ? " and target one of its members" : ""}.`,
       );
     }
-    const fitted = AgentTeam.agentTeamTarget(team, input.target);
+    if (team.kind === "auto") {
+      // The lead named a model, as the user may ask; otherwise T3 picks one for the task.
+      if (input.target?.model !== undefined || input.target?.environmentId !== undefined) {
+        return input;
+      }
+      const picked = yield* routingPolicy.routeTeamWorker({
+        kind: team.auto,
+        prompt: input.task,
+        interactionMode: parent.thread.interactionMode,
+        runtimeMode: parent.thread.runtimeMode,
+        projectId: parent.thread.projectId,
+        runnableInstanceIds: yield* loadOrchestrationCapableInstanceIds(),
+      });
+      return picked === null
+        ? input
+        : {
+            ...input,
+            target: {
+              ...input.target,
+              providerInstanceId: picked.instanceId,
+              model: picked.model,
+            },
+          };
+    }
+    const fitted = AgentTeam.agentTeamTarget(team.team, input.target);
     if (!fitted.ok) return yield* failure("invalid_request", fitted.message);
-    const limit = team.maxParallel ?? 0;
+    const limit = team.team.maxParallel ?? 0;
     if (limit > 0 && input.councilLens === undefined) {
       const { subagents } = yield* threadManagement
         .getThreadRecords(parent.thread.id, ["subagents"])
@@ -1409,7 +1433,7 @@ const make = Effect.gen(function* () {
       if (out >= limit) {
         return yield* failure(
           "invalid_request",
-          `The agent team "${team.name}" runs at most ${limit} ${limit === 1 ? "task" : "tasks"} at once, and ${out} ${out === 1 ? "is" : "are"} still running. End your turn; a finished task's result wakes you to delegate the next.`,
+          `The agent team "${teamName}" runs at most ${limit} ${limit === 1 ? "task" : "tasks"} at once, and ${out} ${out === 1 ? "is" : "are"} still running. End your turn; a finished task's result wakes you to delegate the next.`,
         );
       }
     }
@@ -2729,12 +2753,15 @@ const make = Effect.gen(function* () {
           ? {}
           : {
               agentTeam: {
-                name: agentTeam.name,
-                members: agentTeam.members.map((member) => ({
-                  providerInstanceId: member.instanceId,
-                  model: member.model,
-                  ...(member.options === undefined ? {} : { options: [...member.options] }),
-                })),
+                name: AgentTeam.activeTeamName(agentTeam),
+                // An automatic team's workers are picked per task, so it lists none.
+                members: (agentTeam.kind === "saved" ? agentTeam.team.members : []).map(
+                  (member) => ({
+                    providerInstanceId: member.instanceId,
+                    model: member.model,
+                    ...(member.options === undefined ? {} : { options: [...member.options] }),
+                  }),
+                ),
               },
             }),
         features: {

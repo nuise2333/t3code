@@ -4,7 +4,10 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
 import { CircleAlertIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
-import { ComposerTeamSetup } from "./ComposerTeamSetup";
+import { ComposerTeamMenu } from "./ComposerTeamMenu";
+import { draftThreadAssistsAtom } from "./threadAssistsDraft";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { useAtomValue } from "@effect/atom-react";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { ComposerThreadAssists, type ThreadAssistsState } from "./ComposerThreadAssists";
 import { ComposerControl } from "./ComposerControl";
@@ -19,6 +22,7 @@ import {
   autoRoutingNote,
   routedEffortDisplay,
   pickerRoutingGroups,
+  agentTeamSummary,
   routingProviderSource,
   routedGroupDisplay,
   routedModelDisplay,
@@ -29,6 +33,8 @@ import {
   type ModelSelection,
   type RouteDecision,
   type RoutingGroup,
+  AUTO_TEAMS,
+  type AutoTeamKind,
   type ThreadAgentTeam,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -341,6 +347,11 @@ export function ComposerControlsBar(props: {
   const serverThreadId = routeKind === "server" ? routeThreadRef?.threadId : undefined;
   const savedGroups = serverConfig?.settings.routingGroups ?? [];
   const savedTeams = savedGroups.filter((group) => group.team === true);
+  // A draft's automatic team (or none) waits on the draft; a saved team is its routing group.
+  const draftAssistsAtom = draftThreadAssistsAtom(routeKind === "draft" && draftId ? draftId : "");
+  const draftAssists = useAtomValue(draftAssistsAtom);
+  const defaultAutoTeam =
+    AUTO_TEAMS.find((team) => team.kind === serverConfig?.settings.agentTeamDefault) ?? null;
   const activeTeam =
     routeKind === "server"
       ? teamsCapability
@@ -352,7 +363,56 @@ export function ComposerControlsBar(props: {
         : null
       : pickedGroup?.team
         ? { id: pickedGroup.id, name: pickedGroup.name }
-        : null;
+        : draftAssists.agentTeam !== undefined
+          ? draftAssists.agentTeam
+          : defaultAutoTeam && { id: defaultAutoTeam.id, name: defaultAutoTeam.name };
+  const setDraftTeam = (agentTeam: ThreadAgentTeam | null) =>
+    appAtomRegistry.set(draftAssistsAtom, { ...appAtomRegistry.get(draftAssistsAtom), agentTeam });
+  const setThreadTeam = (agentTeam: ThreadAgentTeam | null) => {
+    if (serverThreadId === undefined) return;
+    void updateThreadMetadata({
+      environmentId,
+      input: { threadId: serverThreadId, agentTeam },
+    });
+  };
+  const teamChoices = savedTeams.map((team) => ({
+    id: team.id,
+    name: team.name,
+    summary: agentTeamSummary(team, team.members[0], providerModels),
+  }));
+  // An automatic kind is remembered for new threads; No team forgets it.
+  const selectAutoTeam = useStableCallback((kind: AutoTeamKind) => {
+    const team = AUTO_TEAMS.find((candidate) => candidate.kind === kind);
+    if (!team) return;
+    const ref = { id: team.id, name: team.name };
+    updateSettings({ agentTeamDefault: kind });
+    if (routeKind !== "server") {
+      if (pickedGroup?.team) clearPickedGroup();
+      setDraftTeam(ref);
+      return;
+    }
+    setThreadTeam(ref);
+  });
+  const selectNoTeam = useStableCallback(() => {
+    updateSettings({ agentTeamDefault: null });
+    if (routeKind !== "server") {
+      if (pickedGroup?.team) clearPickedGroup();
+      setDraftTeam(null);
+      return;
+    }
+    setThreadTeam(null);
+  });
+  // A saved team picked here keeps the thread's model as its lead; the setup can change it.
+  const selectSavedTeam = useStableCallback((teamId: string) => {
+    const team = savedTeams.find((candidate) => candidate.id === teamId);
+    if (!team) return;
+    if (routeKind !== "server") {
+      handleRoutingGroupSelect(team.id);
+      setDraftTeam({ id: team.id, name: team.name });
+      return;
+    }
+    setThreadTeam({ id: team.id, name: team.name });
+  });
   const teamDisabledReason =
     multipleModelSelections !== null ? "Pick one model to work as a team." : null;
   // The setup saves teams in place, keeping every plain routing group as it was.
@@ -366,6 +426,7 @@ export function ComposerControlsBar(props: {
     if (!architect) return;
     if (routeKind !== "server") {
       if (draftId) setRoutingGroup(draftId, { id: team.id, placeholder: architect });
+      setDraftTeam({ id: team.id, name: team.name });
       return;
     }
     if (serverThreadId === undefined) return;
@@ -381,22 +442,17 @@ export function ComposerControlsBar(props: {
       input: { threadId: serverThreadId, agentTeam: { id: team.id, name: team.name } },
     });
   });
-  const disableTeam = useStableCallback(() => {
-    if (routeKind !== "server") {
-      clearPickedGroup();
-      return;
-    }
-    if (serverThreadId === undefined) return;
-    void updateThreadMetadata({
-      environmentId,
-      input: { threadId: serverThreadId, agentTeam: null },
-    });
-  });
+  const disableTeam = selectNoTeam;
   const showTeamControl =
     teamsCapability && (routeKind === "server" ? serverThreadId !== undefined : Boolean(draftId));
   const teamControl = showTeamControl ? (
-    <ComposerTeamSetup
+    <ComposerTeamMenu
       teams={savedTeams}
+      teamChoices={teamChoices}
+      onSelectAuto={selectAutoTeam}
+      onSelectTeam={selectSavedTeam}
+      onSelectNone={selectNoTeam}
+      hidden={composerControlsHidden}
       active={activeTeam}
       newThread={routeKind !== "server"}
       entries={providerInstanceEntries}

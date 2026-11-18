@@ -19,6 +19,7 @@ import {
 
 import {
   chooseAutoModel,
+  chooseTeamWorkerModel,
   crossVendorModel,
   classifyTask,
   isFrontendPrompt,
@@ -2179,6 +2180,31 @@ describe("chooseAutoModel", () => {
         now: NOW,
       }),
     ).toEqual(picks);
+  });
+
+  it("picks automatic team workers: cheapest that passes, one tier up, or the strongest", () => {
+    const worker = (kind: "cheap" | "balanced" | "best", providers = [claude(), codex()]) =>
+      chooseTeamWorkerModel({
+        kind,
+        table: tableOf(ROWS),
+        taskClass: "implement",
+        providers,
+        settings: settingsFor(providers),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    // Implementation wants tier A: Sol is the cheapest A; Opus is the only S.
+    expect(worker("cheap")).toStrictEqual({ instanceId: codexId, model: "model-sol" });
+    expect(worker("balanced")).toStrictEqual({ instanceId: claudeId, model: "model-opus" });
+    expect(worker("best")).toStrictEqual({ instanceId: claudeId, model: "model-opus" });
+    // Without an S model, Balanced settles for the task's own tier.
+    expect(worker("balanced", [codex()])).toStrictEqual({
+      instanceId: codexId,
+      model: "model-sol",
+    });
+    expect(worker("best", [])).toBeUndefined();
   });
 
   it("drops the old selection's options and keeps them when it stays", () => {

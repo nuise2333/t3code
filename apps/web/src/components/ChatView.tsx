@@ -48,16 +48,21 @@ import { RightPanelSurfaceContent } from "./chat/RightPanelSurfaceContent";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
-import type { ScopedProjectRef, UsageLimitSourceSnapshots } from "@t3tools/contracts";
+import {
+  AUTO_TEAMS,
+  type ScopedProjectRef,
+  type UsageLimitSourceSnapshots,
+} from "@t3tools/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import {
   agentTeamProgress,
   agentTeamSummary,
   higherEffortRetry,
   rootCausePrompt,
+  routingMemberLabel,
   routingProviderSource,
 } from "@t3tools/client-runtime/routing";
-import { threadAgentTeam } from "@t3tools/shared/agentTeam";
+import { threadAgentTeam, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
 import { councilApplies, councilStatus, councilUserMessageTimes } from "@t3tools/shared/council";
 import { councilBannerItem } from "./chat/CouncilStrip";
 import { agentTeamBannerItem } from "./chat/AgentTeamStrip";
@@ -2736,28 +2741,41 @@ export default function ChatView(props: ChatViewProps) {
           council: serverProjection.thread.council,
           councilApplies: councilApplies(serverProjection.thread),
         };
-  const leadTeam =
+  const teamRef =
     isServerThread &&
     serverProjection !== null &&
     serverConfig?.environment.capabilities.agentTeams === true
-      ? threadAgentTeam({
+      ? threadAgentTeamRef({
           routing: serverProjection.thread.routing,
           agentTeam: serverProjection.thread.agentTeam,
           modelSelection: serverProjection.thread.modelSelection,
-          groups: serverConfig.settings.routingGroups ?? [],
         })
       : null;
+  const autoTeam = teamRef === null ? undefined : AUTO_TEAMS.find((team) => team.id === teamRef.id);
+  const savedTeam =
+    teamRef === null || autoTeam !== undefined || serverProjection === null
+      ? null
+      : threadAgentTeam({
+          routing: serverProjection.thread.routing,
+          agentTeam: serverProjection.thread.agentTeam,
+          modelSelection: serverProjection.thread.modelSelection,
+          groups: serverConfig?.settings.routingGroups ?? [],
+        });
   const agentTeamItems: ComposerBannerStackItem[] = (() => {
-    if (leadTeam === null || serverProjection === null) return [];
+    if (serverProjection === null || (autoTeam === undefined && savedTeam === null)) return [];
     const nowMs = Date.parse(nowMinute);
     const providers = providerStatuses.map((provider) => routingProviderSource(provider, nowMs));
+    const lead = routingMemberLabel(serverProjection.thread.modelSelection, providers);
     return [
       agentTeamBannerItem({
-        name: leadTeam.name,
-        summary: agentTeamSummary(leadTeam, serverProjection.thread.modelSelection, providers),
+        name: autoTeam?.name ?? savedTeam?.name ?? "",
+        summary:
+          autoTeam !== undefined
+            ? `${lead} leads; T3 picks each worker (${autoTeam.description.toLowerCase()})`
+            : agentTeamSummary(savedTeam!, serverProjection.thread.modelSelection, providers),
         progress: agentTeamProgress({
           threadId: serverProjection.thread.id,
-          team: leadTeam,
+          team: savedTeam,
           subagents: serverProjection.subagents,
           providers,
         }),

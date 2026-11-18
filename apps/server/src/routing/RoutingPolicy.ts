@@ -1,4 +1,5 @@
 import {
+  type AutoTeamKind,
   type CrossVendorModelInput,
   type CrossVendorModelResult,
   type LaunchRoutingRequest,
@@ -19,6 +20,7 @@ import { isReasoningSelect } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   chooseAutoModel,
+  chooseTeamWorkerModel,
   classifyTask,
   crossVendorModel,
   isFrontendPrompt,
@@ -118,6 +120,15 @@ export interface RoutingDelegationInput {
   readonly runnableInstanceIds: ReadonlySet<ProviderInstanceId>;
 }
 
+export interface RoutingTeamWorkerInput {
+  readonly kind: AutoTeamKind;
+  readonly prompt: string;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly runtimeMode: RuntimeMode;
+  readonly projectId: ProjectId | null;
+  readonly runnableInstanceIds: ReadonlySet<ProviderInstanceId>;
+}
+
 export interface RoutedSelection {
   readonly selection: ModelSelection;
   readonly decision: RouteDecision;
@@ -137,6 +148,10 @@ export class RoutingPolicy extends Context.Service<
     readonly routeDelegation: (
       input: RoutingDelegationInput,
     ) => Effect.Effect<RoutedSelection | null>;
+    /** An automatic team's worker for this task; null when no model qualifies or it fails. */
+    readonly routeTeamWorker: (
+      input: RoutingTeamWorkerInput,
+    ) => Effect.Effect<ModelSelection | null>;
     /** A user's own ask, so Auto's switches do not apply; null when nothing qualifies or it fails. */
     readonly crossVendorModel: (
       input: CrossVendorModelInput,
@@ -504,10 +519,35 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  const routeTeamWorker = Effect.fn("RoutingPolicy.routeTeamWorker")(
+    function* (input: RoutingTeamWorkerInput) {
+      const settings = yield* serverSettings.getSettings;
+      const chosen = chooseTeamWorkerModel({
+        kind: input.kind,
+        table: ModelManifest.resolveRoutingTable(yield* manifest.current),
+        taskClass: classifyTask(input).taskClass,
+        providers: yield* providerRegistry.getProviders,
+        settings,
+        projectId: input.projectId,
+        runtimeMode: input.runtimeMode,
+        interactionMode: input.interactionMode,
+        runnableInstanceIds: input.runnableInstanceIds,
+        now: DateTime.toEpochMillis(yield* DateTime.now),
+      });
+      return chosen?.selection ?? null;
+    },
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Team worker routing failed; the lead names a model.", cause).pipe(
+        Effect.as(null),
+      ),
+    ),
+  );
+
   return RoutingPolicy.of({
     decide,
     resolveGroup,
     routeDelegation,
+    routeTeamWorker,
     crossVendorModel: crossVendor,
   });
 });

@@ -15,7 +15,9 @@ import {
   type OrchestrationV2ThreadProjection,
   type ProviderDriverKind,
   type LaunchRoutingRequest,
+  AUTO_TEAMS,
   type CouncilSettings,
+  type ThreadAgentTeam,
   type TokenSaverSettings,
   type ProviderInteractionMode,
   ProjectId,
@@ -99,6 +101,8 @@ export interface ThreadLaunchInput {
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   /** Auto effort or a routing group; every other launch keeps its selection. */
   readonly routing?: LaunchRoutingRequest | undefined;
+  /** Absent uses the user's default team kind for a thread the user starts; null none. */
+  readonly agentTeam?: ThreadAgentTeam | null | undefined;
   /** Absent uses the user's default for a thread the user starts; null starts it off. */
   readonly tokenSaver?: TokenSaverSettings | null | undefined;
   /** Absent uses the user's default for a thread the user starts; null starts it off. */
@@ -277,7 +281,9 @@ const make = Effect.gen(function* () {
     const defaults =
       input.createdBy === "user" &&
       input.delegatedFrom === undefined &&
-      (input.tokenSaver === undefined || input.council === undefined)
+      (input.tokenSaver === undefined ||
+        input.council === undefined ||
+        input.agentTeam === undefined)
         ? yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null))
         : null;
     const tokenSaver =
@@ -293,8 +299,16 @@ const make = Effect.gen(function* () {
               reviewers: councilDefaults.reviewers,
             }
           : null;
+    const defaultTeam = AUTO_TEAMS.find((team) => team.kind === defaults?.agentTeamDefault);
+    const agentTeam =
+      input.agentTeam !== undefined
+        ? input.agentTeam
+        : defaultTeam === undefined
+          ? null
+          : { id: defaultTeam.id, name: defaultTeam.name };
     const now = DateTime.toEpochMillis(yield* DateTime.now);
     return {
+      ...(agentTeam === null ? {} : { agentTeam }),
       ...(tokenSaver === null || tokenSaver.packs.length === 0
         ? {}
         : { tokenSaver: { ...tokenSaver, changedAt: now } }),

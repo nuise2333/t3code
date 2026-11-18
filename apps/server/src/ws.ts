@@ -2189,6 +2189,7 @@ export const layerWsRpc = (
                             ? {}
                             : { tokenSaver: input.tokenSaver }),
                           ...(input.council === undefined ? {} : { council: input.council }),
+                          ...(input.agentTeam === undefined ? {} : { agentTeam: input.agentTeam }),
                           ...(input.initialMessage === undefined
                             ? {}
                             : {
