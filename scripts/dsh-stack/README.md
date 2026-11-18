@@ -16,6 +16,13 @@ pack on most coding requests. `scripts/dsh-acp-presets.test.mjs` fails when the
 `ds-*` names in the preset and `skills/` disagree; route any new upstream skill after a refresh. Use the highest reasoning effort the model offers for planning
 and review; upstream says it "matters more than any skill".
 
+The DeepSeek Harness desktop app gets the same mode from a local bundle. Run
+`node scripts/dsh-stack/sync-desktop.mjs` after changing the preset or the
+skills, then restart the app. The script copies both into the bundle, registers
+it in the desktop profile on first run, and reports when nothing changed. The
+desktop app manages that profile itself and rejects `dsh plugin`, so the script
+writes the profile's manifest, lockfile and link directly.
+
 The skills are vendored (upstream commit `d4f1ebe72e8314c3a0c6135bb82f623c650f7218`,
 2026-10-28, MIT) so the preset works offline and cannot drift with a network
 fetch. To refresh them:
@@ -24,7 +31,7 @@ fetch. To refresh them:
 git clone --depth 1 https://github.com/aicodeking/deepseek-stack.git /tmp/deepseek-stack
 cp -R /tmp/deepseek-stack/skills/. scripts/dsh-stack/skills/
 cp /tmp/deepseek-stack/LICENSE scripts/dsh-stack/LICENSE
-# Update the commit above, then review the diff.
+# Update the commit above, review the diff, then rerun sync-desktop.mjs.
 ```
 
 `LICENSE` is the upstream MIT license. The skill text is upstream content; the

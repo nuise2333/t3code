@@ -30,6 +30,7 @@
         "fixtures/*/*.js",
         // bin/dsh, the DSH ACP launcher, runs this by path.
         "dsh-acp.mjs",
+        "dsh-stack/sync-desktop.mjs",
         "knip-schemas.ts",
         "linux-after-pack.ts",
         "mobile-behavior/run.ts",
