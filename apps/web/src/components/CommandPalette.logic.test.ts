@@ -9,7 +9,8 @@ import {
   buildThreadActionItems,
   buildLinkedThreadActionItems,
   filterPinnedBrowseEntries,
-  buildFolderSearchGroups,
+  buildHostAddProjectGroups,
+  hostSearchProjectFolder,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
   resolveAddProjectEntry,
@@ -779,30 +780,49 @@ describe("buildThreadActionItems", () => {
   });
 });
 
-describe("buildFolderSearchGroups", () => {
-  it("keeps the server ranking but lists folders that are already projects last", async () => {
+describe("buildHostAddProjectGroups", () => {
+  const match = (path: string) => ({
+    name: path.slice(path.lastIndexOf("/") + 1),
+    nameMatchRanges: [],
+    path,
+    pathMatchRanges: [],
+  });
+
+  it("adds a folder as itself and a file as its folder, listing existing projects last", async () => {
     const addFolder = vi.fn();
-    const groups = buildFolderSearchGroups({
-      entries: [
-        { name: "t3-code", fullPath: "/h/Projects/t3-code", isGitRepository: true },
-        { name: "t3-code", fullPath: "/Volumes/T7/t3-code", isGitRepository: true },
-        { name: "t3-code-fork", fullPath: "/h/t3-code-fork", isGitRepository: false },
-      ],
+    const groups = buildHostAddProjectGroups({
+      sections: {
+        folders: [match("/h/Projects/t3-code"), match("/Volumes/T7/t3-code")],
+        files: [match("/h/notes/t3-code.md")],
+      },
       existingProjectPaths: new Set(["/h/Projects/t3-code"]),
-      repositoryIcon: null,
-      directoryIcon: null,
+      renderRow: ({ match: row }) => ({ title: row.name, icon: null }),
       addFolder,
     });
-    const items = groups[0]?.items ?? [];
-    expect(items.map((item) => item.value)).toEqual([
-      "folder-search:/Volumes/T7/t3-code",
-      "folder-search:/h/t3-code-fork",
-      "folder-search:/h/Projects/t3-code",
+    expect(groups.map((group) => [group.label, group.items.map((item) => item.value)])).toEqual([
+      [
+        "Folders",
+        [
+          "host-add-project:directory:/Volumes/T7/t3-code",
+          "host-add-project:directory:/h/Projects/t3-code",
+        ],
+      ],
+      ["Files", ["host-add-project:file:/h/notes/t3-code.md"]],
     ]);
-    const first = items[0];
-    if (first?.kind !== "action") throw new Error("expected an action item");
-    await first.run();
-    expect(addFolder).toHaveBeenCalledWith("/Volumes/T7/t3-code");
+    for (const group of groups) {
+      const item = group.items[0];
+      if (item?.kind !== "action") throw new Error("expected an action item");
+      await item.run();
+    }
+    expect(addFolder.mock.calls).toEqual([["/Volumes/T7/t3-code"], ["/h/notes"]]);
+  });
+
+  it.each([
+    ["/a.txt", "/"],
+    ["C:\\Users\\me\\a.txt", "C:\\Users\\me"],
+    ["C:\\a.txt", "C:\\"],
+  ])("finds the folder holding %s", (path, folder) => {
+    expect(hostSearchProjectFolder(path, "file")).toBe(folder);
   });
 });
 

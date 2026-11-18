@@ -206,7 +206,6 @@ import {
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
-import * as DirectorySearch from "./workspace/DirectorySearch.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -1549,7 +1548,6 @@ export const layerWsRpc = (
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
-      const directorySearch = yield* DirectorySearch.DirectorySearch;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const hostFileSearch = yield* HostFileSearch.HostFileSearch;
       const fileOperations = yield* FileOperations.FileOperations;
@@ -3021,7 +3019,6 @@ export const layerWsRpc = (
                 }),
             ),
           ),
-        [WS_METHODS.filesystemSearchDirectories]: (input) => directorySearch.search(input),
         [WS_METHODS.attachmentsCreateUploadUrl]: (input) => issueAttachmentUploadUrl(input),
         [WS_METHODS.attachmentsDelete]: (input) => deletePendingAttachment(input.attachmentId),
         [WS_METHODS.agentSessionsScan]: () => agentSessionScanner.scan,

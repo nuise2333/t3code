@@ -25,7 +25,6 @@ import {
   type ProjectId,
   type EnvironmentMachineKind,
   type FilesystemBrowseEntry,
-  type FilesystemDirectorySearchEntry,
   type KeybindingCommand,
   type SourceControlDiscoveryResult,
   type SourceControlRepositoryInfo,
@@ -33,6 +32,11 @@ import {
 } from "@t3tools/contracts";
 import { filterFilesystemBrowseEntries } from "@t3tools/client-runtime/state/filesystem";
 import { type ReactNode } from "react";
+
+import type {
+  ProjectFilePickerMatch,
+  ProjectFilePickerSections,
+} from "./files/ProjectFilePicker.logic";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 import { isSidebarHiddenThread } from "./Sidebar.logic";
@@ -742,32 +746,68 @@ export function buildBrowseGroups(input: {
 }
 
 /** Server ranking is kept, except folders that already are projects drop to the end. */
-export function buildFolderSearchGroups(input: {
-  entries: ReadonlyArray<FilesystemDirectorySearchEntry>;
+/** The folder a host search row adds as a project: a folder itself, or the one holding a file. */
+export function hostSearchProjectFolder(path: string, kind: "file" | "directory"): string {
+  if (kind === "directory") return path;
+  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  if (separator <= 0) return path.slice(0, separator + 1) || path;
+  // Keep a Windows drive root whole.
+  return /^[A-Za-z]:$/.test(path.slice(0, separator))
+    ? path.slice(0, separator + 1)
+    : path.slice(0, separator);
+}
+
+export interface HostAddProjectRow {
+  readonly match: ProjectFilePickerMatch;
+  readonly kind: "file" | "directory";
+  readonly folder: string;
+  readonly alreadyAdded: boolean;
+}
+
+/**
+ * Host search rows for Add project, in the host index's order: folders, then files, which add the
+ * folder holding them. Folders that are already projects go last.
+ */
+export function buildHostAddProjectGroups(input: {
+  sections: ProjectFilePickerSections;
   existingProjectPaths: ReadonlySet<string>;
-  repositoryIcon: ReactNode;
-  directoryIcon: ReactNode;
-  addFolder: (fullPath: string) => void | Promise<void>;
+  renderRow: (
+    row: HostAddProjectRow,
+  ) => Pick<CommandPaletteActionItem, "title" | "description" | "icon">;
+  addFolder: (path: string) => void | Promise<void>;
 }): CommandPaletteGroup[] {
-  const isExisting = (entry: FilesystemDirectorySearchEntry) =>
-    input.existingProjectPaths.has(entry.fullPath);
-  const ordered = [
-    ...input.entries.filter((entry) => !isExisting(entry)),
-    ...input.entries.filter(isExisting),
-  ];
-  const items = ordered.map((entry): CommandPaletteActionItem => ({
+  const rows = (matches: ReadonlyArray<ProjectFilePickerMatch>, kind: "file" | "directory") =>
+    matches.map((match): HostAddProjectRow => {
+      const folder = hostSearchProjectFolder(match.path, kind);
+      return { match, kind, folder, alreadyAdded: input.existingProjectPaths.has(folder) };
+    });
+  const item = (row: HostAddProjectRow): CommandPaletteActionItem => ({
     kind: "action",
-    value: `folder-search:${entry.fullPath}`,
-    searchTerms: [entry.name, entry.fullPath],
-    title: entry.name,
-    description: isExisting(entry) ? `${entry.fullPath} · Already added` : entry.fullPath,
-    icon: entry.isGitRepository ? input.repositoryIcon : input.directoryIcon,
+    value: `host-add-project:${row.kind}:${row.match.path}`,
+    searchTerms: [row.match.name, row.match.path],
+    ...input.renderRow(row),
     keepOpen: true,
     run: async () => {
-      await input.addFolder(entry.fullPath);
+      await input.addFolder(row.folder);
     },
-  }));
-  return items.length === 0 ? [] : [{ value: "folder-search", label: "Folders", items }];
+  });
+  const folders = rows(input.sections.folders, "directory");
+  const groups: CommandPaletteGroup[] = [
+    {
+      value: "host-add-project-folders",
+      label: "Folders",
+      items: [
+        ...folders.filter((row) => !row.alreadyAdded),
+        ...folders.filter((row) => row.alreadyAdded),
+      ].map(item),
+    },
+    {
+      value: "host-add-project-files",
+      label: "Files",
+      items: rows(input.sections.files, "file").map(item),
+    },
+  ];
+  return groups.filter((group) => group.items.length > 0);
 }
 
 export function filterPinnedBrowseEntries(input: {

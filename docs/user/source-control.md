@@ -155,11 +155,11 @@ publish it. If Git has no name or email on that machine, the project is created 
 first commit.
 
 To add a folder that is already on disk, choose **Local folder** under **Add Project**. Type a
-path such as `~/Projects/` to browse, or type part of a folder's name, like `pinball`, to search
-the computer for it. Search uses the system's file index (Spotlight on macOS, `locate` on Linux,
-Everything on Windows), so folders the index skips will not appear; browse to them instead.
-Repositories are listed first. Without an index, only your home folder and mounted drives are
-searched, and not inside Git repositories.
+path such as `~/Projects/` to browse, or type part of a name, like `pinball`, to search the
+computer the way **This computer** does in the file picker (`mod+p`). Folders and files are both
+listed; choosing a file adds the folder that holds it. Search reads the system's file index
+(Spotlight on macOS, `plocate` or `locate` on Linux, Everything on Windows), so locations the index
+skips will not appear; browse to them instead.
 
 Use **Add Project** in the command palette (`Cmd/Ctrl+K`) to clone a repository. Choose a hosting
 provider or paste a Git URL, then choose where to save it. Only GitHub is listed at first. To list

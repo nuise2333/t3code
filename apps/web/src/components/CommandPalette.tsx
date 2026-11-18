@@ -50,7 +50,6 @@ import {
   type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
-  type FilesystemSearchDirectoriesResult,
   SourceControlProviderKind,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   resolveEnvironmentMachineKind,
@@ -120,7 +119,15 @@ import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment, useFilesystemReadAccess } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
-import { useDebouncedValue } from "../state/queries";
+import { useHostPathSearch } from "../state/queries";
+import { useTheme } from "../hooks/useTheme";
+import { PierreEntryIcon } from "./chat/PierreEntryIcon";
+import { HighlightedFuzzyText } from "./files/ProjectFilePicker";
+import {
+  getProjectFilePickerSections,
+  PROJECT_FILE_PICKER_RESULT_LIMIT,
+  projectFilePickerHostScopeDisabledReason,
+} from "./files/ProjectFilePicker.logic";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
@@ -200,7 +207,7 @@ import {
   ADDON_ICON_CLASS,
   browseInputEndPaddingClass,
   buildBrowseGroups,
-  buildFolderSearchGroups,
+  buildHostAddProjectGroups,
   buildRootGroups,
   buildLinkedThreadActionItems,
   buildCommandPaletteRows,
@@ -284,9 +291,6 @@ import { readPullRequestListPreferences } from "~/components/pullRequest/pullReq
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
-const EMPTY_FOLDER_SEARCH_ENTRIES: FilesystemSearchDirectoriesResult["entries"] = [];
-const FOLDER_SEARCH_LIMIT = 50;
-const FOLDER_SEARCH_DEBOUNCE_MS = 120;
 const ADD_PROJECT_ENTRY_GROUP = "add-project";
 const NEW_THREAD_IN_GROUP = "projects";
 
@@ -778,42 +782,25 @@ function OpenCommandPaletteDialog(props: {
     addProjectCloneFlow === null
       ? query.trim()
       : "";
-  const debouncedFolderSearchText = useDebouncedValue(folderSearchText, FOLDER_SEARCH_DEBOUNCE_MS);
   const isFolderSearch = folderSearchText.length > 0;
-  const folderSearchQuery = useEnvironmentQuery(
-    browseAccess.canReadFiles &&
-      isFolderSearch &&
-      debouncedFolderSearchText.length > 0 &&
-      browseEnvironmentId !== null
-      ? filesystemEnvironment.searchDirectories({
-          environmentId: browseEnvironmentId,
-          input: { query: debouncedFolderSearchText, limit: FOLDER_SEARCH_LIMIT },
-        })
-      : null,
+  const { resolvedTheme } = useTheme();
+  // The same OS index search as the file picker's "This computer" scope.
+  const hostAddProjectSearch = useHostPathSearch(
+    { environmentId: browseEnvironmentId, query: isFolderSearch ? folderSearchText : null },
+    PROJECT_FILE_PICKER_RESULT_LIMIT,
   );
-  const folderSearchAccessError =
-    isFolderSearch && !browseAccess.isPending && !browseAccess.canReadFiles
-      ? (browseAccess.error ?? "This connection cannot search host folders.")
+  const browseServerConfig = browseEnvironment?.serverConfig ?? null;
+  const folderSearchUnavailableReason =
+    isFolderSearch && !browseAccess.isPending && browseServerConfig !== null
+      ? projectFilePickerHostScopeDisabledReason({
+          hostFileSearch: browseServerConfig.hostFileSearch,
+          canReadFiles: browseAccess.canReadFiles,
+        })
       : null;
-  const isFolderSearchPending =
-    isFolderSearch &&
-    folderSearchAccessError === null &&
-    (debouncedFolderSearchText !== folderSearchText || folderSearchQuery.isPending);
-  const settledFolderSearchEntries =
-    !isFolderSearchPending && folderSearchQuery.data ? folderSearchQuery.data.entries : null;
-  // Kept from earlier renders: the host index can take a second, and blanking per keystroke flickers.
-  const [previousFolderSearchEntries, setPreviousFolderSearchEntries] = useState<
-    FilesystemSearchDirectoriesResult["entries"]
-  >(EMPTY_FOLDER_SEARCH_ENTRIES);
-  if (
-    settledFolderSearchEntries !== null &&
-    settledFolderSearchEntries !== previousFolderSearchEntries
-  ) {
-    setPreviousFolderSearchEntries(settledFolderSearchEntries);
-  }
-  const shownFolderSearchEntries = !isFolderSearch
-    ? EMPTY_FOLDER_SEARCH_ENTRIES
-    : (settledFolderSearchEntries ?? previousFolderSearchEntries);
+  const folderSearchAccessError =
+    folderSearchUnavailableReason ?? (isFolderSearch ? hostAddProjectSearch.error : null);
+  const isFolderSearchPending = isFolderSearch && hostAddProjectSearch.isPending;
+  const folderSearchHostName = browseEnvironmentIsDesktopLocal ? "this computer" : "the host";
 
   const prefetchBrowsePath = async (
     partialPath: string,
@@ -1095,7 +1082,7 @@ function OpenCommandPaletteDialog(props: {
         value: `action:add-project:${environmentId}:local`,
         searchTerms: ["local", "folder", "directory", "browse"],
         title: "Local folder",
-        description: "Browse a folder on disk or search it by name",
+        description: "Browse a folder on disk or search this computer for it",
         icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
         keepOpen: true,
         run: async () => {
@@ -2368,13 +2355,40 @@ function OpenCommandPaletteDialog(props: {
       .filter((project) => project.environmentId === browseEnvironmentId)
       .map((project) => project.workspaceRoot),
   );
-  const folderSearchGroups = buildFolderSearchGroups({
-    entries: shownFolderSearchEntries,
-    existingProjectPaths,
-    repositoryIcon: <FolderGit2Icon className={ITEM_ICON_CLASS} />,
-    directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
-    addFolder: handleAddProject,
-  });
+  const hasHostAddProjectQuery = /\S/.test(hostAddProjectSearch.searchedQuery);
+  const folderSearchGroups =
+    folderSearchAccessError !== null
+      ? []
+      : buildHostAddProjectGroups({
+          sections: getProjectFilePickerSections(
+            hostAddProjectSearch.entries,
+            hostAddProjectSearch.searchedQuery,
+            "all",
+          ),
+          existingProjectPaths,
+          renderRow: ({ match, kind, folder, alreadyAdded }) => ({
+            title: (
+              <HighlightedFuzzyText
+                active={hasHostAddProjectQuery}
+                value={match.name}
+                ranges={match.nameMatchRanges}
+              />
+            ),
+            description: (
+              <>
+                <HighlightedFuzzyText
+                  active={hasHostAddProjectQuery}
+                  value={match.path}
+                  ranges={match.pathMatchRanges}
+                />
+                {kind === "file" ? ` · Adds ${folder}` : null}
+                {alreadyAdded ? " · Already added" : null}
+              </>
+            ),
+            icon: <PierreEntryIcon pathValue={match.path} kind={kind} theme={resolvedTheme} />,
+          }),
+          addFolder: handleAddProject,
+        });
   const cloneDestinationBrowseGroups = browseGroups.map((group) =>
     group.value === "directories" ? { ...group, label: "Select where to clone" } : group,
   );
@@ -3128,9 +3142,11 @@ function OpenCommandPaletteDialog(props: {
                   }
                 : isFolderSearch
                   ? {
-                      emptyStateMessage: isFolderSearchPending
-                        ? "Searching folders…"
-                        : "No folders match. Type a path like ~/ to browse instead.",
+                      emptyStateMessage: hostAddProjectSearch.queryTooShort
+                        ? `Type at least 2 characters to search ${folderSearchHostName}, or a path like ~/ to browse.`
+                        : isFolderSearchPending
+                          ? `Searching ${folderSearchHostName}…`
+                          : `No matches on ${folderSearchHostName}. Only indexed locations are searched; type a path like ~/ to browse.`,
                     }
                   : isThreadSearchPending
                     ? { emptyStateMessage: "Searching thread messages…" }

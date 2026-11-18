@@ -91,8 +91,6 @@ import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
   FilesystemBrowseError,
-  FilesystemSearchDirectoriesInput,
-  FilesystemSearchDirectoriesResult,
   FilesystemSearchHostInput,
   FilesystemSearchHostResult,
   FilesystemSearchHostError,
@@ -437,7 +435,6 @@ export const WS_METHODS = {
   shellOpenInEditor: "shell.openInEditor",
 
   filesystemBrowse: "filesystem.browse",
-  filesystemSearchDirectories: "filesystem.searchDirectories",
   filesystemGetMetadata: "filesystem.getMetadata",
   filesystemSearchHost: "filesystem.searchHost",
   filesystemFileOperation: "filesystem.fileOperation",
@@ -1460,12 +1457,6 @@ const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   error: Schema.Union([FilesystemBrowseError, EnvironmentAuthorizationError]),
 });
 
-const WsFilesystemSearchDirectoriesRpc = Rpc.make(WS_METHODS.filesystemSearchDirectories, {
-  payload: FilesystemSearchDirectoriesInput,
-  success: FilesystemSearchDirectoriesResult,
-  error: EnvironmentAuthorizationError,
-});
-
 const WsFilesystemSearchHostRpc = Rpc.make(WS_METHODS.filesystemSearchHost, {
   payload: FilesystemSearchHostInput,
   success: FilesystemSearchHostResult,
@@ -2273,7 +2264,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsMutateRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
-  WsFilesystemSearchDirectoriesRpc,
   WsFilesystemGetMetadataRpc,
   WsFilesystemSearchHostRpc,
   WsFilesystemFileOperationRpc,

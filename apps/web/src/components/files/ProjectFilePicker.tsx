@@ -59,7 +59,7 @@ interface ThreadSearchSection {
 
 const NO_THREAD_SEARCH: ThreadSearchSection = { groups: [], query: "", isPending: false };
 
-function HighlightedFuzzyText(props: {
+export function HighlightedFuzzyText(props: {
   readonly active: boolean;
   readonly ranges: ReadonlyArray<ProjectFilePickerMatchRange>;
   readonly value: string;

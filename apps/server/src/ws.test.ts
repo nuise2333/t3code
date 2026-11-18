@@ -128,7 +128,6 @@ import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
-import * as DirectorySearch from "./workspace/DirectorySearch.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as FileOperations from "./workspace/FileOperations.ts";
@@ -874,7 +873,6 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(VcsProvisioningService.VcsProvisioningService)({}),
   Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({}),
   Layer.mock(WorkspaceEntries.WorkspaceEntries)({}),
-  Layer.mock(DirectorySearch.DirectorySearch)({}),
   Layer.mock(WorkspaceFileSystem.WorkspaceFileSystem)({}),
   Layer.mock(HostFileSearch.HostFileSearch)({ backend: undefined }),
   Layer.mock(FileOperations.FileOperations)({}),

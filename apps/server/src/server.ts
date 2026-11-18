@@ -126,7 +126,6 @@ import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
-import * as DirectorySearch from "./workspace/DirectorySearch.ts";
 import * as FileOperations from "./workspace/FileOperations.ts";
 import * as HostFileSearch from "./workspace/HostFileSearch.ts";
 import * as HostTrash from "./workspace/HostTrash.ts";
@@ -551,7 +550,6 @@ const layerWorkspace = Layer.mergeAll(
   layerWorkspaceFileSystem,
   layerFileOperations,
   HostFileSearch.layer,
-  DirectorySearch.layer.pipe(Layer.provide(HostFileSearch.layer)),
 );
 
 const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(

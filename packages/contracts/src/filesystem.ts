@@ -45,28 +45,6 @@ export const FilesystemBrowseResult = Schema.Struct({
 });
 export type FilesystemBrowseResult = typeof FilesystemBrowseResult.Type;
 
-const FILESYSTEM_SEARCH_DIRECTORIES_MAX_LIMIT = 100;
-
-// Finds folders by name anywhere under the host's home directory and mounted volumes.
-export const FilesystemSearchDirectoriesInput = Schema.Struct({
-  query: TrimmedNonEmptyString.check(Schema.isMaxLength(FILESYSTEM_PATH_MAX_LENGTH)),
-  limit: PositiveInt.check(Schema.isLessThanOrEqualTo(FILESYSTEM_SEARCH_DIRECTORIES_MAX_LIMIT)),
-});
-export type FilesystemSearchDirectoriesInput = typeof FilesystemSearchDirectoriesInput.Type;
-
-export const FilesystemDirectorySearchEntry = Schema.Struct({
-  name: TrimmedNonEmptyString,
-  fullPath: TrimmedNonEmptyString,
-  isGitRepository: Schema.Boolean,
-});
-export type FilesystemDirectorySearchEntry = typeof FilesystemDirectorySearchEntry.Type;
-
-export const FilesystemSearchDirectoriesResult = Schema.Struct({
-  entries: Schema.Array(FilesystemDirectorySearchEntry),
-  truncated: Schema.Boolean,
-});
-export type FilesystemSearchDirectoriesResult = typeof FilesystemSearchDirectoriesResult.Type;
-
 export const FilesystemBrowseFailure = Schema.Literals([
   "windows_path_unsupported",
   "current_project_required",

@@ -168,7 +168,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectsCreateFromThread]: "orchestration",
   [WS_METHODS.shellOpenInEditor]: "workspace",
   [WS_METHODS.filesystemBrowse]: "workspace",
-  [WS_METHODS.filesystemSearchDirectories]: "workspace",
   [WS_METHODS.filesystemGetMetadata]: "workspace",
   [WS_METHODS.filesystemSearchHost]: "workspace",
   [WS_METHODS.filesystemFileOperation]: "workspace",

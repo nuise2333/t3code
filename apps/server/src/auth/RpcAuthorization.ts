@@ -160,7 +160,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectsCreateNew]: AuthOrchestrationOperateScope,
   [WS_METHODS.shellOpenInEditor]: AuthOrchestrationOperateScope,
   [WS_METHODS.filesystemBrowse]: AuthFilesystemReadScope,
-  [WS_METHODS.filesystemSearchDirectories]: AuthFilesystemReadScope,
   [WS_METHODS.filesystemGetMetadata]: AuthFilesystemReadScope,
   [WS_METHODS.filesystemSearchHost]: AuthFilesystemReadScope,
   // The whole host, as browsing and search are; protected locations are refused server side.
