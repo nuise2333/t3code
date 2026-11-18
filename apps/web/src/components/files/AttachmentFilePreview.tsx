@@ -20,6 +20,9 @@ import {
   Code2Icon,
   CopyIcon,
   EyeIcon,
+  FileDownIcon,
+  ListTreeIcon,
+  SearchIcon,
   Table2Icon,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -27,11 +30,17 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useAssetUrlRefresh } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { maskMarkdownFrontmatter } from "@t3tools/shared/markdownFrontmatter";
-import { ScrollArea } from "~/components/ui/scroll-area";
 import { toastManager } from "~/components/ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
+import { ReaderFindScope, type ReaderFindHandle } from "~/reader/find/ReaderFindScope";
+import {
+  readerAttachmentSurfaceKey,
+  useReaderOutlineToggle,
+} from "~/reader/navigation/readerOutlineStore";
+import { ReaderSurface } from "~/reader/navigation/ReaderSurface";
+import { exportShownReader } from "~/shortcuts/readerCommands";
 
 import { BinaryFilePreview } from "./BinaryFilePreview";
 import { PreviewImage } from "./PreviewImage";
@@ -151,6 +160,9 @@ export function AttachmentFilePreview(props: {
   const [localUrl, setLocalUrl] = useState<string | null>(null);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [rendered, setRendered] = useState(true);
+  const readerFindRef = useRef<ReaderFindHandle>(null);
+  const readerSurfaceKey = readerAttachmentSurfaceKey(props.asset);
+  const readerOutline = useReaderOutlineToggle(readerSurfaceKey ?? "");
   const [revision, setRevision] = useState(0);
   const [content, setContent] = useState<{ text: string; truncated: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -305,13 +317,15 @@ export function AttachmentFilePreview(props: {
         <MermaidFilePreview text={content.text} />
       </Suspense>
     ) : kind === "markdown" && rendered ? (
-      <ScrollArea className="min-h-0 flex-1">
-        <ChatMarkdown
-          text={maskMarkdownFrontmatter(content.text)}
-          cwd={undefined}
-          className="mx-auto max-w-4xl px-6 py-5"
-        />
-      </ScrollArea>
+      <ReaderFindScope handleRef={readerFindRef}>
+        <ReaderSurface surfaceKey={readerSurfaceKey}>
+          <ChatMarkdown
+            text={maskMarkdownFrontmatter(content.text)}
+            cwd={undefined}
+            variant="reader"
+          />
+        </ReaderSurface>
+      </ReaderFindScope>
     ) : (
       <ReadOnlySourcePreview name={props.name} text={content.text} wordWrap={wordWrap} />
     )
@@ -417,6 +431,31 @@ export function AttachmentFilePreview(props: {
               <EyeIcon className="size-3.5" />
             )}
           </FileSurfaceAction>
+        ) : null}
+        {kind === "markdown" && rendered && content ? (
+          <>
+            <FileSurfaceAction
+              label="Find in document"
+              onPress={() => readerFindRef.current?.open()}
+            >
+              <SearchIcon className="size-3.5" />
+            </FileSurfaceAction>
+            {readerOutline.isAvailable ? (
+              <FileSurfaceAction
+                label={readerOutline.isOpen ? "Hide outline" : "Show outline"}
+                pressed={readerOutline.isOpen}
+                onPress={readerOutline.toggle}
+              >
+                <ListTreeIcon className="size-3.5" />
+              </FileSurfaceAction>
+            ) : null}
+            <FileSurfaceAction
+              label="Export as PDF"
+              onPress={() => exportShownReader(props.threadRef ?? null)}
+            >
+              <FileDownIcon className="size-3.5" />
+            </FileSurfaceAction>
+          </>
         ) : null}
         {showsRawText ? (
           <FileSurfaceAction

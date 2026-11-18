@@ -1,0 +1,164 @@
+/* Printing the reading view (readerExport.ts). While an export runs, the root carries
+   `data-reader-printing`, the reader `data-reader-print-target` and each of its ancestors
+   `data-reader-print-path`; everything else on the page is left out of the print. */
+
+@media print {
+  :root[data-reader-printing] {
+    color-scheme: light;
+    background: #ffffff !important;
+
+    & body {
+      height: auto !important;
+      min-height: 0 !important;
+      overflow: visible !important;
+      background: #ffffff !important;
+    }
+
+    &
+      body
+      :not([data-reader-print-path], [data-reader-print-target], [data-reader-print-target] *) {
+      display: none !important;
+    }
+
+    /* The app's panels, scrollers and splits around the reader become plain flow, so the
+       document runs over as many pages as it needs. */
+    & [data-reader-print-path] {
+      display: block !important;
+      position: static !important;
+      inset: auto !important;
+      width: auto !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      height: auto !important;
+      min-height: 0 !important;
+      max-height: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      overflow: visible !important;
+      transform: none !important;
+      contain: none !important;
+      zoom: 1 !important;
+      mask: none !important;
+      box-shadow: none !important;
+      background: none !important;
+    }
+  }
+
+  /* Paper is white and the size is the print size, whatever the theme, zoom and font size. */
+  :root[data-reader-printing] .chat-markdown.markdown-reader[data-reader-print-target] {
+    --reader-base: 14px !important;
+    --reader-paper: #ffffff !important;
+    color-scheme: light;
+    min-height: 0 !important;
+    padding: 0 !important;
+    zoom: 1 !important;
+    background: #ffffff !important;
+    print-color-adjust: exact;
+
+    & :is(h1, h2, h3, h4, h5, h6) {
+      break-after: avoid;
+    }
+
+    & :is(p, li, dd, blockquote) {
+      orphans: 2;
+      widows: 2;
+    }
+
+    & :is(img, svg, figure, tr, .chat-markdown-math-display) {
+      break-inside: avoid;
+    }
+
+    & :is([data-slot="button"], [role="toolbar"], [data-slot="scroll-area-scrollbar"]) {
+      display: none !important;
+    }
+
+    /* Nothing scrolls on paper: code wraps and wide content is shown whole. */
+    & [data-slot="scroll-area-viewport"] {
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+      mask: none !important;
+    }
+
+    & pre,
+    & pre code {
+      white-space: pre-wrap !important;
+      overflow-wrap: anywhere;
+    }
+
+    /* Lines typeset for the screen's column are set again by the browser for the page's,
+       as a paragraph far from the scrolled view already is. */
+    & [data-reader-typeset] {
+      white-space: normal !important;
+      hyphens: auto;
+      hyphenate-limit-chars: 5 2 3;
+      text-autospace: normal;
+      text-spacing-trim: trim-start;
+    }
+
+    & :is(p, li, dd)[data-reader-typeset] {
+      text-align: justify;
+    }
+
+    & [data-reader-typeset] :is(.reader-lat, .reader-han, .reader-atom) {
+      white-space: inherit !important;
+      word-spacing: normal !important;
+      letter-spacing: normal !important;
+      margin-inline: 0 !important;
+    }
+
+    & :is(.reader-eol, .reader-hyphen)::after {
+      content: none;
+    }
+
+    /* The file editor prints as the reading view: its source markers and raw blocks' source
+       stay off paper, and its text is set by the browser like the reader's. */
+    &[data-reader-editor] {
+      white-space: normal !important;
+
+      & :is(.reader-md-marker, .reader-md-gutter, [data-md-raw-source], .reader-md-indent) {
+        display: none !important;
+      }
+
+      & .reader-raw > .reader-raw-preview {
+        display: block !important;
+      }
+
+      & hr[data-md-gutter]::before {
+        content: none;
+      }
+
+      & .reader-ws-gone {
+        display: none !important;
+      }
+    }
+  }
+
+  :root[data-reader-printing][data-reader-justify="false"]
+    .chat-markdown.markdown-reader[data-reader-print-target]
+    :is(p, li, dd)[data-reader-typeset] {
+    text-align: start;
+  }
+
+  /* The app theme follows the app's colours, which may be dark; paper gets the light classic. */
+  :root[data-reader-printing][data-reader-theme="app"]
+    .chat-markdown.markdown-reader[data-reader-print-target] {
+    --reader-text: #000000 !important;
+    --reader-heading: #000000 !important;
+    --reader-link: #0068da !important;
+    --reader-inline-code: #000000 !important;
+    --reader-secondary: rgb(0 0 0 / 49.8%) !important;
+    --reader-rule: rgb(0 0 0 / 9.8%) !important;
+    --reader-code-bg: #f4f5f7 !important;
+    --reader-capsule-bg: #edeef1 !important;
+    --reader-table-header-bg: #f7f7f7 !important;
+    --reader-placeholder-bg: #f5f5f5 !important;
+    --reader-mark-bg: #f8de72 !important;
+    --reader-syntax-keyword: #2d2f7e !important;
+    --reader-syntax-string: #11704d !important;
+    --reader-syntax-comment: #949699 !important;
+    --reader-syntax-literal: #ae630c !important;
+    --reader-syntax-type: #00528c !important;
+  }
+}

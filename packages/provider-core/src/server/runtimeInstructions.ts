@@ -11,6 +11,8 @@ export function buildRuntimeInstructions(runtime: {
   readonly reasoningEffort?: string | undefined;
   /** False when the session's system prompt already carries the linking instructions. */
   readonly pullRequestLinking?: boolean;
+  /** The `responseLanguage` server setting; empty adds nothing. */
+  readonly responseLanguage?: string | undefined;
 }): string {
   const harness = toSingleLine(runtime.harness);
   const model = toSingleLine(runtime.model ?? "");
@@ -21,9 +23,18 @@ export function buildRuntimeInstructions(runtime: {
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
   const runtimeInfo = `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images, video, and audio using Markdown image syntax with absolute file paths. Link every other file you cite or produce by its absolute path, as in [http.ts:42](/abs/path/http.ts:42), so the user can open it in T3 Code's files viewer.</runtime_info>`;
+  const language = buildResponseLanguageInstructions(runtime.responseLanguage);
+  const head = language ? `${runtimeInfo}\n\n${language}` : runtimeInfo;
   return runtime.pullRequestLinking === false
-    ? runtimeInfo
-    : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
+    ? head
+    : `${head}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
+}
+
+/** Empty when no language is set, so instruction text stays unchanged for everyone else. */
+export function buildResponseLanguageInstructions(responseLanguage: string | undefined): string {
+  const language = toSingleLine(responseLanguage ?? "");
+  if (!language) return "";
+  return `<response_language>Write every message the user sees in ${language}, from your first sentence to the final summary, even when you reasoned in another language or the code and tool output are in another language. Use a different language only when the user explicitly asks for one. Keep code, commands, file paths, identifiers, and quoted output unchanged.</response_language>`;
 }
 
 function toSingleLine(value: string): string {

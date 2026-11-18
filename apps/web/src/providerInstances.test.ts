@@ -574,7 +574,7 @@ describe("provider icon metadata", () => {
       null,
     );
     expect(localEntry?.acpRegistryAgentId).toBeUndefined();
-    expect(localEntry?.acpRegistryIconUrl).toBeUndefined();
+    expect(localEntry?.acpRegistryIconUrl).toBe("t3-acp-icon:deepseek-harness");
     expect(localEntry?.enabled).toBe(false);
     expect(localEntry?.snapshot).toBe(snapshots[0]?.snapshot);
 

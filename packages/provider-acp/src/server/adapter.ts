@@ -115,7 +115,10 @@ import {
   t3AcpPromptWithInstructions,
   type T3AcpInstructionState,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildResponseLanguageInstructions,
+  buildRuntimeInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
@@ -1530,6 +1533,10 @@ function acpRootSessionUpdateIngestsOutput(
       return false;
   }
 }
+
+// The per-turn reminder rides in the prompt, so session/load replays it as user text.
+const withoutResponseLanguageReminder = (text: string) =>
+  text.replaceAll(/\s*<response_language>[\s\S]*?<\/response_language>/g, "");
 
 export function acpPostSettleWakeEvidence(
   notification: EffectAcpSchema.SessionNotification,
@@ -8199,12 +8206,17 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               : { previousState: previousInstructionState }),
           });
           const sessionSetup = yield* Ref.get(activeSessionSetup);
+          const responseLanguage = yield* host.settings.get.pipe(
+            Effect.map((settings) => settings.responseLanguage),
+            Effect.orElseSucceed(() => ""),
+          );
           const runtimeInstructions = buildRuntimeInstructions({
             harness: flavor.runtimeHarness ?? driver,
             model: turnInput.modelSelection.model,
             pullRequestLinking:
               sessionSetup === null ||
               flavor.sessionCarriesPullRequestLinking?.(sessionSetup.initializeResult) !== true,
+            responseLanguage,
           });
           // The agent keeps its own history, so resend only after compaction or when the text changes.
           const sendRuntimeInstructions =
@@ -8221,8 +8233,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               detail: "ACP turn requires non-empty text or attachments",
             });
           }
+          const languageReminder = buildResponseLanguageInstructions(responseLanguage);
           if (sendRuntimeInstructions) {
             prompt.push({ type: "text", text: runtimeInstructions });
+          } else if (!isNativeSlashCommand && languageReminder) {
+            prompt.push({ type: "text", text: languageReminder });
           }
           return {
             prompt,
@@ -9493,7 +9508,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     providerTurns: [...(yield* Ref.get(providerTurns)).values()],
                     messages: state.order.flatMap((key) => {
                       const message = state.messages.get(key);
-                      return message === undefined ? [] : [message];
+                      if (message === undefined) return [];
+                      return message.role === "user"
+                        ? [{ ...message, text: withoutResponseLanguageReminder(message.text) }]
+                        : [message];
                     }),
                     reasoningMessageIds: [...state.reasoningIds],
                     runtimeRequests: [],

@@ -22,6 +22,7 @@ import {
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ProviderTurn,
   type ProviderOptionSelection,
+  DEFAULT_SERVER_SETTINGS,
 } from "@t3tools/contracts";
 import { OpenCodeSettings } from "../settings.ts";
 import * as Effect from "effect/Effect";
@@ -37,6 +38,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import { buildResponseLanguageInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import type * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -183,6 +185,7 @@ const makeOpenCodeRuntimeHarness = Effect.fn("makeOpenCodeRuntimeHarness")(funct
     Effect.provideService(ProviderHost.ProviderHost, {
       paths: { cwd: "/workspace" },
       resolveAttachmentPath: () => null,
+      settings: { get: Effect.succeed(DEFAULT_SERVER_SETTINGS) },
       ...host,
     } as unknown as ProviderHost.ProviderHost["Service"]),
   );
@@ -2127,57 +2130,73 @@ describe("OpenCodeAdapterV2", () => {
     }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
   );
 
-  it.effect("steers with the turn's agent, reasoning variant and system instructions", () =>
-    Effect.gen(function* () {
-      const nativeEvents = asyncEventStream();
-      const promptInputs: Array<{ agent?: string; variant?: string; system?: string }> = [];
-      const harness = yield* makeOpenCodeRuntimeHarness(
-        "steer-agent",
-        "root",
-        {
-          event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
-          session: {
-            create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
-            get: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
-            messages: async () => ({ data: [] }),
-            promptAsync: async (input: { agent?: string; variant?: string; system?: string }) => {
-              promptInputs.push(input);
-              return { data: true };
+  it.effect(
+    "steers with the turn's agent, reasoning variant and system instructions, including the response language",
+    () =>
+      Effect.gen(function* () {
+        const nativeEvents = asyncEventStream();
+        const promptInputs: Array<{
+          agent?: string;
+          variant?: string;
+          system?: string;
+          parts?: ReadonlyArray<{ type: string; text?: string; synthetic?: boolean }>;
+        }> = [];
+        const harness = yield* makeOpenCodeRuntimeHarness(
+          "steer-agent",
+          "root",
+          {
+            event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+            session: {
+              create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+              get: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+              messages: async () => ({ data: [] }),
+              promptAsync: async (input: (typeof promptInputs)[number]) => {
+                promptInputs.push(input);
+                return { data: true };
+              },
+              abort: async () => ({ data: true }),
+              children: async () => ({ data: [] }),
             },
-            abort: async () => ({ data: true }),
-            children: async () => ({ data: [] }),
           },
-        },
-        {},
-        { options: [{ id: "variant", value: "high" }], interactionMode: "plan" },
-      );
-      yield* harness.startTurn();
-      const snapshot = yield* harness.runtime.readThreadSnapshot({
-        providerThread: harness.providerThread,
-      });
-      yield* harness.runtime.steerTurn({
-        threadId: harness.threadId,
-        runId: harness.runId,
-        providerThread: harness.providerThread,
-        providerTurnId: snapshot.providerTurns.at(-1)!.id,
-        message: {
-          messageId: MessageId.make("message-opencode-steer-agent"),
-          text: "also cover the README",
-          attachments: [],
-          createdBy: "user",
-          creationSource: "web",
-        },
-      });
+          {
+            settings: {
+              get: Effect.succeed({ ...DEFAULT_SERVER_SETTINGS, responseLanguage: "简体中文" }),
+            } as unknown as ProviderHost.ProviderHost["Service"]["settings"],
+          },
+          { options: [{ id: "variant", value: "high" }], interactionMode: "plan" },
+        );
+        yield* harness.startTurn();
+        const snapshot = yield* harness.runtime.readThreadSnapshot({
+          providerThread: harness.providerThread,
+        });
+        yield* harness.runtime.steerTurn({
+          threadId: harness.threadId,
+          runId: harness.runId,
+          providerThread: harness.providerThread,
+          providerTurnId: snapshot.providerTurns.at(-1)!.id,
+          message: {
+            messageId: MessageId.make("message-opencode-steer-agent"),
+            text: "also cover the README",
+            attachments: [],
+            createdBy: "user",
+            creationSource: "web",
+          },
+        });
 
-      const [start, steer] = promptInputs;
-      assert.equal(start?.agent, "plan");
-      assert.equal(start?.variant, "high");
-      assert.include(start?.system ?? "", "OpenCode");
-      assert.deepEqual(
-        { agent: steer?.agent, variant: steer?.variant, system: steer?.system },
-        { agent: start?.agent, variant: start?.variant, system: start?.system },
-      );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+        const [start, steer] = promptInputs;
+        assert.equal(start?.agent, "plan");
+        assert.equal(start?.variant, "high");
+        assert.include(start?.system ?? "", "OpenCode");
+        const reminder = buildResponseLanguageInstructions("简体中文");
+        assert.include(start?.system ?? "", reminder);
+        for (const input of [start, steer]) {
+          assert.deepEqual(input?.parts?.at(-1), { type: "text", text: reminder, synthetic: true });
+        }
+        assert.deepEqual(
+          { agent: steer?.agent, variant: steer?.variant, system: steer?.system },
+          { agent: start?.agent, variant: start?.variant, system: start?.system },
+        );
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
   );
 
   it.effect("keeps a newly admitted prompt alive across stale idle and delayed busy evidence", () =>
@@ -2261,6 +2280,7 @@ describe("OpenCodeAdapterV2", () => {
         Effect.provideService(ProviderHost.ProviderHost, {
           paths: { cwd: "/workspace" },
           resolveAttachmentPath: () => null,
+          settings: { get: Effect.succeed(DEFAULT_SERVER_SETTINGS) },
         } as unknown as ProviderHost.ProviderHost["Service"]),
       );
       const threadId = ThreadId.make("thread-opencode-admission-race");
@@ -2643,6 +2663,7 @@ describe("OpenCodeAdapterV2", () => {
         Effect.provideService(ProviderHost.ProviderHost, {
           paths: { cwd: "/workspace" },
           resolveAttachmentPath: () => null,
+          settings: { get: Effect.succeed(DEFAULT_SERVER_SETTINGS) },
         } as unknown as ProviderHost.ProviderHost["Service"]),
       );
       const threadId = ThreadId.make("thread-opencode-initial-stop");

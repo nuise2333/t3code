@@ -105,6 +105,24 @@ export function getChangedTypographySettingLabels(settings: TypographySettings):
   ];
 }
 
+const READER_SETTING_LABELS = [
+  ["readerTypography", "Reading typography"],
+  ["readerFontSize", "Reading font size"],
+  ["readerJustify", "Justify text"],
+  ["readerLimitWidth", "Limit reading width"],
+  ["readerTheme", "Reading theme"],
+  ["readerTableStyle", "Table style"],
+  ["readerZoom", "Reading zoom"],
+] as const;
+
+type ReaderSettings = Pick<UnifiedSettings, (typeof READER_SETTING_LABELS)[number][0]>;
+
+export function getChangedReaderSettingLabels(settings: ReaderSettings): string[] {
+  return READER_SETTING_LABELS.flatMap(([key, label]) =>
+    settings[key] !== DEFAULT_UNIFIED_SETTINGS[key] ? [label] : [],
+  );
+}
+
 export type BrowserDefaultSettings = Pick<
   UnifiedSettings,
   | "browserDefaultViewport"

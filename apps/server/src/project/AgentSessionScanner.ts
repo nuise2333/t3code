@@ -359,6 +359,10 @@ function foldClaudeFields(fields: ClaudeFields, record: DecodedTranscriptRecord)
 
 // Codex records setup context as user text ahead of the real request. Skip
 // these leading blocks when deriving a title; imported messages keep them.
+// T3 appends this block to each Codex turn input; it is not part of what the user typed.
+const withoutResponseLanguageReminder = (text: string) =>
+  text.replaceAll(/\s*<response_language>[\s\S]*?<\/response_language>/g, "");
+
 const CODEX_TITLE_PREAMBLE =
   /^(?:\s*(?:<(recommended_plugins|environment_context|user_instructions|INSTRUCTIONS|in-app-browser-context)(?:\s[^>]*)?>[\s\S]*?<\/\1>|# AGENTS\.md instructions\b[^\n]*|## My request for Codex:))+/;
 
@@ -502,7 +506,7 @@ function parseAgentSessionRecords(
         continue;
       }
       if (record.type === "event_msg" && record.payload?.type === "user_message") {
-        const text = record.payload.message?.trim() ?? "";
+        const text = withoutResponseLanguageReminder(record.payload.message ?? "").trim();
         if (text.length > 0) canonicalUserTextsInTurn.add(text);
         continue;
       }
@@ -512,7 +516,7 @@ function parseAgentSessionRecords(
         record.payload.role === "user"
       ) {
         const turnId = codexTurnId(record.payload.internal_chat_message_metadata_passthrough);
-        const text = extractText(record.payload.content);
+        const text = withoutResponseLanguageReminder(extractText(record.payload.content));
         if (turnId !== null && text.length > 0) {
           responseUsersInTurn.push({ index: recordIndex, turnId, text });
         }
@@ -594,7 +598,7 @@ function parseAgentSessionRecords(
       continue;
     }
     if (record.type === "event_msg" && record.payload?.type === "user_message") {
-      const text = record.payload.message ?? "";
+      const text = withoutResponseLanguageReminder(record.payload.message ?? "");
       if (text.trim().length === 0) continue;
       // Codex can duplicate prompts across formats; remove only matching response copies.
       for (let index = messages.length - 1; index >= 0; index--) {
@@ -623,7 +627,10 @@ function parseAgentSessionRecords(
       continue;
     }
 
-    const extractedText = extractText(record.payload.content);
+    const extractedText =
+      record.payload.role === "user"
+        ? withoutResponseLanguageReminder(extractText(record.payload.content))
+        : extractText(record.payload.content);
     if (extractedText.length === 0) continue;
     if (record.payload.role === "user" && canonicalCodexResponseUserIndices.has(recordIndex)) {
       continue;

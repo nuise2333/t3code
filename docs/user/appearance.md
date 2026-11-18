@@ -41,6 +41,33 @@ exporting a table preserves the TeX.
 The composer keeps TeX source editable, including when rich text is enabled. The Render math
 preference is saved separately on each device.
 
+## Reading view
+
+On web and desktop, a Markdown file or attachment switched to its rendered view opens in a reading
+view with its own typography, colors, and line length. Adjust it under **Reader** in
+**Settings → Appearance**. Chat messages, pull request descriptions, and notebooks keep the
+interface font and are not affected.
+
+Each **Reading theme** has a light and a dark version that follows the app's appearance; choose
+**App theme** to use your current theme's colors instead. **Reading zoom** scales the whole view,
+including images, while **Reading font size** changes only the text. Justified text falls back to
+left-aligned in narrow panels.
+
+A Markdown file in your workspace opens in the reading view ready to edit: click anywhere and
+type. Formatting appears as you type, and Markdown markers such as `**`, `#` and `[link](...)`
+show only around the caret. Tables, HTML, math, diagrams and footnotes switch to their source
+while the caret is in them and render again when it leaves. Changes save on their own, and only
+the parts you edit change in the file. Use **Show markdown source** in the file header for the
+plain source editor. Files over 1 MB, files outside the workspace, read-only connections and
+attachments open in the reading view without editing.
+
+The file header has buttons to find text in the document, show an outline of its headings, and
+export it as a PDF. A document reopens where you left off until the app reloads. Keyboard paging,
+find, zoom, and the outline shortcut are listed in [Keybindings](./keybindings.md#the-reading-view).
+
+Reader preferences are saved separately on each device or browser. The mobile app keeps its own
+Markdown preview and text preferences.
+
 ## Motion
 
 The main sidebar, right panel, and terminal drawer open and close immediately by default. Move the

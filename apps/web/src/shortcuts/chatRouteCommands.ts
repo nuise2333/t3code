@@ -30,8 +30,18 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import { type CommandHandler, registerCommands } from "./dispatcher";
+import { exportShownReader, zoomReader } from "./readerCommands";
+import { isReaderFocused } from "./readerFocus";
+import { toggleActiveReaderOutline } from "../reader/navigation/readerOutlineStore";
+import type { ReaderZoomChange } from "./readerZoom";
 
 const CHAT_ROUTE_ID = "/_chat";
+
+const READER_ZOOM_FOR_PREVIEW_ACTION: Partial<Record<PreviewAction, ReaderZoomChange>> = {
+  "zoom-in": "in",
+  "zoom-out": "out",
+  "reset-zoom": "reset",
+};
 
 /**
  * New-thread and preview commands, live while a chat route is showing and no
@@ -114,8 +124,25 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     (action: PreviewAction): CommandHandler =>
     (event) => {
       claim(event);
+      // Startup puts new defaults ahead of a config's older rules, so in a config written before
+      // the reader rules existed the preview's zoom keys still win inside the reading view.
+      const readerZoomChange = READER_ZOOM_FOR_PREVIEW_ACTION[action];
+      if (readerZoomChange !== undefined && isReaderFocused()) {
+        zoomReader(readerZoomChange);
+        return;
+      }
       const threadRef = readRouteThreadRef();
-      if (threadRef && canOperatePreview(threadRef.environmentId)) dispatchPreviewAction(action);
+      // Only a browser preview needs the scope; find also serves files and rendered documents.
+      if (threadRef && (action === "find" || canOperatePreview(threadRef.environmentId))) {
+        dispatchPreviewAction(action);
+      }
+    };
+
+  const readerZoomCommand =
+    (change: ReaderZoomChange): CommandHandler =>
+    (event) => {
+      claim(event);
+      zoomReader(change);
     };
 
   return registerCommands(
@@ -169,6 +196,17 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       "preview.zoomOut": previewCommand("zoom-out"),
       "preview.resetZoom": previewCommand("reset-zoom"),
       "preview.find": previewCommand("find"),
+      "reader.zoomIn": readerZoomCommand("in"),
+      "reader.zoomOut": readerZoomCommand("out"),
+      "reader.resetZoom": readerZoomCommand("reset"),
+      "reader.exportPdf": (event) => {
+        if (!event.repeat && !exportShownReader(readRouteThreadRef())) return false;
+        claim(event);
+      },
+      "reader.toggleOutline": (event) => {
+        if (!toggleActiveReaderOutline()) return false;
+        claim(event);
+      },
     },
     {
       when: () =>

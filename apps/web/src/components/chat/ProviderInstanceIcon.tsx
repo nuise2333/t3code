@@ -6,7 +6,7 @@ import {
   providerInstanceInitials,
 } from "@t3tools/client-runtime/state/provider-instance-display";
 
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { bundledAcpIconUrlForAgentId, ProviderDriverKind } from "@t3tools/contracts";
 import {
   AnthropicIcon,
   AntigravityIcon,
@@ -81,6 +81,7 @@ export function resolveProviderInstanceAcpRegistryIconUrl(input: {
 }): string | null {
   if (input.driverKind !== "acpRegistry") return null;
   return (
+    resolveOfficialAcpRegistryIconUrl(bundledAcpIconUrlForAgentId(input.agentId)) ??
     resolveOfficialAcpRegistryIconUrl(input.iconUrl ?? null) ??
     officialAcpRegistryIconUrlForAgentId(input.agentId?.trim() || null)
   );

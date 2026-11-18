@@ -423,6 +423,54 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["long lines code blocks diffs file previews"],
   },
   {
+    id: "reader-typography",
+    title: "Reading typography",
+    to: "/settings/appearance",
+    searchTerms: [
+      "reader reading view rendered markdown font family serif sans charter avenir book chinese indent",
+    ],
+  },
+  {
+    id: "reader-font-size",
+    title: "Reading font size",
+    to: "/settings/appearance",
+    searchTerms: ["reader reading view rendered markdown text larger smaller"],
+  },
+  {
+    id: "reader-justify",
+    title: "Justify text",
+    to: "/settings/appearance",
+    searchTerms: ["reader reading view rendered markdown justified alignment left aligned ragged"],
+  },
+  {
+    id: "reader-limit-width",
+    title: "Limit reading width",
+    to: "/settings/appearance",
+    searchTerms: [
+      "reader reading view rendered markdown column line length measure wide full centered",
+    ],
+  },
+  {
+    id: "reader-theme",
+    title: "Reading theme",
+    to: "/settings/appearance",
+    searchTerms: [
+      "reader reading view rendered markdown colors paper mono classic one solarized app",
+    ],
+  },
+  {
+    id: "reader-table-style",
+    title: "Table style",
+    to: "/settings/appearance",
+    searchTerms: ["reader reading view rendered markdown tables rules borders grid"],
+  },
+  {
+    id: "reader-zoom",
+    title: "Reading zoom",
+    to: "/settings/appearance",
+    searchTerms: ["reader reading view rendered markdown scale magnify percent"],
+  },
+  {
     id: "composer-context",
     title: "Composer context",
     to: "/settings/appearance",
@@ -866,6 +914,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/threads",
     scope: "project-defaults",
     searchTerms: ["generated thread titles prompt custom style naming rename regenerate"],
+  },
+  {
+    id: "response-language",
+    title: "Response language",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["reply answer language chinese 中文 简体中文 日本語 respond"],
+    environmentOnly: true,
   },
   {
     id: "app-version",

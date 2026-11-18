@@ -124,14 +124,15 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 ## When conditions
 
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
-`previewOpen`, `rightPanelOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`,
+`previewOpen`, `readerFocus`, `rightPanelOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`,
 `draftThreadRoute`, `turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
 `rightPanelOpen` applies only to `rightPanel.new` and is true while the right panel is
 open; the default `mod+t` uses it to open the panel's new-tab menu.
 `draftThreadRoute` is true on a draft thread, including a restored draft, until it is first sent.
 `editableFocus` is true while a text field, the composer, or another editor has
 the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
-desktop app. Unknown keys evaluate to `false`.
+desktop app. `readerFocus` is true while a rendered Markdown file has the keyboard; it is
+inside the right panel, so `previewFocus` is true there too. Unknown keys evaluate to `false`.
 
 `mod+1` through `mod+9` jump to the first nine threads, and to models while the
 model picker is open. The thread jumps do not run while the model picker is open.
@@ -159,6 +160,29 @@ and **Escape** to close find.
 is also in the browser's **⋮** menu and the command palette. A page that handles `mod+f` itself,
 such as a code editor, keeps its own find. Use the **⋮** menu to reach the browser's find there.
 Streamed browser tabs and T3 Code in a web browser do not support it.
+
+## The reading view
+
+While a rendered Markdown file has the keyboard, **Space** and **Page Down** page forward and
+**Shift+Space** and **Page Up** page back, keeping the last two lines on screen. While you edit
+the file, **Space** types and **Page Up** and **Page Down** page and move the caret with the page.
+`mod+b`, `mod+i`, `mod+e` and `mod+shift+s` make the selection bold, italic, code or
+struck through, `mod+k` makes it a link, **Tab** and **Shift+Tab** indent and outdent list items,
+and `mod+click` opens a link. `mod+f`
+(`preview.find`) opens **Find in document**; **Enter** and **Shift+Enter**, or `mod+g` and
+`mod+shift+g`, move between matches, and **Escape** closes it. `reader.toggleOutline`
+(`mod+alt+o`) shows or hides the outline of the document's headings.
+
+`mod+=` (or `mod++`) and `mod+-` step its **Reading zoom** between 80% and 200%, and `mod+0`
+returns it to 100%. The zoom applies to every rendered Markdown file and is also in
+**Settings → Appearance**. Everywhere else these keys keep zooming the browser preview or the app
+window.
+
+`reader.exportPdf` prints the document alone on white paper, at print size, with one inch
+margins. It has no default shortcut; bind one in Keybindings with `"when": "readerFocus"`. The
+desktop app asks where to save the PDF. In a web browser it opens the print dialog; choose
+**Save as PDF** as the destination there. Zoom, the outline, and export are also in the command
+palette while a reading view is shown.
 
 ## Precedence
 

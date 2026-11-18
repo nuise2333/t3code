@@ -19,6 +19,7 @@ import * as DocumentText from "../../provider/DocumentText.ts";
 import { assert, beforeAll, describe, it } from "@effect/vitest";
 import {
   CheckpointId,
+  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   type ModelSelection,
   ProviderDriverKind,
@@ -60,6 +61,7 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { buildResponseLanguageInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   ACP_EMPTY_OPTION_VALUE,
@@ -2405,6 +2407,22 @@ describe("AcpAdapterV2", () => {
         });
         assert.equal(switchedModel.textBlockCount, 2);
         assert.include(switchedModel.prompt, "as composer-2");
+        assert.notInclude(switchedModel.prompt, "<response_language>");
+
+        yield* (yield* TestProviderHost.TestProviderHostSettings).set({
+          ...DEFAULT_SERVER_SETTINGS,
+          responseLanguage: "简体中文",
+        });
+        const composer = { instanceId, model: "composer-2" } as const;
+        const languageSet = yield* runTurn(8, defaultPolicy, "Answer in Chinese.", composer);
+        assert.equal(languageSet.textBlockCount, 2);
+        assert.lengthOf(languageSet.prompt.split("<response_language>"), 2);
+        const languageReminded = yield* runTurn(9, defaultPolicy, "Keep going.", composer);
+        assert.equal(
+          languageReminded.prompt,
+          `Keep going.\n${buildResponseLanguageInstructions("简体中文")}`,
+        );
+        assert.equal((yield* runTurn(10, defaultPolicy, "/compact", composer)).textBlockCount, 1);
       }).pipe(Effect.provide(layerTest)),
   );
 
@@ -3096,6 +3114,12 @@ describe("AcpAdapterV2", () => {
       });
       assert.isDefined(sessionUpdateHandler);
 
+      for (const text of ["Fix it.", buildResponseLanguageInstructions("简体中文")]) {
+        yield* sessionUpdateHandler!({
+          sessionId: "mock-session-1",
+          update: { sessionUpdate: "user_message_chunk", content: { type: "text", text } },
+        });
+      }
       yield* sessionUpdateHandler!({
         sessionId: "mock-session-1",
         update: {
@@ -3140,11 +3164,11 @@ describe("AcpAdapterV2", () => {
       const snapshot = yield* runtime.readThreadSnapshot({ providerThread });
       assert.deepEqual(
         snapshot.messages.map((message) => message.text),
-        ["before plan", "after plan", "weighing it", "settled on it"],
+        ["Fix it.", "before plan", "after plan", "weighing it", "settled on it"],
       );
       assert.deepEqual(
         snapshot.reasoningMessageIds,
-        snapshot.messages.slice(2).map((message) => message.id),
+        snapshot.messages.slice(3).map((message) => message.id),
       );
     }).pipe(Effect.provide(layerTest)),
   );

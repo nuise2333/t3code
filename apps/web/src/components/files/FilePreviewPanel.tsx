@@ -45,16 +45,16 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
-import { FolderTree, Globe2, WrapTextIcon } from "lucide-react";
-import * as Schema from "effect/Schema";
 import {
-  lazy,
-  Suspense,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+  FileDownIcon,
+  FolderTree,
+  Globe2,
+  ListTreeIcon,
+  SearchIcon,
+  WrapTextIcon,
+} from "lucide-react";
+import * as Schema from "effect/Schema";
+import { lazy, Suspense, useEffect, useRef, useState, type Ref } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
@@ -68,7 +68,7 @@ import { useStableCallback } from "~/hooks/useStableCallback";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
-import { cn, isMacPlatform } from "~/lib/utils";
+import { cn } from "~/lib/utils";
 import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
 import type { ChatFileAttachment } from "~/types";
 import { isHostPath } from "@t3tools/shared/path";
@@ -96,7 +96,16 @@ import FileBrowserPanel from "./FileBrowserPanel";
 import { FileExplorerPane } from "./FileExplorerPane";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { breadcrumbPathOf, retainedBreadcrumbTrail, trailChildOf } from "./filePath";
+import type { EditorView } from "@tiptap/pm/view";
+
+import { FileMarkdownEditor } from "./FileMarkdownEditor";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
+import { ReaderFindScope, type ReaderFindHandle } from "~/reader/find/ReaderFindScope";
+import {
+  readerFileSurfaceKey,
+  useReaderOutlineToggle,
+} from "~/reader/navigation/readerOutlineStore";
+import { exportShownReader } from "~/shortcuts/readerCommands";
 import {
   type FileCommentAnnotationEntry,
   type FileCommentAnnotationGroup,
@@ -126,11 +135,9 @@ import {
   shouldShowFileExplorer,
   workspaceAssetResource,
 } from "./filePreviewMode";
-import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskList";
 import { changeFileSaveSession, useFileSaveSession } from "./fileSaveSessions";
 import { revisionedQuery } from "~/state/revisionedQuery";
 import {
-  getOptimisticProjectFileQueryData,
   getProjectFileContents,
   getProjectFileQueryAtom,
   setProjectFileQueryData,
@@ -167,7 +174,8 @@ const MermaidFilePreview = lazy(() =>
 );
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
-const RENDER_MARKDOWN_STORAGE_KEY = "t3code.renderMarkdown";
+// The rendered view became the editor; everyone starts there once under the new key.
+const RENDER_MARKDOWN_STORAGE_KEY = "t3code.renderMarkdownEditable";
 const RENDER_BROWSER_FILE_STORAGE_KEY = "t3code.renderBrowserFile";
 const RENDER_TABLE_STORAGE_KEY = "t3code.renderTable";
 type FilePostRender = <LAnnotation>(
@@ -940,25 +948,6 @@ function EditableFileSurface({
   );
 }
 
-function selectRenderedContentOnSelectAll(event: ReactKeyboardEvent<HTMLElement>) {
-  const mac = isMacPlatform(navigator.platform);
-  const selectAll =
-    event.key.toLowerCase() === "a" &&
-    (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
-    !event.shiftKey &&
-    !event.altKey;
-  // React bubbles keys from portaled children (the image dialog) through this surface.
-  if (
-    !selectAll ||
-    !(event.target instanceof Node) ||
-    !event.currentTarget.contains(event.target)
-  ) {
-    return;
-  }
-  event.preventDefault();
-  window.getSelection()?.selectAllChildren(event.currentTarget);
-}
-
 function RenderedMarkdownSurface({
   environmentId,
   cwd,
@@ -968,6 +957,8 @@ function RenderedMarkdownSurface({
   workspaceMutationId,
   readOnly,
   onPendingChange,
+  findRef,
+  onEditorViewChange,
 }: Omit<
   EditableFileSurfaceProps,
   | "resolvedTheme"
@@ -981,33 +972,37 @@ function RenderedMarkdownSurface({
   threadRef: ScopedThreadRef;
   readOnly: boolean;
   workspaceMutationId: string | null;
+  findRef: Ref<ReaderFindHandle>;
+  onEditorViewChange: (view: EditorView | null) => void;
 }) {
   const saveTarget = { environmentId, cwd, relativePath };
   useFileSaveSession(saveTarget, onPendingChange);
 
+  if (!readOnly) {
+    return (
+      <ReaderFindScope handleRef={findRef}>
+        <FileMarkdownEditor
+          environmentId={environmentId}
+          cwd={cwd}
+          relativePath={relativePath}
+          contents={contents}
+          threadRef={threadRef}
+          workspaceMutationId={workspaceMutationId}
+          onViewChange={onEditorViewChange}
+        />
+      </ReaderFindScope>
+    );
+  }
   return (
-    <ScrollArea className="min-h-0 flex-1" onKeyDown={selectRenderedContentOnSelectAll}>
+    <ReaderFindScope handleRef={findRef}>
       <FileMarkdownPreview
         text={contents}
         cwd={cwd}
         relativePath={relativePath}
         threadRef={threadRef}
         workspaceMutationId={workspaceMutationId}
-        onTaskListChange={
-          readOnly
-            ? undefined
-            : ({ markerOffset, checked }) => {
-                const currentContents =
-                  getOptimisticProjectFileQueryData(environmentId, cwd, relativePath)?.contents ??
-                  contents;
-                const nextContents = setMarkdownTaskChecked(currentContents, markerOffset, checked);
-                if (nextContents === currentContents) return;
-                setProjectFileQueryData(environmentId, cwd, relativePath, nextContents);
-                changeFileSaveSession(saveTarget, nextContents);
-              }
-        }
       />
-    </ScrollArea>
+    </ReaderFindScope>
   );
 }
 
@@ -1123,7 +1118,7 @@ export default function FilePreviewPanel({
   });
   const [renderMarkdownPreferred, setRenderMarkdownPreferred] = useLocalStorage(
     RENDER_MARKDOWN_STORAGE_KEY,
-    false,
+    true,
     Schema.Boolean,
   );
   const [renderBrowserFilePreferred, setRenderBrowserFilePreferred] = useLocalStorage(
@@ -1188,9 +1183,26 @@ export default function FilePreviewPanel({
     !renderMermaid &&
     !(isMarkdown && renderMarkdown) &&
     !(tableDelimiter && renderTable);
+  // The rendered view of a writable Markdown file is its editor, which takes panel focus too.
+  const editsRenderedMarkdown =
+    renderMarkdown &&
+    attachment === undefined &&
+    !isHostFile &&
+    canWriteFiles &&
+    file.error === null &&
+    file.data !== null &&
+    !file.data.truncated;
   const contentFocusRef = useRef<HTMLDivElement>(null);
+  const markdownEditorRef = useRef<EditorView | null>(null);
+  const readerFindRef = useRef<ReaderFindHandle>(null);
+  const readerOutline = useReaderOutlineToggle(readerFileSurfaceKey(cwd, relativePath ?? ""));
   const fileEditorRef = useRef<FileEditor | null>(null);
   const focusEditorFromContent = () => {
+    const markdownEditor = markdownEditorRef.current;
+    if (markdownEditor && document.activeElement === contentFocusRef.current) {
+      markdownEditor.focus();
+      return;
+    }
     const editor = fileEditorRef.current;
     if (!editor || document.activeElement !== contentFocusRef.current) return;
     // Without a caret the editor focuses with no selection, so no caret shows and typing
@@ -1207,6 +1219,10 @@ export default function FilePreviewPanel({
     focusEditorFromContent();
   };
   const handleEditorChangeStable = useStableCallback(handleEditorChange);
+  const handleMarkdownEditorChange = useStableCallback((view: EditorView | null) => {
+    markdownEditorRef.current = view;
+    focusEditorFromContent();
+  });
   const focusEditorOnTreeRowClickOrEnter = (event: {
     nativeEvent: Event;
     altKey: boolean;
@@ -1403,6 +1419,28 @@ export default function FilePreviewPanel({
               )}
             </FileSurfaceAction>
           ) : null}
+          {renderMarkdown && file.data !== null ? (
+            <FileSurfaceAction
+              label="Find in document"
+              onPress={() => readerFindRef.current?.open()}
+            >
+              <SearchIcon className="size-3.5" />
+            </FileSurfaceAction>
+          ) : null}
+          {renderMarkdown && file.data !== null && readerOutline.isAvailable ? (
+            <FileSurfaceAction
+              label={readerOutline.isOpen ? "Hide outline" : "Show outline"}
+              pressed={readerOutline.isOpen}
+              onPress={readerOutline.toggle}
+            >
+              <ListTreeIcon className="size-3.5" />
+            </FileSurfaceAction>
+          ) : null}
+          {renderMarkdown && file.data !== null ? (
+            <FileSurfaceAction label="Export as PDF" onPress={() => exportShownReader(threadRef)}>
+              <FileDownIcon className="size-3.5" />
+            </FileSurfaceAction>
+          ) : null}
           {showsRawText ? (
             <FileSurfaceAction
               label={wordWrap ? "Disable word wrap" : "Enable word wrap"}
@@ -1447,7 +1485,7 @@ export default function FilePreviewPanel({
         <div
           className={cn("min-w-0 flex-1 flex-col overflow-hidden", previewPath ? "flex" : "hidden")}
         >
-          {mayOpenEditor ? (
+          {mayOpenEditor || editsRenderedMarkdown ? (
             // Panel focus lands here and passes to the editor once it attaches. sr-only keeps the
             // 1px box workspace focus needs, and clips it so clicks in the file never reach it.
             // The hand-off waits a microtask: workspace focus checks that focus stayed here.
@@ -1605,6 +1643,8 @@ export default function FilePreviewPanel({
                 workspaceMutationId={workspaceMutationId}
                 readOnly={file.data.truncated || isHostFile || !canWriteFiles}
                 onPendingChange={onPendingChange}
+                findRef={readerFindRef}
+                onEditorViewChange={handleMarkdownEditorChange}
               />
             ) : tableDelimiter && renderTable ? (
               <DelimitedTablePreview

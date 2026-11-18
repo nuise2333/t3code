@@ -1,0 +1,132 @@
+/* The Markdown file editor (ReaderEditor.tsx): the reading view, editable. Its text is the
+   file's source, so the source's markers and white space are drawn here the way the reader
+   draws the rendered document. */
+
+@media screen {
+  :root .chat-markdown.markdown-reader[data-reader-editor] {
+    /* ProseMirror keeps typed white space as written; collapsed runs are wrapped below. */
+    white-space: pre-wrap;
+    outline: none;
+    caret-color: var(--reader-text);
+
+    /* Empty item text has no box of its own to hold the caret. */
+    & .reader-flow:is(:empty, :has(> br.ProseMirror-trailingBreak)) {
+      display: block;
+    }
+
+    /* Typeset lines end only where the engine put a line end. */
+    & [data-reader-typeset] {
+      white-space: pre;
+    }
+
+    /* White space the reader does not show as written, collapsed as the browser collapses
+       the reader's text. */
+    & .reader-ws-collapse {
+      white-space: normal;
+    }
+
+    & [data-reader-typeset] .reader-ws-collapse {
+      white-space: nowrap;
+    }
+
+    /* A source line end between Han, which the engine sets at no width. */
+    & .reader-ws-gone {
+      display: none;
+    }
+
+    & .reader-md-marker {
+      color: var(--reader-secondary);
+    }
+
+    & .reader-md-marker-hidden {
+      display: none;
+    }
+
+    /* Block markers sit in the margin beside the caret's block and add no width. */
+    & :is(p, h1, h2, h3, h4, h5, h6, hr) {
+      position: relative;
+    }
+
+    & .reader-md-gutter,
+    & hr[data-md-gutter]::before {
+      position: absolute;
+      right: 100%;
+      margin-right: 0.6em;
+      color: var(--reader-secondary);
+      font-family: var(--reader-font-mono);
+      font-size: var(--reader-code-size);
+      font-weight: 400;
+      font-style: normal;
+      pointer-events: none;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    & hr[data-md-gutter]::before {
+      top: 0;
+      line-height: 25px;
+      content: attr(data-md-gutter);
+    }
+
+    & .ProseMirror-selectednode {
+      outline: 2px solid color-mix(in srgb, var(--reader-link) 35%, transparent);
+    }
+
+    /* Raw blocks: the rendering, or the source while the caret is in it. */
+    & .reader-raw > [data-md-raw-source] {
+      display: none;
+    }
+
+    & .reader-raw[data-md-raw-active] > [data-md-raw-source] {
+      display: block;
+    }
+
+    & .reader-raw[data-md-raw-active] > .reader-raw-preview {
+      display: none;
+    }
+
+    & .reader-raw-preview {
+      min-height: var(--reader-line);
+      cursor: text;
+      white-space: normal;
+    }
+
+    & .reader-raw-muted {
+      margin: 0 0 var(--reader-gap);
+      color: var(--reader-secondary);
+      font-family: var(--reader-font-mono);
+      font-size: var(--reader-code-size);
+      white-space: pre-wrap;
+    }
+
+    & .reader-md-footnote-label {
+      color: var(--reader-secondary);
+      font-size: round(nearest, calc(var(--reader-base) * 0.7), 1px);
+      vertical-align: super;
+    }
+
+    & .reader-raw-footnote {
+      display: flex;
+      gap: 0.4em;
+    }
+
+    /* The code block holding the caret shows its language picker in place of the label. */
+    & .reader-codeblock[data-md-code-active] {
+      & .chat-markdown-codeblock-header {
+        opacity: 1;
+      }
+
+      & > .reader-code-label {
+        visibility: hidden;
+      }
+    }
+
+    &.ProseMirror-hideselection *::selection {
+      background: transparent;
+    }
+
+    &.ProseMirror-hideselection {
+      caret-color: transparent;
+    }
+  }
+}

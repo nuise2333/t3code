@@ -4,7 +4,7 @@ import React, { use, useEffect, useState, type ReactNode } from "react";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useClientSettings } from "../../hooks/useSettings";
-import type { DiffThemeName } from "../../lib/diffRendering";
+import type { CodeBlockThemeName } from "../../lib/diffRendering";
 import {
   createIncrementalHighlightedDocument,
   highlightCodeToHast,
@@ -135,6 +135,7 @@ export function MarkdownCodeBlock({
   isStreaming,
   viewToggle,
   canWrap = true,
+  wrapByDefault,
   diagram = false,
   children,
 }: {
@@ -146,6 +147,8 @@ export function MarkdownCodeBlock({
   isStreaming: boolean;
   viewToggle?: ReactNode;
   canWrap?: boolean;
+  /** Overrides the word wrap preference as the starting state. */
+  wrapByDefault?: boolean | undefined;
   diagram?: boolean;
   children: ReactNode;
 }) {
@@ -161,9 +164,9 @@ export function MarkdownCodeBlock({
         cause,
       ),
   });
-  const defaultWrapped = useClientSettings((settings) => settings.wordWrap);
+  const wordWrap = useClientSettings((settings) => settings.wordWrap);
   const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
-  const wrapped = wrapOverride ?? defaultWrapped;
+  const wrapped = wrapOverride ?? wrapByDefault ?? wordWrap;
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
   const copyLabel = copied ? "Copied" : "Copy code";
   const command = code.trim();
@@ -270,7 +273,7 @@ export function MarkdownCodeBlock({
 interface SuspenseShikiCodeBlockProps {
   className: string | undefined;
   code: string;
-  themeName: DiffThemeName;
+  themeName: CodeBlockThemeName;
   isStreaming: boolean;
 }
 
@@ -313,7 +316,7 @@ export function SuspenseShikiCodeBlock({
 interface UncachedShikiCodeBlockProps {
   code: string;
   language: string;
-  themeName: DiffThemeName;
+  themeName: CodeBlockThemeName;
   cacheKey: string;
   isStreaming: boolean;
   preserveLines: boolean;

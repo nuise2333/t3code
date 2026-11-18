@@ -52,6 +52,7 @@ import {
   syncDocumentWindowControlsOverlayClass,
 } from "./lib/windowControlsOverlay";
 import { startProviderAuthDelivery } from "./providerAuthDelivery";
+import { applyReaderAppearance } from "./reader/readerAppearance";
 import { getRouter, type AppRouter } from "./router";
 import { appAtomRegistry } from "./rpc/atomRegistry";
 import { environmentProjects } from "./state/projects";
@@ -118,6 +119,17 @@ function startClientAppearance(): void {
         smoothing: settings.fontSmoothing,
         separate: separateFonts,
       });
+    }
+    if (
+      previous?.readerTypography !== settings.readerTypography ||
+      previous.readerFontSize !== settings.readerFontSize ||
+      previous.readerJustify !== settings.readerJustify ||
+      previous.readerLimitWidth !== settings.readerLimitWidth ||
+      previous.readerTheme !== settings.readerTheme ||
+      previous.readerTableStyle !== settings.readerTableStyle ||
+      previous.readerZoom !== settings.readerZoom
+    ) {
+      applyReaderAppearance(root, settings);
     }
   };
   subscribeClientSettings(apply);

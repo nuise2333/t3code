@@ -229,6 +229,19 @@ describe("searchSettings", () => {
     }
   });
 
+  it("finds every reading view setting from the words for the view", () => {
+    const readerIds = SETTINGS_SEARCH_ITEMS.map((item) => item.id).filter((id) =>
+      id.startsWith("reader-"),
+    );
+    expect(readerIds).toHaveLength(7);
+    for (const query of ["reader", "reading view", "rendered markdown"]) {
+      expect(
+        searchSettings(query).map((item) => item.id),
+        query,
+      ).toEqual(expect.arrayContaining(readerIds));
+    }
+  });
+
   it("keeps catalog result ids unique", () => {
     const ids = SETTINGS_SEARCH_ITEMS.map((item) => item.id);
     expect(new Set(ids).size).toBe(ids.length);

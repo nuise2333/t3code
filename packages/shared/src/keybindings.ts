@@ -83,6 +83,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
   { key: "mod+f", command: "preview.find", when: "previewFocus" },
+  // The reading view sits inside the right panel, so these must follow the preview rules.
+  { key: "mod+=", command: "reader.zoomIn", when: "readerFocus" },
+  { key: "mod++", command: "reader.zoomIn", when: "readerFocus" },
+  { key: "mod+-", command: "reader.zoomOut", when: "readerFocus" },
+  { key: "mod+0", command: "reader.resetZoom", when: "readerFocus" },
+  { key: "mod+alt+o", command: "reader.toggleOutline", when: "readerFocus" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },

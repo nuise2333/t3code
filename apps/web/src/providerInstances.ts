@@ -1,5 +1,7 @@
 import { pipe } from "effect/Function";
 import {
+  bundledAcpIconUrlForAgentId,
+  bundledAcpIconUrlForCommand,
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   resolveProjectProviderInstanceEnabled,
@@ -138,10 +140,17 @@ function applyProviderInstanceBranding(
       ? (explicitInstance.config as Readonly<Record<string, unknown>>)
       : null;
   if (config?.source === "local") {
-    return { ...entry, acpRegistryAgentId: undefined, acpRegistryIconUrl: undefined };
+    const commandPath = typeof config.commandPath === "string" ? config.commandPath : null;
+    return {
+      ...entry,
+      acpRegistryAgentId: undefined,
+      acpRegistryIconUrl: bundledAcpIconUrlForCommand(commandPath) ?? undefined,
+    };
   }
   const agentId = config?.agentId;
-  const iconUrl = config?.registryIconUrl;
+  const iconUrl =
+    (typeof agentId === "string" ? bundledAcpIconUrlForAgentId(agentId) : null) ??
+    config?.registryIconUrl;
   return {
     ...entry,
     ...(typeof agentId === "string" && agentId.trim()

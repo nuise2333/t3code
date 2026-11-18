@@ -1,5 +1,6 @@
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { buildResponseLanguageInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   makeProviderTextDeltaCoalescer,
   type ProviderTextDeltaUpdate,
@@ -287,6 +288,40 @@ describe("CodexAdapterV2 runtime policy", () => {
         value: "Filtered to overdue",
       });
       assert.isDefined(withT3.additionalContext?.["t3_code_runtime"]);
+    }),
+  );
+
+  it.effect("sends the response language with or without T3 MCP context", () =>
+    Effect.gen(function* () {
+      const build = (hasT3Mcp: boolean, responseLanguage: string, text: string | null = "hi") =>
+        CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-language",
+          codexInput: text === null ? [] : [{ type: "text", text }],
+          runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          hasT3Mcp,
+          responseLanguage,
+        });
+      const language = buildResponseLanguageInstructions("简体中文");
+      assert.deepEqual((yield* build(false, "简体中文")).additionalContext, {
+        t3_code_response_language: { kind: "application", value: language },
+      });
+      assert.notProperty(yield* build(false, ""), "additionalContext");
+      const withT3 = (yield* build(true, "简体中文")).additionalContext;
+      assert.include(withT3?.["t3_code_runtime"]?.value ?? "", language);
+      assert.notProperty(withT3, "t3_code_response_language");
+      for (const hasT3Mcp of [false, true]) {
+        assert.deepEqual((yield* build(hasT3Mcp, "简体中文")).input, [
+          { type: "text", text: "hi" },
+          { type: "text", text: language },
+        ]);
+        assert.deepEqual((yield* build(hasT3Mcp, "")).input, [{ type: "text", text: "hi" }]);
+        assert.deepEqual((yield* build(hasT3Mcp, "简体中文", null)).input, []);
+      }
+      assert.notInclude(
+        (yield* build(true, "")).additionalContext?.["t3_code_runtime"]?.value ?? "",
+        "<response_language>",
+      );
     }),
   );
 });

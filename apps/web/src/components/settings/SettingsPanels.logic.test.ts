@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   backgroundActivitySharedPolicySettings,
   getChangedBrowserSettingLabels,
+  getChangedReaderSettingLabels,
   hasChangedBackgroundActivitySettings,
 } from "./SettingsPanels.logic";
 
@@ -86,5 +87,25 @@ describe("getChangedBrowserSettingLabels", () => {
         browserCustomSearchUrl: "https://search.example/?q=%s",
       }),
     ).toEqual(["Search engine"]);
+  });
+});
+
+describe("getChangedReaderSettingLabels", () => {
+  it("names every reader setting, so restore defaults lists each one it resets", () => {
+    expect(getChangedReaderSettingLabels(DEFAULT_UNIFIED_SETTINGS)).toEqual([]);
+    const readerKeys = Object.keys(DEFAULT_UNIFIED_SETTINGS).filter((key) =>
+      key.startsWith("reader"),
+    );
+    expect(
+      getChangedReaderSettingLabels({
+        readerTypography: "book",
+        readerFontSize: 18,
+        readerJustify: false,
+        readerLimitWidth: false,
+        readerTheme: "app",
+        readerTableStyle: "grid",
+        readerZoom: 120,
+      }),
+    ).toHaveLength(readerKeys.length);
   });
 });

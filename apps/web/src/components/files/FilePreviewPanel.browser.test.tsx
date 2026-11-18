@@ -103,7 +103,7 @@ import FilePreviewPanel from "./FilePreviewPanel";
 const environmentId = EnvironmentId.make("markdown-preview-test");
 const threadRef = { environmentId, threadId: ThreadId.make("thread") };
 function setup() {
-  const keys = ["t3code.fileExplorerOpen", "t3code.renderMarkdown"];
+  const keys = ["t3code.fileExplorerOpen", "t3code.renderMarkdownEditable"];
   const previous = keys.map((key) => localStorage.getItem(key));
   localStorage.setItem(keys[0]!, "false");
   localStorage.setItem(keys[1]!, "true");
@@ -267,7 +267,8 @@ describe("rendered Markdown task saves", () => {
     expect(checkbox).not.toBeNull();
     expect(checkbox.disabled).toBe(false);
     await act(async () => checkbox.click());
-    await vi.advanceTimersByTimeAsync(500);
+    // The editor publishes after its pause, then the save session after its own.
+    await vi.advanceTimersByTimeAsync(700);
     expect(state.writeFile).toHaveBeenCalledExactlyOnceWith({
       environmentId,
       input: {
@@ -276,6 +277,40 @@ describe("rendered Markdown task saves", () => {
         contents: "- [x] Keep the rest of this file\n",
       },
     });
+  });
+});
+
+describe("rendered Markdown editing", () => {
+  it("opens a Markdown file in the editor by default, and a truncated one read-only", async () => {
+    using _settings = setup();
+    localStorage.removeItem("t3code.renderMarkdownEditable");
+    await using screen = await render(markdownPreview(false));
+    await vi.waitFor(() =>
+      expect(screen.container.querySelector("[data-reader-editor]")).not.toBeNull(),
+    );
+    await screen.rerender(markdownPreview(true));
+    await vi.waitFor(() =>
+      expect(screen.container.querySelector("[data-reader-editor]")).toBeNull(),
+    );
+    expect(screen.container.querySelector(".markdown-reader")).not.toBeNull();
+  });
+
+  it("saves the last keystrokes when the editor goes away", async () => {
+    using _settings = setup();
+    const screen = await render(markdownPreview(false, "Body text.\n"));
+    await vi.waitFor(() =>
+      expect(screen.container.querySelector("[data-reader-editor]")).not.toBeNull(),
+    );
+    await userEvent.click(screen.getByText("Body text."));
+    await userEvent.keyboard("{End}!");
+    await screen.unmount();
+    await vi.waitFor(() =>
+      expect(state.writeFile).toHaveBeenCalledWith({
+        environmentId,
+        input: { cwd: "/workspace", relativePath: "tasks.md", contents: "Body text.!\n" },
+      }),
+    );
+    await screen[Symbol.asyncDispose]();
   });
 });
 

@@ -90,6 +90,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   getChangedBrowserSettingLabels,
+  getChangedReaderSettingLabels,
   getChangedTypographySettingLabels,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
@@ -515,6 +516,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ["Composer context"]
       : []),
     ...getChangedTypographySettingLabels(settings),
+    ...getChangedReaderSettingLabels(settings),
     ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
       ? ["Default diff file state"]
       : []),
@@ -584,6 +586,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
     ...(settings.threadTitleInstructions !== DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions
       ? ["Thread title instructions"]
+      : []),
+    ...(settings.responseLanguage !== DEFAULT_UNIFIED_SETTINGS.responseLanguage
+      ? ["Response language"]
       : []),
     ...getChangedBrowserSettingLabels(settings),
     ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
@@ -695,6 +700,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
       threadTitleInstructions: DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions,
+      responseLanguage: DEFAULT_UNIFIED_SETTINGS.responseLanguage,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -703,6 +709,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
       fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
       fontSizeTerminal: DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal,
+      readerTypography: DEFAULT_UNIFIED_SETTINGS.readerTypography,
+      readerFontSize: DEFAULT_UNIFIED_SETTINGS.readerFontSize,
+      readerJustify: DEFAULT_UNIFIED_SETTINGS.readerJustify,
+      readerLimitWidth: DEFAULT_UNIFIED_SETTINGS.readerLimitWidth,
+      readerTheme: DEFAULT_UNIFIED_SETTINGS.readerTheme,
+      readerTableStyle: DEFAULT_UNIFIED_SETTINGS.readerTableStyle,
+      readerZoom: DEFAULT_UNIFIED_SETTINGS.readerZoom,
       browserDefaultViewport: DEFAULT_UNIFIED_SETTINGS.browserDefaultViewport,
       browserDefaultZoomFactor: DEFAULT_UNIFIED_SETTINGS.browserDefaultZoomFactor,
       browserDefaultAppearance: DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance,

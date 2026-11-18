@@ -109,6 +109,7 @@ import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { buildCodexAdditionalContext } from "../../provider/CodexDeveloperInstructions.ts";
+import { buildResponseLanguageInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   describeMcpElicitation,
   toMcpElicitationResponse,
@@ -133,6 +134,7 @@ import {
   MCP_APP_RESOURCE_SCHEME,
 } from "@t3tools/shared/mcpApp";
 import { snapshotMcpApp } from "../../mcpApps/McpAppSnapshot.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriverCreateInput,
@@ -379,11 +381,17 @@ function codexTimestamp(seconds: number | null | undefined): DateTime.Utc {
     : DateTime.makeUnsafe(seconds * 1000);
 }
 
+function isResponseLanguageReminder(text: string): boolean {
+  return text.startsWith("<response_language>") && text.endsWith("</response_language>");
+}
+
 function codexUserMessageText(
   content: ReadonlyArray<CodexSchema.V2ItemCompletedNotification__UserInput>,
 ): string {
   return content
-    .flatMap((item) => (item.type === "text" ? [item.text] : []))
+    .flatMap((item) =>
+      item.type === "text" && !isResponseLanguageReminder(item.text) ? [item.text] : [],
+    )
     .join("\n")
     .trim();
 }
@@ -789,6 +797,7 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
     readonly cyberAccess?: { readonly defaultProgram: string | undefined } | undefined;
     /** The user's `model_reasoning_summary` from the Codex config, when set. */
     readonly configuredReasoningSummary?: CodexSchema.V2TurnStartParams__ReasoningSummary;
+    readonly responseLanguage?: string;
   }) {
     const runtimeModeDefaults = codexRuntimeModeTurnDefaults(input.runtimePolicy.runtimeMode);
     const approvalPolicy =
@@ -823,23 +832,34 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
         { kind: "untrusted" as const, value: entry.text },
       ]),
     );
+    const responseLanguage = buildResponseLanguageInstructions(input.responseLanguage);
     const t3Context =
       input.hasT3Mcp === true
         ? buildCodexAdditionalContext(
-            { model: input.modelSelection.model, reasoningEffort: effort ?? undefined },
+            {
+              model: input.modelSelection.model,
+              reasoningEffort: effort ?? undefined,
+              responseLanguage: input.responseLanguage,
+            },
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
             },
           )
-        : undefined;
+        : responseLanguage
+          ? { t3_code_response_language: { kind: "application" as const, value: responseLanguage } }
+          : undefined;
     const additionalContext =
       t3Context === undefined && Object.keys(appContext).length === 0
         ? undefined
         : { ...t3Context, ...appContext };
     return yield* decodeCodexTurnStartParams({
       threadId: input.nativeThreadId,
-      input: input.codexInput,
+      // additionalContext is sent once per thread; a copy beside each message stops long threads drifting.
+      input:
+        responseLanguage && input.codexInput.length > 0
+          ? [...input.codexInput, { type: "text", text: responseLanguage }]
+          : input.codexInput,
       ...(additionalContext ? { additionalContext } : {}),
       cwd: input.runtimePolicy.cwd,
       model: input.modelSelection.model,
@@ -1842,6 +1862,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
   adapterOptions: CodexAdapterV2Options,
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
   const readMcpSession = (threadId: ThreadId | null) =>
     threadId === null ? Effect.undefined : mcpSessions.read(threadId);
   const { clientFactory, digest, fileSystem, idAllocator, serverConfig } = adapterOptions;
@@ -7338,8 +7359,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   Effect.logDebug("Codex config read failed.").pipe(Effect.as(undefined)),
                 ),
               );
+            const responseLanguage = Option.isSome(serverSettings)
+              ? yield* serverSettings.value.getSettings.pipe(
+                  Effect.map((settings) => settings.responseLanguage),
+                  Effect.orElseSucceed(() => ""),
+                )
+              : "";
             const turnStartParams = yield* buildCodexTurnStartParams({
               cyberAccess: codexCyberAccess(models, turnInput.modelSelection.model),
+              responseLanguage,
               nativeThreadId: threadId,
               codexInput,
               runtimePolicy: turnInput.runtimePolicy,

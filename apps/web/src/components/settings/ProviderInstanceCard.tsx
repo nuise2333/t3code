@@ -24,6 +24,8 @@ import {
   type ProviderInstanceEnvironmentVariable,
   type ProviderInstanceId,
   type AcpRegistryUrlAuthAction,
+  bundledAcpIconUrlForAgentId,
+  bundledAcpIconUrlForCommand,
   type EnvironmentId,
   type ProjectId,
   type ProviderDriverKind,
@@ -928,8 +930,11 @@ export function ProviderInstanceCard({
       }
       acpRegistryIconUrl={
         readConfigString(instance.config, "source") === "local"
-          ? undefined
-          : (readConfigString(instance.config, "registryIconUrl") ?? undefined)
+          ? (bundledAcpIconUrlForCommand(readConfigString(instance.config, "commandPath")) ??
+            undefined)
+          : (bundledAcpIconUrlForAgentId(readConfigString(instance.config, "agentId")) ??
+            readConfigString(instance.config, "registryIconUrl") ??
+            undefined)
       }
       showBadge={Boolean(accentColor)}
       className="size-5"

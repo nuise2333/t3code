@@ -6,7 +6,11 @@ import * as NodeModule from "node:module";
 import * as NodeVM from "node:vm";
 import { assert, describe, it } from "@effect/vitest";
 
-import { PI_T3_MCP_EXTENSION_SOURCE, PI_T3_SERVICE_TIER_COMMAND } from "./mcpExtensionSource.ts";
+import {
+  PI_T3_MCP_EXTENSION_SOURCE,
+  PI_T3_RESPONSE_LANGUAGE_COMMAND,
+  PI_T3_SERVICE_TIER_COMMAND,
+} from "./mcpExtensionSource.ts";
 import { loadMcpBridge } from "./mcpBridge.testkit.ts";
 
 type RequestHook = (
@@ -80,6 +84,41 @@ describe("Pi orchestration prompt section", () => {
       assert.isTrue(result!.systemPrompt.startsWith(`${event.systemPrompt}\n\n`));
       assert.include(result!.systemPrompt, "orchestrator_capabilities");
     }
+  });
+
+  it("adds the response language block until T3 clears it", async () => {
+    const bridge = await loadMcpBridge();
+    const hook = bridge.handlers.get("before_agent_start")!;
+    const setLanguage = bridge.commands.get(PI_T3_RESPONSE_LANGUAGE_COMMAND)!;
+    const block = "<response_language>Reply in 简体中文.</response_language>";
+    const ctx = { ui: { notify: assert.fail } };
+    const sectioned = () => {
+      const sections: Record<string, string> = {};
+      return {
+        sections,
+        result: hook({ systemPrompt: "base", systemPromptOptions: { sections } }, ctx),
+      };
+    };
+
+    const reminder = { customType: "t3_response_language", content: block, display: false };
+
+    await setLanguage(` ${block} `);
+    const plain = await hook({ systemPrompt: "base" }, ctx);
+    assert.isTrue(plain!.systemPrompt.endsWith(`\n\n${block}`));
+    assert.deepEqual(plain!.message, reminder);
+    const first = sectioned();
+    const firstResult = await first.result;
+    assert.deepEqual(firstResult?.message, reminder);
+    assert.notProperty(firstResult, "systemPrompt");
+    assert.isTrue(first.sections["t3_code_orchestration"]!.endsWith(`\n\n${block}`));
+
+    await setLanguage("");
+    const clearedPlain = await hook({ systemPrompt: "base" }, ctx);
+    assert.notInclude(clearedPlain!.systemPrompt, "response_language");
+    assert.notProperty(clearedPlain, "message");
+    const cleared = sectioned();
+    assert.isUndefined(await cleared.result);
+    assert.notInclude(cleared.sections["t3_code_orchestration"]!, "response_language");
   });
 });
 

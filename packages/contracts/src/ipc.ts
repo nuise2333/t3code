@@ -1042,6 +1042,21 @@ export const DesktopMediaReadSchema = Schema.Struct({
 });
 export type DesktopMediaRead = typeof DesktopMediaReadSchema.Type;
 
+export const DesktopReaderFontFaceSchema = Schema.Struct({
+  family: Schema.Literals(["serif", "mono"]),
+  style: Schema.Literals(["normal", "italic"]),
+  data: Schema.Uint8Array,
+});
+export type DesktopReaderFontFace = typeof DesktopReaderFontFaceSchema.Type;
+
+export const DesktopReaderPdfExportInputSchema = Schema.Struct({
+  title: Schema.String.check(Schema.isMaxLength(255)),
+});
+export type DesktopReaderPdfExportInput = typeof DesktopReaderPdfExportInputSchema.Type;
+
+export const DesktopReaderPdfExportResultSchema = Schema.Literals(["saved", "canceled"]);
+export type DesktopReaderPdfExportResult = typeof DesktopReaderPdfExportResultSchema.Type;
+
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
@@ -1139,6 +1154,10 @@ export interface DesktopBridge {
   openExternal: (url: string) => Promise<boolean>;
   /** Reads http(s) media in the main process, outside renderer CORS and CSP; null on network failure. */
   readMedia: (url: string) => Promise<DesktopMediaRead | null>;
+  /** Bytes of the macOS system fonts Chromium cannot reach by name; empty on other platforms. */
+  readReaderFonts: () => Promise<readonly DesktopReaderFontFace[]>;
+  /** Asks where to save, then prints the calling page to that PDF with its print stylesheet. */
+  exportReaderPdf: (input: DesktopReaderPdfExportInput) => Promise<DesktopReaderPdfExportResult>;
   openSystemSettings: (pane: SystemSettingsPane) => Promise<boolean>;
   checkSystemPermission: (pane: SystemSettingsPane) => Promise<boolean>;
   probeRemoteEditors: () => Promise<readonly EditorId[]>;

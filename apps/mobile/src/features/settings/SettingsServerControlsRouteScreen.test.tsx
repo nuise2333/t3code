@@ -125,6 +125,7 @@ vi.mock("./components/BranchNamingSettings", () => ({
     return null;
   },
 }));
+vi.mock("./components/ResponseLanguageSettings", () => ({ ResponseLanguageSettings: () => null }));
 vi.mock("./settings-environment-filter", () => ({
   useSettingsEnvironmentFilter: () => ({
     selectedTargets: mocks.targets,

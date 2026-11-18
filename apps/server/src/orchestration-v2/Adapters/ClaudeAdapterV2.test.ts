@@ -85,9 +85,11 @@ import * as PortScanner from "../../preview/PortScanner.ts";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { WorkflowAgentTranscriptReadObserver } from "../workflowAgentTranscript.ts";
 import * as ServerConfig from "../../config.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import { T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH } from "@t3tools/provider-core/server/orchestrationInstructions";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { buildResponseLanguageInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
@@ -814,6 +816,7 @@ describe("ClaudeAdapterV2 device instructions", () => {
     ]);
     assert.deepEqual(await subagentContext({ mcp: true, deviceToolsAvailable: false }), []);
     assert.deepEqual(await subagentContext({ mcp: false, deviceToolsAvailable: true }), []);
+    assert.isUndefined(options({ mcp: true, deviceToolsAvailable: true }).hooks?.UserPromptSubmit);
   });
 });
 
@@ -19675,6 +19678,190 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           McpProviderSessions.layer,
           NodeServices.layer,
           NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
+  it.effect("reopens the process on the turn after the response language changes", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const opened: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOptions> = [];
+      const processQueues: Array<Queue.Queue<SDKMessage>> = [];
+      const turnTerminals = yield* Queue.unbounded<void>();
+      const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+        instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+        settings: DEFAULT_CLAUDE_SETTINGS,
+        environment: {},
+        attachmentsDir: yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-response-language-",
+        }),
+        fileSystem,
+        path: yield* Path.Path,
+        random: yield* SecureRandom.SecureRandom,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        continuationRequests: { offer: () => Effect.void },
+        queryRunner: {
+          allocateSessionId: Effect.succeed(WAKE_NATIVE_SESSION),
+          open: (input) =>
+            Effect.gen(function* () {
+              opened.push(input.options);
+              const sdkMessages = yield* Queue.unbounded<SDKMessage>();
+              processQueues.push(sdkMessages);
+              return {
+                messages: Stream.fromQueue(sdkMessages),
+                offer: () => Effect.void,
+                setModel: () => Effect.void,
+                applyFlagSettings: () => Effect.void,
+                setPermissionMode: () => Effect.void,
+                backgroundTasks: () => Effect.succeed(false),
+                mcpServerStatus: Effect.succeed([]),
+                readMcpResource: () => Effect.die("unexpected MCP resource read"),
+                callMcpTool: () => Effect.die("unexpected MCP tool call"),
+                listPermissionRules: Effect.die("unexpected permission rules read"),
+                stopTask: () => Effect.void,
+                interrupt: Effect.void,
+                close: Queue.shutdown(sdkMessages),
+              };
+            }),
+          forkSession: () => Effect.die("unused forkSession"),
+          subagentLaunchToolUseId: () => Effect.succeed(null),
+          subagentModel: () => Effect.succeed(null),
+          assertComplete: Effect.void,
+        },
+      });
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: "/workspace",
+      });
+      const threadId = ThreadId.make("thread-claude-response-language");
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("provider-session-claude-response-language"),
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        runtimePolicy,
+      });
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        runtimePolicy,
+      });
+      yield* runtime.events.pipe(
+        Stream.runForEach((event) =>
+          event.type === "turn.terminal" ? Queue.offer(turnTerminals, undefined) : Effect.void,
+        ),
+        Effect.forkScoped,
+      );
+      const now = yield* DateTime.now;
+      const runTurn = (ordinal: number, frames: ReadonlyArray<SDKMessage> = []) =>
+        Effect.gen(function* () {
+          yield* runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId,
+              providerThread:
+                ordinal === 1 ? providerThread : { ...providerThread, status: "active" },
+              now,
+              attemptId: RunAttemptId.make(`attempt-claude-response-language-${ordinal}`),
+              text: "Hello",
+              attachments: [],
+              providerTurnOrdinal: ordinal,
+              runtimePolicy,
+            }),
+          );
+          yield* Queue.offerAll(processQueues.at(-1)!, frames);
+          yield* Queue.offer(
+            processQueues.at(-1)!,
+            makeResultFrame({
+              uuid: `00000000-0000-4000-8000-00000000c0${ordinal}0`,
+              result: "Hi",
+            }),
+          );
+          yield* Queue.take(turnTerminals);
+        });
+      const append = (index: number) =>
+        (opened[index]?.systemPrompt as { readonly append?: string } | undefined)?.append ?? "";
+
+      yield* runTurn(1);
+      yield* runTurn(2);
+      assert.lengthOf(opened, 1);
+      assert.include(append(0), "<response_language>");
+      assert.include(append(0), "简体中文");
+      const promptContext = yield* Effect.promise(() =>
+        Promise.all(
+          (opened[0]?.hooks?.UserPromptSubmit ?? []).flatMap((matcher) =>
+            matcher.hooks.map((hook) =>
+              hook(
+                {
+                  hook_event_name: "UserPromptSubmit",
+                  prompt: "Hello",
+                  session_id: "native-thread-claude-response-language",
+                  transcript_path: "/transcript.jsonl",
+                  cwd: "/workspace",
+                },
+                undefined,
+                { signal: new AbortController().signal },
+              ),
+            ),
+          ),
+        ),
+      );
+      assert.deepEqual(promptContext, [
+        {
+          hookSpecificOutput: {
+            hookEventName: "UserPromptSubmit",
+            additionalContext: buildResponseLanguageInstructions("简体中文"),
+          },
+        },
+      ]);
+      const toolBatchContext = yield* Effect.promise(() =>
+        Promise.all(
+          (opened[0]?.hooks?.PostToolBatch ?? []).flatMap((matcher) =>
+            matcher.hooks.map((hook) =>
+              hook(
+                {
+                  hook_event_name: "PostToolBatch",
+                  tool_calls: [],
+                  session_id: "native-thread-claude-response-language",
+                  transcript_path: "/transcript.jsonl",
+                  cwd: "/workspace",
+                },
+                undefined,
+                { signal: new AbortController().signal },
+              ),
+            ),
+          ),
+        ),
+      );
+      assert.deepEqual(toolBatchContext, [
+        {
+          hookSpecificOutput: {
+            hookEventName: "PostToolBatch",
+            additionalContext: buildResponseLanguageInstructions("简体中文"),
+          },
+        },
+      ]);
+
+      yield* settings.updateSettings({ responseLanguage: "Deutsch" });
+      yield* runTurn(3);
+      assert.lengthOf(opened, 2);
+      assert.include(append(1), "Deutsch");
+      assert.notInclude(append(1), "简体中文");
+
+      // Background work outlives the turn; a language change must not refuse or kill it.
+      yield* runTurn(4, [wakeTaskStarted]);
+      yield* settings.updateSettings({ responseLanguage: "日本語" });
+      yield* runTurn(5);
+      assert.lengthOf(opened, 2);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+          ServerSettings.ServerSettingsService.layerTest({ responseLanguage: "简体中文" }),
         ),
       ),
     ),

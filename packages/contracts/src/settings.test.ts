@@ -324,6 +324,57 @@ describe("ClientSettings quit confirmation", () => {
   });
 });
 
+describe("ClientSettings reader", () => {
+  it("defaults to the serif look and keeps choices through patches and persistence", () => {
+    expect(decodeClientSettings({})).toMatchObject({
+      readerTypography: "serif",
+      readerFontSize: 16,
+      readerJustify: true,
+      readerLimitWidth: true,
+      readerTheme: "mono",
+      readerTableStyle: "booktabs",
+      readerZoom: 100,
+    });
+    for (const choices of [
+      {
+        readerTypography: "book",
+        readerFontSize: 12,
+        readerJustify: false,
+        readerLimitWidth: false,
+        readerTheme: "app",
+        readerTableStyle: "grid",
+        readerZoom: 80,
+      },
+      {
+        readerTypography: "serif-tc",
+        readerFontSize: 28,
+        readerTheme: "solarized",
+        readerZoom: 200,
+      },
+    ]) {
+      expect(decodeClientSettingsPatch(choices)).toEqual(choices);
+      expect(encodeClientSettings(decodeClientSettings(choices))).toMatchObject(choices);
+    }
+  });
+
+  it.each([
+    { readerTypography: "mono" },
+    { readerFontSize: 11 },
+    { readerFontSize: 29 },
+    { readerFontSize: 16.5 },
+    { readerJustify: "true" },
+    { readerLimitWidth: 1 },
+    { readerTheme: "sepia" },
+    { readerTableStyle: "striped" },
+    { readerZoom: 79 },
+    { readerZoom: 201 },
+    { readerZoom: 100.5 },
+  ])("rejects %o as a patch and as stored settings", (invalid) => {
+    expect(() => decodeClientSettingsPatch(invalid)).toThrow();
+    expect(() => decodeClientSettings(invalid)).toThrow();
+  });
+});
+
 describe("provider enabled defaults", () => {
   it("resolves instance enabled state with explicit false winning", () => {
     const grok = ProviderDriverKind.make("grok");

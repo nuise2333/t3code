@@ -2179,6 +2179,10 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             if (declined !== undefined)
               yield* eventPermit.withPermits(1)(finish(turn, "failed", declined));
           } else {
+            const responseLanguage = yield* providerHost.settings.get.pipe(
+              Effect.map((settings) => settings.responseLanguage),
+              Effect.orElseSucceed(() => ""),
+            );
             const result = yield* request(
               "turn/start",
               {
@@ -2189,6 +2193,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                       harness: "Muse Code",
                       model: session.model ?? undefined,
                       reasoningEffort: effort,
+                      responseLanguage,
                     }),
                   },
                   ...parts,

@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useId, useState } from "react";
 import {
+  isFullColorAcpIconUrl,
   resolveOfficialAcpRegistryIconUrl,
   officialAcpRegistryIconUrlForAgentId,
 } from "@t3tools/contracts";
@@ -107,6 +108,7 @@ export function AcpRegistryAgentIcon({
 }) {
   const colorFilterId = useId();
   const iconUrl = resolveOfficialAcpRegistryIconUrl(icon);
+  const fullColor = isFullColorAcpIconUrl(iconUrl);
   // Render only after the load pipeline resolves, so the fallback icon does
   // not flash a broken image.
   const source = AsyncResult.getOrElse(
@@ -150,7 +152,7 @@ export function AcpRegistryAgentIcon({
             "size-full object-contain",
             status !== "loaded" && "invisible absolute inset-0",
           )}
-          style={{ filter: `url(#${colorFilterId})` }}
+          style={fullColor ? undefined : { filter: `url(#${colorFilterId})` }}
           decoding="async"
           referrerPolicy="no-referrer"
           src={source}
