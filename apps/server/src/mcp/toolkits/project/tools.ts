@@ -1,7 +1,9 @@
 import { McpAttachmentInput } from "../attachment/input.ts";
 import {
+  clampedPositiveInt,
   NonNegativeInt,
   ModelSelection,
+  RoutingGroupId,
   TrimmedNonEmptyString,
   ThreadId,
   RunId,
@@ -55,7 +57,7 @@ const ProjectListTool = Tool.make("t3_project_list", {
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     cursor: Schema.optional(NonNegativeInt),
-    limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+    limit: Schema.optional(clampedPositiveInt(100)),
   }),
   success: Schema.Struct({
     projects: Schema.Array(Project),
@@ -103,7 +105,11 @@ const ProjectDeleteTool = Tool.make("t3_project_delete", {
     projectId: ProjectId,
     force: Schema.optionalKey(Schema.Boolean),
   }),
-  dependencies: [...shared.dependencies, ProjectCloneTracker.ProjectCloneTracker],
+  dependencies: [
+    ...shared.dependencies,
+    ProjectCloneTracker.ProjectCloneTracker,
+    ManagedProjectFolders.ManagedProjectFolders,
+  ],
 }).annotate(Tool.Destructive, true);
 const ProjectCloneTool = Tool.make("t3_project_clone", {
   ...shared,
@@ -136,6 +142,10 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ),
     title: TrimmedNonEmptyString,
     modelSelection: Schema.optional(ModelSelection),
+    routingGroupId: Schema.optional(RoutingGroupId).annotate({
+      description:
+        "Group id from orchestrator_capabilities; launches a usable member. Not with modelSelection.",
+    }),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
     workspaceStrategy: Schema.optional(
@@ -153,6 +163,9 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
     /** Set by a linked environment launching its agent's delegated task here; ignored otherwise. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+    delegatedRole: Schema.optional(Schema.Literal("review")).annotate({
+      description: "Linked environments only, with delegatedFrom. Leave unset.",
+    }),
   }),
   success: Schema.Struct({
     threadId: ThreadId,

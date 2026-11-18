@@ -101,6 +101,73 @@ describe("serverSettings helpers", () => {
     expect([on.idleCompaction, on.compactIdleThreads]).toEqual(["beforeCacheExpires", true]);
   });
 
+  it("merges Auto switches and reads the flat Auto effort switch of older clients", () => {
+    const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { autoRoutingEnabled: true });
+    const switching = applyServerSettingsPatch(enabled, {
+      autoRouting: { allowModelSwitch: true },
+    });
+    expect(switching.autoRouting).toEqual({
+      enabled: true,
+      allowModelSwitch: true,
+      allowProviderSwitch: false,
+    });
+    expect(applyServerSettingsPatch(switching, { autoRoutingEnabled: false }).autoRouting).toEqual({
+      enabled: false,
+      allowModelSwitch: true,
+      allowProviderSwitch: false,
+    });
+    expect("autoRoutingEnabled" in switching).toBe(false);
+  });
+
+  it("replaces routing groups and rules whole, so a cleared rule does not survive", () => {
+    const member = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-fake-1" };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      routingGroups: [
+        { id: "fast", name: "Fast", members: [member], strategy: "order" },
+        { id: "deep", name: "Deep", members: [member, member], strategy: "order" },
+      ],
+      routingGroupRules: { hard: "deep", readonly: "fast" },
+    });
+    const patched = applyServerSettingsPatch(saved, {
+      routingGroups: [{ id: "deep", name: "Deep", members: [member], strategy: "order" }],
+      routingGroupRules: { hard: "deep" },
+    });
+    expect(patched.routingGroups).toEqual([
+      { id: "deep", name: "Deep", members: [member], strategy: "order" },
+    ]);
+    expect(patched.routingGroupRules).toEqual({ hard: "deep" });
+  });
+
+  it("keeps a stored rank and team when a client that predates them saves the group", () => {
+    const member = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-fake-1" };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      routingGroups: [
+        { id: "spread", name: "Spread", members: [member], strategy: "order", rank: "quota" },
+        { id: "crew", name: "Crew", members: [member], strategy: "order", team: true },
+      ],
+    });
+    const resaved = applyServerSettingsPatch(saved, {
+      routingGroups: [{ id: "crew", name: "Crew", members: [member], strategy: "order" }],
+    });
+    expect(resaved.routingGroups[0]?.team).toBe(true);
+    const renamed = applyServerSettingsPatch(saved, {
+      routingGroups: [
+        { id: "spread", name: "Spread out", members: [member], strategy: "order" },
+        { id: "fresh", name: "Fresh", members: [member], strategy: "order" },
+      ],
+    });
+    expect(renamed.routingGroups.map((group) => [group.id, group.rank])).toEqual([
+      ["spread", "quota"],
+      ["fresh", undefined],
+    ]);
+    const ordered = applyServerSettingsPatch(renamed, {
+      routingGroups: [
+        { id: "spread", name: "Spread", members: [member], strategy: "order", rank: "order" },
+      ],
+    });
+    expect(ordered.routingGroups[0]?.rank).toBe("order");
+  });
+
   it("changes a cleanup rule without replacing the machine's other rules", () => {
     const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnMerge: true, logsAfterDays: 30 },

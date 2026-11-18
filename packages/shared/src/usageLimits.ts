@@ -26,56 +26,81 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
+function windowIsLive(window: ServerProviderUsageWindow, now: number, model?: string): boolean {
+  return (
+    (model === undefined || window.modelIds === undefined || window.modelIds.includes(model)) &&
+    (model === undefined ||
+      window.providerIds === undefined ||
+      window.providerIds.includes(model.split("/")[0] ?? "")) &&
+    (!window.resetsAt ||
+      !Number.isFinite(Date.parse(window.resetsAt)) ||
+      Date.parse(window.resetsAt) > now)
+  );
+}
+
+/** Whether a driver bills this model against the window; Cursor's either-pool rule stays with exhaustion. */
+function windowBillsModel(
+  provider: ServerProvider | undefined,
+  window: ServerProviderUsageWindow,
+  model: string,
+): boolean {
+  switch (provider?.driver) {
+    case "antigravity": {
+      const family = model.match(/^(gemini|claude|gpt)-/)?.[1];
+      const pool = window.id.match(/^(gemini|claude|gpt|3p)-/)?.[1];
+      return (
+        pool === undefined ||
+        family === undefined ||
+        pool === family ||
+        (pool === "3p" && (family === "claude" || family === "gpt"))
+      );
+    }
+    case "codex":
+      // Seat-based plans spend credits only past their plan windows, so the credit cap blocks only plans without them.
+      return (
+        window.id !== "individual" ||
+        !(provider.usageLimits?.windows ?? []).some(
+          (entry) => entry.id === "primary" || entry.id === "secondary",
+        )
+      );
+    case "opencode":
+      return !window.id.startsWith("go_") || model.startsWith("opencode-go/");
+    default:
+      return true;
+  }
+}
+
+/** Windows that have not reset and that this model spends, at any fill level. */
+export function applicableUsageWindows(
+  provider: ServerProvider | undefined,
+  now: number,
+  model: string,
+): ReadonlyArray<ServerProviderUsageWindow> {
+  return (provider?.usageLimits?.windows ?? []).filter(
+    (window) => windowIsLive(window, now, model) && windowBillsModel(provider, window, model),
+  );
+}
+
 export function exhaustedUsageWindow(
   provider: ServerProvider | undefined,
   now: number,
   model?: string,
 ) {
-  const windows = provider?.usageLimits?.windows ?? [];
-  const exhausted = windows.filter(
-    (window) =>
-      (window.usedPercent ?? 0) >= 100 &&
-      (model === undefined || window.modelIds === undefined || window.modelIds.includes(model)) &&
-      (model === undefined ||
-        window.providerIds === undefined ||
-        window.providerIds.includes(model.split("/")[0] ?? "")) &&
-      (!window.resetsAt ||
-        !Number.isFinite(Date.parse(window.resetsAt)) ||
-        Date.parse(window.resetsAt) > now),
-  );
-  if (model === undefined) return exhausted[0];
-  switch (provider?.driver) {
-    case "cursor": {
-      const api = exhausted.find((window) => window.id === "apiPercentUsed");
-      const auto = exhausted.find((window) => window.id === "autoPercentUsed");
-      return /^(auto|default|grok|composer)/.test(model) ? auto && api : api;
-    }
-    case "antigravity": {
-      const family = model.match(/^(gemini|claude|gpt)-/)?.[1];
-      return exhausted.find((window) => {
-        const pool = window.id.match(/^(gemini|claude|gpt|3p)-/)?.[1];
-        return (
-          pool === undefined ||
-          family === undefined ||
-          pool === family ||
-          (pool === "3p" && (family === "claude" || family === "gpt"))
-        );
-      });
-    }
-    case "codex": {
-      // Seat-based plans spend credits only past their plan windows, so the credit cap blocks only plans without them.
-      const hasPlanWindows = windows.some(
-        (window) => window.id === "primary" || window.id === "secondary",
-      );
-      return exhausted.find((window) => window.id !== "individual" || !hasPlanWindows);
-    }
-    case "opencode":
-      return exhausted.find(
-        (window) => !window.id.startsWith("go_") || model.startsWith("opencode-go/"),
-      );
-    default:
-      return exhausted[0];
+  const isFull = (window: ServerProviderUsageWindow) => (window.usedPercent ?? 0) >= 100;
+  if (model === undefined) {
+    return (provider?.usageLimits?.windows ?? []).find(
+      (window) => isFull(window) && windowIsLive(window, now),
+    );
   }
+  if (provider?.driver === "cursor") {
+    const exhausted = (provider.usageLimits?.windows ?? []).filter(
+      (window) => isFull(window) && windowIsLive(window, now, model),
+    );
+    const api = exhausted.find((window) => window.id === "apiPercentUsed");
+    const auto = exhausted.find((window) => window.id === "autoPercentUsed");
+    return /^(auto|default|grok|composer)/.test(model) ? auto && api : api;
+  }
+  return applicableUsageWindows(provider, now, model).find(isFull);
 }
 
 export function resolveNewThreadModelSelection(input: {

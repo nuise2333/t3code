@@ -385,6 +385,9 @@ const LegacyProviderSettingsJson = fromLenientJson(
     providers: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
     bitbucket: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
     github: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+    // Unknown, so a malformed value never costs the rest of the file.
+    autoRoutingEnabled: Schema.optionalKey(Schema.Unknown),
+    autoRouting: Schema.optionalKey(Schema.Unknown),
   }),
 );
 const decodeLegacyProviderSettingsJsonExit = Schema.decodeUnknownExit(LegacyProviderSettingsJson);
@@ -817,6 +820,14 @@ const make = Effect.gen(function* () {
         }
       } else {
         settings = decoded.value;
+        // Older files keep Auto effort in a flat switch; the object wins once one was saved.
+        const legacy = legacySettings.value;
+        if (typeof legacy.autoRoutingEnabled === "boolean" && legacy.autoRouting === undefined) {
+          settings = {
+            ...settings,
+            autoRouting: { ...settings.autoRouting, enabled: legacy.autoRoutingEnabled },
+          };
+        }
       }
     }
     // Settings saved by a server that kept the mode in `compactIdleThreads` move

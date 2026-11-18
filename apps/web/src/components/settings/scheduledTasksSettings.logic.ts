@@ -113,6 +113,8 @@ export interface DraftState {
   readonly startFromOrigin: boolean;
   readonly existingWorktreePath: string;
   readonly modelKey: string;
+  /** A routing group this task launches through; empty when it uses `modelKey`. */
+  readonly routingGroupId: string;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   /** Retain the source selection's provider options when the picker leaves instanceId:model unchanged. */
@@ -307,6 +309,7 @@ export function taskToDraft(task: ScheduledTask): DraftState {
         ? task.workspaceStrategy.worktreePath
         : "",
     modelKey: `${task.modelSelection.instanceId}:${task.modelSelection.model}`,
+    routingGroupId: task.routingGroupId ?? "",
     runtimeMode: task.runtimeMode,
     interactionMode: task.interactionMode,
     baseModelSelection: task.modelSelection,

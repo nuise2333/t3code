@@ -1,6 +1,9 @@
 import * as WorktreeBranchSync from "./WorktreeBranchSync.ts";
 import * as GuestShareService from "../guest/GuestShareService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
+import * as CouncilWorker from "./CouncilWorker.ts";
+import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
+import * as RoutingSummary from "../routing/RoutingSummary.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -280,6 +283,9 @@ export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe
 const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
   Layer.provide(layerProjectService),
 );
+const layerRoutingPolicyProvided = RoutingPolicy.layer.pipe(
+  Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
+);
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -289,6 +295,7 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
       layerCommandReceiptStoreProvided,
       layerEventSink,
       IdAllocator.layer,
+      layerRoutingPolicyProvided,
     ).pipe(Layer.provideMerge(layerProjectService)),
   ),
 );
@@ -393,6 +400,8 @@ export const layerProduction = Layer.mergeAll(
   layer,
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
+  layerRoutingPolicyProvided,
+  RoutingSummary.layer,
   layerScheduledTaskProvided,
   layerScratchThreadPromotionProvided,
   layerSecretRequestsProvided,
@@ -400,6 +409,15 @@ export const layerProduction = Layer.mergeAll(
     Layer.provide(Layer.merge(layerOrchestratorProvided, layerCommandOutputHubProvided)),
   ),
   UsageLimitRecoveryWorker.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        ProjectionStore.layer,
+        layerThreadManagementProvided,
+        layerOrchestratorProvided,
+      ),
+    ),
+  ),
+  CouncilWorker.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         ProjectionStore.layer,

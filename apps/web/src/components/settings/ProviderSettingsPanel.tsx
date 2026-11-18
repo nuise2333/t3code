@@ -97,6 +97,7 @@ import { IntervalSecondsField } from "./IntervalSecondsField";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { useSecretSources } from "./SecretSourceInput";
 import { TextGeneratorsSettings } from "./TextGeneratorsSettings";
+import { RoutingGroupsSettings } from "./RoutingGroupsSettings";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
@@ -1104,6 +1105,21 @@ export function EnvironmentProviderSettings({
           readOnly={readOnly}
         />
       ) : null}
+
+      <RoutingGroupsSettings
+        key={`routing-groups:${environmentId}`}
+        environmentId={environmentId}
+        providers={serverProviders}
+        readOnly={readOnly}
+      />
+
+      <RoutingGroupsSettings
+        key={`agent-teams:${environmentId}`}
+        kind="team"
+        environmentId={environmentId}
+        providers={serverProviders}
+        readOnly={readOnly}
+      />
 
       <SettingsSection title="Advanced">
         <SettingsRow

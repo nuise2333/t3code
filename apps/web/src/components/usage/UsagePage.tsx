@@ -34,6 +34,7 @@ import { usePrimarySettings } from "../../hooks/useSettings";
 import { resolveHour12 } from "../../timestampFormat";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentPresentations } from "../../state/presentation";
+import { UsageRoutingSection } from "./UsageRoutingSection";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isModelPickerOpen } from "../../modelPickerVisibility";
@@ -534,20 +535,28 @@ export function UsagePage() {
                 ))}
               </div>
             ) : (
-              <UsageOverview
-                merged={merged}
-                shownWindow={shownWindow}
-                hour12={hour12}
-                days={days}
-                hours={hours}
-                showingKept={showingKept}
-                metric={metric === "tokens" ? "tokens" : "cost"}
-                selectedEnvironments={selectedEnvironments}
-                hiddenProviders={hiddenProviders}
-                refreshingUsage={refreshingUsage}
-                showChatGptSharing={showChatGptSharing}
-                onSelectModel={selectUsageModel}
-              />
+              <>
+                <UsageOverview
+                  merged={merged}
+                  shownWindow={shownWindow}
+                  hour12={hour12}
+                  days={days}
+                  hours={hours}
+                  showingKept={showingKept}
+                  metric={metric === "tokens" ? "tokens" : "cost"}
+                  selectedEnvironments={selectedEnvironments}
+                  hiddenProviders={hiddenProviders}
+                  refreshingUsage={refreshingUsage}
+                  showChatGptSharing={showChatGptSharing}
+                  onSelectModel={selectUsageModel}
+                />
+                <UsageRoutingSection
+                  environmentIds={selectedEnvironments.map(
+                    (environment) => environment.environmentId,
+                  )}
+                  days={windowDays}
+                />
+              </>
             )}
           </WorkspacePageContainer>
         </ScrollArea>

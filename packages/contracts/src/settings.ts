@@ -35,7 +35,14 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import {
+  AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH,
+  MAX_ROUTING_GROUPS,
+  RoutingGroup,
+  RoutingGroupRules,
+} from "./routing.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
+import { CouncilDefaults, DEFAULT_COUNCIL_DEFAULTS, TokenSaverSettings } from "./council.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
@@ -822,6 +829,16 @@ export const IDLE_COMPACTION_MODES = [
 export const IdleCompactionMode = Schema.Literals(IDLE_COMPACTION_MODES.map((mode) => mode.value));
 export type IdleCompactionMode = typeof IdleCompactionMode.Type;
 
+export const AutoRoutingSettings = Schema.Struct({
+  /** Auto effort: a new thread's reasoning effort, up to high, from its first message. */
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Auto may pick another model on the thread's provider instance, once, at launch. */
+  allowModelSwitch: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Auto may pick a model on another configured provider instance, once, at launch. */
+  allowProviderSwitch: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type AutoRoutingSettings = typeof AutoRoutingSettings.Type;
+
 // Shipped clients reject the whole server config unless `compactIdleThreads` is boolean.
 // Keep the mode in `idleCompaction`, but accept strings from older servers.
 const LegacyCompactIdleThreads = Schema.Union([Schema.Boolean, IdleCompactionMode]);
@@ -1420,6 +1437,32 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+const decodeRoutingGroupOption = Schema.decodeUnknownOption(RoutingGroup);
+
+/** Bad entries drop alone and a repeated id keeps its first group, so a hand edit cannot reset settings. */
+const LenientRoutingGroups = Schema.Array(Schema.Unknown).pipe(
+  Schema.decodeTo(
+    Schema.Array(RoutingGroup),
+    SchemaTransformation.transform<
+      ReadonlyArray<typeof RoutingGroup.Encoded>,
+      ReadonlyArray<unknown>
+    >({
+      decode: (values) => {
+        const seen = new Set<string>();
+        const kept: Array<typeof RoutingGroup.Encoded> = [];
+        for (const value of values) {
+          const decoded = decodeRoutingGroupOption(value);
+          if (Option.isNone(decoded) || seen.has(decoded.value.id)) continue;
+          seen.add(decoded.value.id);
+          kept.push(value as typeof RoutingGroup.Encoded);
+        }
+        return kept.slice(0, MAX_ROUTING_GROUPS);
+      },
+      encode: (values) => values,
+    }),
+  ),
+);
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1541,6 +1584,29 @@ export const ServerSettings = Schema.Struct({
   linkedEnvironmentsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Beta: Claude and Codex predict the next prompt after completed turns. Codex follows a change at once; open Claude threads after they restart. */
   promptSuggestionsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Beta: Auto picks a new thread's effort, and optionally its model, once, from its first message. */
+  autoRouting: AutoRoutingSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  routingGroups: LenientRoutingGroups.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  routingGroupRules: RoutingGroupRules.pipe(
+    Schema.catchDecoding(() => Effect.succeedSome({})),
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  /** Text every agent team's lead follows after the built-in team rules; empty for none. */
+  agentTeamLeadGuidance: Schema.String.pipe(
+    Schema.check(Schema.isMaxLength(AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH)),
+    Schema.catchDecoding(() => Effect.succeedSome("")),
+    Schema.withDecodingDefault(Effect.succeed("")),
+  ),
+  /** The token saver new threads start with; null starts them without one. */
+  tokenSaverDefault: Schema.NullOr(TokenSaverSettings).pipe(
+    Schema.catchDecoding(() => Effect.succeedSome(null)),
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** Council's last settings, and whether new threads start with it on. */
+  councilDefaults: CouncilDefaults.pipe(
+    Schema.catchDecoding(() => Effect.succeedSome(DEFAULT_COUNCIL_DEFAULTS)),
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_COUNCIL_DEFAULTS)),
+  ),
   sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1973,6 +2039,26 @@ export const ServerSettingsPatch = Schema.Struct({
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
   linkedEnvironmentsEnabled: Schema.optionalKey(Schema.Boolean),
   promptSuggestionsEnabled: Schema.optionalKey(Schema.Boolean),
+  autoRouting: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      allowModelSwitch: Schema.optionalKey(Schema.Boolean),
+      allowProviderSwitch: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+  /** Legacy alias for `autoRouting.enabled`, from clients that predate the object. */
+  autoRoutingEnabled: Schema.optionalKey(Schema.Boolean),
+  /** Replaces the whole list, like `deviceHosts`. */
+  routingGroups: Schema.optionalKey(
+    Schema.Array(RoutingGroup).check(Schema.isMaxLength(MAX_ROUTING_GROUPS)),
+  ),
+  /** Replaces every rule; omit a class to clear it. */
+  routingGroupRules: Schema.optionalKey(RoutingGroupRules),
+  agentTeamLeadGuidance: Schema.optionalKey(
+    Schema.String.check(Schema.isMaxLength(AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH)),
+  ),
+  tokenSaverDefault: Schema.optionalKey(Schema.NullOr(TokenSaverSettings)),
+  councilDefaults: Schema.optionalKey(CouncilDefaults),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

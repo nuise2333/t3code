@@ -120,6 +120,26 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Hide the switch when absent; older servers silently drop per-project provider patches. */
   projectProviderInstanceOverrides: Schema.optionalKey(Schema.Boolean),
   threadSnooze: Schema.optionalKey(Schema.Boolean),
+  /** Honors a launch's `routing` request; older servers drop it, so clients offer Auto effort only when set. */
+  autoRouting: Schema.optionalKey(Schema.Boolean),
+  /** Honors `autoRouting.allowModelSwitch` and `allowProviderSwitch`; clients show those switches only when set. */
+  autoModelRouting: Schema.optionalKey(Schema.Boolean),
+  /** Resolves a launch's `{ mode: "group" }` routing; clients show routing groups only when set. */
+  routingGroups: Schema.optionalKey(Schema.Boolean),
+  /** Keeps a routing group's `rank`; older servers strip it, so clients offer quota ranking only when set. */
+  routingGroupQuota: Schema.optionalKey(Schema.Boolean),
+  /** Stores a scheduled task's `routingGroupId`; older servers drop it, so clients offer groups there only when set. */
+  scheduledTaskRoutingGroups: Schema.optionalKey(Schema.Boolean),
+  /** Keeps a routing group's `team` and leads team threads; clients show Agent teams only when set. */
+  agentTeams: Schema.optionalKey(Schema.Boolean),
+  /** Threads take token saver packs and Council. */
+  threadAssists: Schema.optionalKey(Schema.Boolean),
+  /** The rtk command is installed, so the RTK compression pack can run. */
+  rtk: Schema.optionalKey(Schema.Boolean),
+  /** Serves `server.crossVendorModel`; clients hide "Find the cause" where it is absent. */
+  crossVendorModel: Schema.optionalKey(Schema.Boolean),
+  /** Serves `server.routingSummary`; the Usage page shows its Routing section only when set. */
+  routingSummary: Schema.optionalKey(Schema.Boolean),
   /** Serves `orchestration.forceStopThread`; hide Force stop where it is absent. */
   threadForceStop: Schema.optionalKey(Schema.Boolean),
   /** Every protocol-2 server sends this; older mobile builds still read it. */

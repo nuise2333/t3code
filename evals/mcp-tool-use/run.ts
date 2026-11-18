@@ -1585,7 +1585,11 @@ export const mockOutput = (sample: Sample, command: string) =>
 type Config = {
   readonly apiKey: string;
   readonly model: Model;
-  readonly proxy?: { readonly url: string; readonly headers: Readonly<Record<string, string>> };
+  readonly proxy?: {
+    readonly url: string;
+    readonly headers: Readonly<Record<string, string>>;
+    readonly modelPrefix: string;
+  };
   readonly effort: string;
   readonly maxSteps: number;
   readonly shellModel: ShellModel;
@@ -2063,7 +2067,12 @@ const callCodex = Effect.fn("evaluateMcpToolUse.callCodex")(function* (
   config: Config,
   body: unknown,
 ) {
-  const raw = yield* postModel("", body, config.proxy, true);
+  const prefix = config.proxy?.modelPrefix ?? "";
+  const routed =
+    prefix && isRecord(body) && typeof body.model === "string"
+      ? { ...body, model: `${prefix}${body.model}` }
+      : body;
+  const raw = yield* postModel("", routed, config.proxy, true);
   const completed = raw
     .split("\n")
     .filter((line) => line.startsWith("data: "))
@@ -2210,7 +2219,11 @@ const runSample = Effect.fn("evaluateMcpToolUse.runSample")(function* (
   for (let step = 0; step < maxSteps; step++) {
     const response = input
       ? yield* callCodex(config, codexRequest(base, input))
-      : yield* callModel(config.apiKey, requestBody(sample, config.effort, messages));
+      : yield* callModel(
+          config.apiKey,
+          requestBody(sample, config.effort, messages),
+          config.apiKey ? undefined : config.proxy,
+        );
     addUsage(usage, response.usage);
     if ("raw" in response) {
       input?.push(...response.raw);
@@ -2624,16 +2637,21 @@ const main = Effect.gen(function* () {
     return;
   }
   const apiKey = yield* Config.String("ANTHROPIC_API_KEY").pipe(Config.withDefault(""));
+  // A gateway that also speaks the Messages API, such as magpie, can stand in for the key.
+  const proxyProvider = yield* Config.String("EVAL_PROXY_PROVIDER").pipe(Config.withDefault(""));
+  const claudeProxy = !apiKey && proxyProvider !== "";
   const out = flags.out;
-  if ((!apiKey && !codex) || out === undefined) {
+  if ((!apiKey && !codex && !claudeProxy) || out === undefined) {
     const message =
-      "Set ANTHROPIC_API_KEY and pass --out <directory>. ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL are never used.";
+      "Set ANTHROPIC_API_KEY (or EVAL_PROXY_PROVIDER) and pass --out <directory>. ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL are never used.";
     return yield* Effect.die(new Error(message));
   }
   const config: Config = {
     apiKey,
     model: flags.model,
-    ...(codex || !isPricedModel(flags["shell-model"]) ? { proxy: proxyConfig() } : {}),
+    ...(codex || claudeProxy || !isPricedModel(flags["shell-model"])
+      ? { proxy: proxyConfig() }
+      : {}),
     effort,
     maxSteps: flags["max-steps"] ?? (codex ? 10 : 6),
     shellModel: flags["shell-model"],

@@ -447,6 +447,10 @@ export interface ComposerDraft {
   readonly interactionMode?: ProviderInteractionMode;
   /** `/clear` armed this draft: its next message starts a fresh provider session. */
   readonly freshContext?: boolean;
+  /** The user picked an effort level, so a new thread keeps it instead of Auto effort. */
+  readonly effortManual?: boolean;
+  /** A new thread launches through this routing group; `modelSelection` holds its first member. */
+  readonly routingGroupId?: string;
   readonly workspaceSelection?: ComposerDraftWorkspaceSelection;
   readonly project?: ComposerDraftProject;
 }
@@ -484,6 +488,8 @@ export type ComposerDraftSettingsUpdate = Pick<
   | "runtimeMode"
   | "interactionMode"
   | "freshContext"
+  | "effortManual"
+  | "routingGroupId"
   | "workspaceSelection"
   | "project"
 >;
@@ -518,6 +524,8 @@ const ComposerDraftSchema = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeModeSchema),
   interactionMode: Schema.optional(ProviderInteractionModeSchema),
   freshContext: Schema.optional(Schema.Boolean),
+  effortManual: Schema.optional(Schema.Boolean),
+  routingGroupId: Schema.optional(Schema.String),
   workspaceSelection: Schema.optional(ComposerDraftWorkspaceSelectionSchema),
   project: Schema.optional(ComposerDraftProjectSchema),
 });
@@ -1412,8 +1420,14 @@ export function appendComposerDraftText(draftKey: string, value: string): void {
   });
 }
 
-function attachmentDedupKey(attachment: DraftComposerAttachment): string {
-  return `${attachment.mimeType}\u0000${attachment.sizeBytes}\u0000${attachment.name}`;
+// Pasted images all share one name, so an image's inline bytes decide whether it is a repeat.
+function isSameAttachment(a: DraftComposerAttachment, b: DraftComposerAttachment): boolean {
+  return (
+    a.mimeType === b.mimeType &&
+    a.sizeBytes === b.sizeBytes &&
+    a.name === b.name &&
+    (a.type !== "image" || b.type !== "image" || a.dataUrl === b.dataUrl)
+  );
 }
 
 /**
@@ -1441,13 +1455,12 @@ export function appendComposerDraftAttachments(
     const retained = options?.appendReference
       ? draftWithoutInsertionSelection(draftKey, existing, options.insertion)
       : existing;
-    const keys = new Set(retained.attachments.map(attachmentDedupKey));
+    const seen = [...retained.attachments];
     const attachments = options?.restore
       ? incoming
       : incoming.filter((attachment) => {
-          const key = attachmentDedupKey(attachment);
-          if (keys.has(key)) return false;
-          keys.add(key);
+          if (seen.some((other) => isSameAttachment(other, attachment))) return false;
+          seen.push(attachment);
           return true;
         });
     duplicates = incoming.filter((attachment) => !attachments.includes(attachment));
@@ -1704,6 +1717,8 @@ export function clearComposerDraftContentState(
     importedShareIds: _importedShareIds,
     context: _context,
     modelSelection,
+    effortManual,
+    routingGroupId,
     workspaceSelection,
     project: _project,
     ...retained
@@ -1711,6 +1726,8 @@ export function clearComposerDraftContentState(
   const draft = {
     ...retained,
     ...(options?.clearModelSelection || modelSelection === undefined ? {} : { modelSelection }),
+    ...(options?.clearModelSelection || effortManual === undefined ? {} : { effortManual }),
+    ...(options?.clearModelSelection || routingGroupId === undefined ? {} : { routingGroupId }),
     ...(options?.clearWorkspaceSelection || workspaceSelection === undefined
       ? {}
       : { workspaceSelection }),
@@ -1871,6 +1888,8 @@ export function sameComposerDraftState(a: ComposerDraft, b: ComposerDraft): bool
     a.runtimeMode === b.runtimeMode &&
     a.interactionMode === b.interactionMode &&
     a.freshContext === b.freshContext &&
+    a.effortManual === b.effortManual &&
+    a.routingGroupId === b.routingGroupId &&
     a.workspaceSelection === b.workspaceSelection
   );
 }
@@ -2034,7 +2053,12 @@ export function retargetNewTaskDraft(
     ) {
       return current;
     }
-    const { workspaceSelection, ...retained } = normalizeDraft(existing);
+    const { workspaceSelection, routingGroupId, ...retained } = normalizeDraft(existing);
+    // Group ids are per environment, so another machine's same id may list other models.
+    const keptRoutingGroupId =
+      stamp === undefined || stamp.environmentId === project.environmentId
+        ? routingGroupId
+        : undefined;
     // The PR checkout is recreated on the target machine, so only the old local path is dropped.
     const keptWorkspaceSelection =
       options?.keepPullRequestWorkspace && workspaceSelection?.pullRequestReference !== undefined
@@ -2052,6 +2076,7 @@ export function retargetNewTaskDraft(
       [draftKey]: {
         ...retained,
         ...(keptWorkspaceSelection ? { workspaceSelection: keptWorkspaceSelection } : {}),
+        ...(keptRoutingGroupId === undefined ? {} : { routingGroupId: keptRoutingGroupId }),
         attachments,
         project: {
           environmentId: project.environmentId,

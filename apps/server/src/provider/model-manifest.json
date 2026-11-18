@@ -1,6 +1,235 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-14T15:58:47Z",
+  "updatedAt": "2026-11-15T18:00:00Z",
+  "routing": {
+    "version": 1,
+    "updatedAt": "2026-11-15T18:00:00Z",
+    "sources": {
+      "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
+      "aa-coding": {
+        "url": "https://artificialanalysis.ai/agents/coding",
+        "dataDate": "2026-11-14"
+      },
+      "aa-index": { "url": "https://artificialanalysis.ai/", "dataDate": "2026-11-15" },
+      "claude-effort": {
+        "url": "https://platform.claude.com/docs/en/build-with-claude/effort",
+        "dataDate": "2026-11-15"
+      },
+      "codex-docs": {
+        "url": "https://learn.chatgpt.com/docs/models",
+        "dataDate": "2026-11-15"
+      },
+      "claude-effort-levels": {
+        "url": "https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels",
+        "dataDate": "2026-11-15"
+      },
+      "claude-cache-effort": {
+        "url": "https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level",
+        "dataDate": "2026-11-15"
+      },
+      "vals-tb4": {
+        "url": "https://www.vals.ai/benchmarks/terminal-bench-4",
+        "dataDate": "2026-11-11"
+      },
+      "frontier-code-2": {
+        "url": "https://cognition.com/data/frontier-code-2.0/data.json",
+        "dataDate": "2026-11-15"
+      },
+      "scale-swe-atlas": {
+        "url": "https://labs.scale.com/leaderboard/swe-atlas",
+        "dataDate": "2026-11-11"
+      },
+      "vals-programbench": {
+        "url": "https://www.vals.ai/benchmarks/programbench",
+        "dataDate": "2026-11-09"
+      },
+      "vals-swebench-multimodal": {
+        "url": "https://www.vals.ai/benchmarks/swebench-multimodal",
+        "dataDate": "2026-11-09"
+      },
+      "paddo-gemini-4": {
+        "url": "https://paddo.dev/blog/gemini-4-carbon/",
+        "dataDate": "2026-11-11"
+      },
+      "theo-gemini-4": {
+        "url": "https://www.youtube.com/watch?v=OBNVzWYMKbE",
+        "dataDate": "2026-11-11"
+      },
+      "v2ex-gemini-4-latency": { "url": "https://www.v2ex.com/t/1257050", "dataDate": "2026-11-14" }
+    },
+    "defaultEffortByClass": {
+      "readonly": "low",
+      "quick_edit": "medium",
+      "implement": "medium",
+      "hard": "high"
+    },
+    "rows": [
+      { "driver": "codex", "model": "*", "sourceIds": ["tb41", "aa-coding"] },
+      {
+        "driver": "codex",
+        "model": "gpt-6.1-sol",
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "A", "hard": "B" },
+        "relativeCost": 2,
+        "verified": true,
+        "sourceIds": [
+          "aa-coding",
+          "tb41",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-programbench",
+          "vals-swebench-multimodal"
+        ]
+      },
+      {
+        "driver": "codex",
+        "model": "gpt-6-astra",
+        "tierByClass": { "readonly": "A", "quick_edit": "B", "implement": "A", "hard": "A" },
+        "relativeCost": 5,
+        "verified": true,
+        "sourceIds": [
+          "aa-coding",
+          "tb41",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-swebench-multimodal"
+        ]
+      },
+      {
+        "driver": "codex",
+        "model": "gpt-6-luna",
+        "effortByClass": {
+          "readonly": "high",
+          "quick_edit": "high",
+          "implement": "high",
+          "hard": "high"
+        },
+        "tierByClass": { "readonly": "C", "quick_edit": "B", "implement": "C", "hard": "C" },
+        "relativeCost": 0,
+        "verified": true,
+        "sourceIds": ["codex-docs", "aa-index", "aa-coding", "frontier-code-2"]
+      },
+      { "driver": "claudeAgent", "model": "*", "sourceIds": ["tb41", "aa-index", "claude-effort"] },
+      {
+        "driver": "claudeAgent",
+        "model": "claude-opus-5-5",
+        "effortByClass": { "readonly": "medium" },
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
+        "relativeCost": 4,
+        "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
+        "verified": true,
+        "sourceIds": [
+          "vals-tb4",
+          "aa-coding",
+          "tb41",
+          "aa-index",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-programbench",
+          "claude-cache-effort"
+        ]
+      },
+      {
+        "driver": "claudeAgent",
+        "model": "claude-fable-5-2",
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
+        "relativeCost": 6,
+        "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
+        "verified": true,
+        "sourceIds": [
+          "aa-coding",
+          "aa-index",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-programbench",
+          "claude-cache-effort"
+        ]
+      },
+      {
+        "driver": "claudeAgent",
+        "model": "claude-sonnet-5-5",
+        "effortByClass": { "implement": "high" },
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "hard": "B" },
+        "relativeCost": 3,
+        "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
+        "verified": true,
+        "sourceIds": [
+          "aa-index",
+          "aa-coding",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "vals-programbench",
+          "claude-cache-effort"
+        ]
+      },
+      {
+        "driver": "claudeAgent",
+        "model": "claude-haiku-5-5",
+        "effortByClass": { "readonly": "medium" },
+        "tierByClass": { "readonly": "C", "quick_edit": "B", "implement": "C", "hard": "C" },
+        "relativeCost": 0,
+        "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
+        "verified": true,
+        "sourceIds": [
+          "claude-effort-levels",
+          "aa-index",
+          "aa-coding",
+          "frontier-code-2",
+          "claude-cache-effort"
+        ]
+      },
+      {
+        "driver": "antigravity",
+        "model": "*",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "medium",
+          "hard": "medium"
+        },
+        "sourceIds": ["aa-index"]
+      },
+      {
+        "driver": "antigravity",
+        "model": "gemini-4-carbon",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "medium",
+          "hard": "medium"
+        },
+        "tierByClass": { "readonly": "A", "quick_edit": "B", "implement": "S", "hard": "A" },
+        "relativeCost": 5,
+        "verified": true,
+        "backgroundOnly": true,
+        "sourceIds": [
+          "aa-index",
+          "aa-coding",
+          "frontier-code-2",
+          "scale-swe-atlas",
+          "paddo-gemini-4",
+          "theo-gemini-4",
+          "v2ex-gemini-4-latency"
+        ]
+      },
+      { "driver": "opencode", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "cursor", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "grok", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "kiro", "model": "*", "sourceIds": ["aa-index"] },
+      { "driver": "pi", "model": "*", "sourceIds": ["aa-index"] },
+      {
+        "driver": "muse",
+        "model": "*",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
+        "sourceIds": ["aa-index"]
+      },
+      { "driver": "fx", "model": "*", "sourceIds": ["aa-index"] }
+    ]
+  },
   "compatibility": [
     {
       "driver": "codex",

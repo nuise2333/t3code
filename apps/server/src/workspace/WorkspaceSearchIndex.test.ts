@@ -9,6 +9,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterEach, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { PROJECT_FAVICON_EXTENSIONS, isProjectFaviconPath } from "@t3tools/shared/projectFavicon";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -88,6 +89,78 @@ it.effect("filters image and category searches before applying the result limit"
       ]);
     }),
   ).pipe(Effect.provide(testLayer)),
+);
+
+it.live("image searches match the image subset of a file search", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const vcsProcess = yield* VcsProcess.VcsProcess;
+    const writeFiles = Effect.fn(function* (root: string, relativePaths: ReadonlyArray<string>) {
+      for (const relativePath of relativePaths) {
+        yield* fileSystem.makeDirectory(path.dirname(path.join(root, relativePath)), {
+          recursive: true,
+        });
+        yield* fileSystem.writeFileString(path.join(root, relativePath), "");
+        yield* fileSystem.utimes(path.join(root, relativePath), 0, 0);
+      }
+    });
+
+    const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-image-search-" });
+    yield* vcsProcess.run({ operation: "test.gitInit", command: "git", args: ["init"], cwd });
+    yield* fileSystem.writeFileString(path.join(cwd, ".git/info/exclude"), "hidden/\n");
+    yield* writeFiles(cwd, [
+      ...Array.from({ length: 220 }, (_, index) => `assets/source-${index}.ts`),
+      ...PROJECT_FAVICON_EXTENSIONS.flatMap((extension) => [
+        `assets/logo${extension}`,
+        `other/logo${extension.toUpperCase()}`,
+      ]),
+      "assets/logo.ts",
+      "assets/logotype.png",
+      "assetss/logotype.png",
+      "assets/images/logo.PNG",
+      "assets/foo{bar}.png",
+      "assets/[id].png",
+      "hidden/logo.png",
+    ]);
+
+    const searchIndex = yield* WorkspaceSearchIndex.make(cwd);
+
+    // Filtering to images must not change fff's parse of fuzzy paths, globs, negations or locations.
+    for (const query of [
+      "",
+      "logo",
+      "lgo",
+      "*.png",
+      "!*.png",
+      "assets/**",
+      "!assets/",
+      "assets*/",
+      "/assets",
+      "assets/",
+      "logo:12",
+      "/assets/logotype.png",
+      "assets/images/",
+      "logo *.svg !other",
+      "foo{bar}.png",
+      "[id].png",
+      "*.{png,svg}",
+      "hidden/",
+    ]) {
+      const ordinary = yield* searchIndex.search(query, 1000, { kind: "file" });
+      const expected = ordinary.entries.filter((entry) => isProjectFaviconPath(entry.path));
+      for (const limit of [1, 200]) {
+        const images = yield* searchIndex.search(query, limit, {
+          kind: "directory",
+          imageOnly: true,
+        });
+        expect(images, `query=${query} limit=${limit}`).toEqual({
+          entries: expected.slice(0, limit),
+          truncated: expected.length > limit,
+        });
+      }
+    }
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
 it.effect("fetches past a first page of Git-ignored results", () =>

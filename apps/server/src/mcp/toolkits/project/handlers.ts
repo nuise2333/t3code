@@ -179,6 +179,11 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 }),
               ),
             );
+        if (input.routingGroupId !== undefined && input.modelSelection !== undefined)
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "Pass routingGroupId or modelSelection, not both.",
+          });
         if (project !== undefined && input.workspaceStrategy?.type === "existing_worktree")
           yield* assertProjectWorktree(project.workspaceRoot, input.workspaceStrategy.worktreePath);
         if (!replaying && input.modelSelection !== undefined) {
@@ -188,8 +193,28 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           if (provider !== undefined)
             yield* OrchestrationMcp.requireAdvertisedModel(provider, model);
         }
+        const projectSettings =
+          project === undefined
+            ? undefined
+            : yield* ServerSettings.ServerSettingsService.pipe(
+                Effect.flatMap((settings) => settings.getSettings),
+                Effect.mapError(unavailable),
+                Effect.map(
+                  (settings) => resolveProjectSettings(settings, projectId, project).settings,
+                ),
+              );
+        // An omitted startFromOrigin follows the new-worktree setting, as the composer and
+        // t3_worktree_handoff do. Otherwise a stale local branch silently becomes the base.
+        const strategy =
+          projectSettings !== undefined &&
+          input.workspaceStrategy?.type === "worktree" &&
+          input.workspaceStrategy.startFromOrigin === undefined
+            ? {
+                ...input.workspaceStrategy,
+                startFromOrigin: projectSettings.newWorktreesStartFromOrigin,
+              }
+            : input.workspaceStrategy;
         // Reject unresolved base refs and blocked branch names before accepting a launch; worktree provisioning happens later.
-        const strategy = input.workspaceStrategy;
         if (!replaying && strategy?.type === "worktree")
           yield* ThreadLaunch.ThreadLaunchService.pipe(
             Effect.flatMap((launches) =>
@@ -206,19 +231,19 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         // A caller outside a thread has nothing to inherit, so it starts with the
         // project's effective defaults, as the composer does. Its mode stays
         // within the ceiling it was approved with.
-        const projectDefaults =
-          caller === undefined && project !== undefined
-            ? yield* ServerSettings.ServerSettingsService.pipe(
+        const projectDefaults = caller === undefined ? projectSettings : undefined;
+        // A group launch passes its first member as a placeholder; the launch resolves the group.
+        const groupPlaceholder =
+          input.routingGroupId === undefined || replaying
+            ? undefined
+            : (yield* ServerSettings.ServerSettingsService.pipe(
                 Effect.flatMap((settings) => settings.getSettings),
                 Effect.mapError(unavailable),
-                Effect.map(
-                  (settings) => resolveProjectSettings(settings, projectId, project).settings,
-                ),
-              )
-            : undefined;
+              )).routingGroups.find((group) => group.id === input.routingGroupId)?.members[0];
         const modelSelection =
           input.modelSelection ??
           launchedModel ??
+          groupPlaceholder ??
           caller?.modelSelection ??
           (projectDefaults
             ? resolveNewThreadModelSelection({
@@ -245,7 +270,8 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 Effect.orElseSucceed(() => runtimeMode),
               )
             : runtimeMode;
-        if (!replaying) {
+        // A group skips members that cannot run the mode instead of stepping it down.
+        if (!replaying && input.routingGroupId === undefined) {
           const providers = yield* (yield* ProviderRegistry.ProviderRegistry).getProviders;
           startedRuntimeMode = yield* resolveRuntimeMode(startedRuntimeMode, input.runtimeMode, {
             modelSelection,
@@ -262,7 +288,10 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           modelSelection,
           runtimeMode: startedRuntimeMode,
           interactionMode,
-          workspaceStrategy: input.workspaceStrategy ?? { type: "root" },
+          workspaceStrategy: strategy ?? { type: "root" },
+          ...(input.routingGroupId === undefined
+            ? {}
+            : { routing: { mode: "group", groupId: input.routingGroupId } }),
           ...(input.message === undefined && attachments.length === 0
             ? {}
             : {
@@ -278,6 +307,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           ...(linkOrigin === undefined ? {} : { linkOrigin }),
           // Kept only alongside linkOrigin: thread.create drops it otherwise.
           ...(input.delegatedFrom === undefined ? {} : { delegatedFrom: input.delegatedFrom }),
+          ...(input.delegatedRole === undefined ? {} : { delegatedRole: input.delegatedRole }),
         }).pipe(
           Effect.mapError((error) => {
             if (error._tag === "AttachmentClaimError") {
@@ -289,6 +319,12 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             if (error._tag === "ThreadManagementProviderInstanceDisabledError") {
               return new OrchestratorMcpFailure({
                 code: "invalid_request",
+                message: error.message,
+              });
+            }
+            if (error._tag === "RoutingGroupUnavailableError") {
+              return new OrchestratorMcpFailure({
+                code: "model_unavailable",
                 message: error.message,
               });
             }
@@ -395,6 +431,13 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
   ),
   t3_project_delete: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
+      const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
+      if (yield* folders.isScratchProject(input.projectId))
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message:
+            '"No project" is the built-in scratch project and cannot be deleted through MCP. The user can remove it in Settings.',
+        });
       const projects = yield* Project.ProjectService;
       const clones = yield* ProjectCloneTracker.ProjectCloneTracker;
       return yield* mutateProjectWithClone(projects, clones, {

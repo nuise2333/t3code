@@ -3,6 +3,15 @@ import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { useNowMinuteMs } from "../../lib/clock";
 import * as Dialog from "../../components/ui/Dialog";
 import React, { useEffect, useRef, useState } from "react";
+import { isClaudeUltrathinkPrompt } from "@t3tools/shared/model";
+import {
+  autoEffortOffered,
+  autoEffortSupported,
+  launchRoutingRequest,
+  type PickerRoutingGroup,
+  pickerRoutingGroups,
+  routingProviderSource,
+} from "@t3tools/client-runtime/routing";
 
 import type {
   EnvironmentId,
@@ -212,6 +221,20 @@ type NewTaskFlowContextValue = {
   readonly setSelectedModelOptions: (
     value: ReadonlyArray<ProviderOptionSelection> | undefined,
   ) => void;
+  /** Auto effort is offered here: the server honors it and its setting is on. */
+  readonly autoEffortOffered: boolean;
+  /** The user picked an effort level for this draft, so the new thread keeps it. */
+  readonly effortManual: boolean;
+  readonly setEffortManual: (manual: boolean) => void;
+  /** Routing groups this server resolves; picking one replaces the model until a model is picked. */
+  readonly routingGroups: ReadonlyArray<PickerRoutingGroup>;
+  /** The draft's group; `summary` is null when the group no longer exists. */
+  readonly selectedRoutingGroup: {
+    readonly id: string;
+    readonly name: string;
+    readonly summary: string | null;
+  } | null;
+  readonly setRoutingGroup: (groupId: string) => void;
   readonly setExpandedProvider: (value: string | null) => void;
 };
 
@@ -502,7 +525,10 @@ export function NewTaskFlowProvider(
     const selection = withRememberedModelOptions(
       options ? { ...option.selection, options } : option.selection,
     );
-    updateComposerDraftSettings(selectedProjectDraftKey, { modelSelection: selection });
+    updateComposerDraftSettings(selectedProjectDraftKey, {
+      modelSelection: selection,
+      routingGroupId: undefined,
+    });
     setStickyComposerModelSelection(selection);
   };
   const setSelectedModelOptions = (options: ReadonlyArray<ProviderOptionSelection> | undefined) => {
@@ -523,6 +549,36 @@ export function NewTaskFlowProvider(
   };
 
   const providerGroups = groupByProvider(modelOptions);
+  const routingGroups = pickerRoutingGroups({
+    newThread: true,
+    multiModel: false,
+    capability: selectedEnvironmentServerConfig?.environment.capabilities.routingGroups,
+    groups: selectedEnvironmentServerConfig?.settings.routingGroups,
+    providers: (selectedEnvironmentServerConfig?.providers ?? []).map((provider) =>
+      routingProviderSource(provider, modelSelectionNow),
+    ),
+  });
+  const draftRoutingGroupId = selectedProjectDraft.routingGroupId ?? null;
+  const selectedRoutingGroup =
+    draftRoutingGroupId === null
+      ? null
+      : (routingGroups.find((group) => group.id === draftRoutingGroupId) ?? {
+          id: draftRoutingGroupId,
+          name: "Missing group",
+          summary: null,
+        });
+  const effortSupported = autoEffortSupported({
+    driver: selectedModelOption?.providerDriver,
+    descriptors: selectedModelOption?.capabilities?.optionDescriptors,
+    selection: selectedModel,
+    ultrathinkPrompt: isClaudeUltrathinkPrompt(prompt),
+  });
+  const effortOffered =
+    effortSupported &&
+    autoEffortOffered({
+      capability: selectedEnvironmentServerConfig?.environment.capabilities.autoRouting,
+      settingEnabled: selectedEnvironmentServerConfig?.settings.autoRouting?.enabled,
+    });
   const setPrompt = (value: string) => {
     if (!selectedProjectDraftKey) {
       return;
@@ -760,6 +816,17 @@ export function NewTaskFlowProvider(
     }
     const workspaceSelection = resolveWorkspaceSelection(draft.workspaceSelection);
     const mode = workspaceSelection.mode;
+    const routing = launchRoutingRequest({
+      offered: effortOffered,
+      effortManual: draft.effortManual === true,
+      multiModel: false,
+      // Mobile drafts do not track an explicit model pick yet, so Auto keeps the model.
+      modelExplicit: true,
+      routingGroupId:
+        selectedEnvironmentServerConfig?.environment.capabilities.routingGroups === true
+          ? draft.routingGroupId
+          : undefined,
+    });
     return {
       environmentId: selectedProject.environmentId,
       threadId: ThreadId.make(metadata.threadId),
@@ -793,6 +860,7 @@ export function NewTaskFlowProvider(
         ...((workspaceSelection?.startFromOrigin ?? startFromOrigin)
           ? { startFromOrigin: true }
           : {}),
+        ...(routing ? { routing } : {}),
       },
       createdAt: metadata.createdAt,
     };
@@ -924,6 +992,25 @@ export function NewTaskFlowProvider(
     loadBranches,
     setRuntimeMode,
     setSelectedModelOptions,
+    autoEffortOffered: effortOffered,
+    effortManual: selectedProjectDraft.effortManual === true,
+    setEffortManual: (manual: boolean) => {
+      if (selectedProjectDraftKey) {
+        updateComposerDraftSettings(selectedProjectDraftKey, {
+          effortManual: manual ? true : undefined,
+        });
+      }
+    },
+    routingGroups,
+    selectedRoutingGroup,
+    setRoutingGroup: (groupId: string) => {
+      const group = routingGroups.find((candidate) => candidate.id === groupId);
+      if (!group || !selectedProjectDraftKey) return;
+      updateComposerDraftSettings(selectedProjectDraftKey, {
+        modelSelection: group.placeholder,
+        routingGroupId: group.id,
+      });
+    },
     setExpandedProvider: (value: string | null) => updateFlow({ expandedProvider: value }),
   } satisfies NewTaskFlowContextValue;
 

@@ -317,6 +317,7 @@ export function useTraitsSelection({
   const modelSelection =
     instanceId && model ? { instanceId, model, options: modelOptions ?? [] } : null;
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
+  const setEffortManual = useComposerDraftStore((store) => store.setEffortManual);
   const updateModelOptions = (nextOptions: ProviderOptions | undefined) => {
     if ("onModelOptionsChange" in persistence) {
       persistence.onModelOptionsChange(nextOptions);
@@ -362,6 +363,11 @@ export function useTraitsSelection({
         (prompt) => getTraitSelectChange(selected, descriptor, prompt, value)?.prompt ?? prompt,
       );
       updateModelOptions(change.modelOptions);
+      const threadTarget =
+        "onModelOptionsChange" in persistence
+          ? null
+          : (persistence.threadRef ?? persistence.draftId);
+      if (threadTarget && isReasoningSelect(descriptor)) setEffortManual(threadTarget, true);
     },
     changeBoolean: (descriptorId: string, value: boolean) => {
       updateModelOptions(

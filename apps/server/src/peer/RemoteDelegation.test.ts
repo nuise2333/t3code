@@ -40,6 +40,7 @@ import { McpSchema, McpServer } from "effect/ai";
 
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
@@ -84,7 +85,7 @@ const modelSelection = { instanceId, model: "gpt-5.4" };
 
 type LaunchedWith = Pick<
   ThreadLaunch.ThreadLaunchInput,
-  "modelSelection" | "runtimeMode" | "interactionMode"
+  "modelSelection" | "runtimeMode" | "interactionMode" | "delegatedRole"
 >;
 
 /** The thread the box launches for the task, which the test finishes. */
@@ -513,6 +514,9 @@ const boxToolkitLayer = (thread: BoxThread) => {
                 modelSelection: input.modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
+                ...(input.delegatedRole === undefined
+                  ? {}
+                  : { delegatedRole: input.delegatedRole }),
               }),
             ),
             Effect.andThen(Effect.flatten(Ref.get(thread.afterLaunch))),
@@ -547,7 +551,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
     McpHttpServer.layerProjectRegistration,
   ).pipe(
     Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
-    Layer.provide(NodeCrypto.layer),
+    Layer.provide(Layer.mergeAll(NodeCrypto.layer, ModelManifest.layerTest)),
     Layer.provide(layerBoxThreads),
     Layer.provide(layerBoxLaunches),
     Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
@@ -713,7 +717,7 @@ const makeLaptop = (
       ),
       Layer.provide(Layer.succeedContext(linking)),
       Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
-      Layer.provide(NodeCrypto.layer),
+      Layer.provide(Layer.mergeAll(NodeCrypto.layer, ModelManifest.layerTest)),
       Layer.provideMerge(layerThreads),
       Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
@@ -1232,15 +1236,18 @@ it.effect("a task named only by environment inherits the parent's model, within 
       yield* seedParent(a, parentModelSelection);
 
       const result = yield* a.call("delegate_task", {
-        task: "Run the suite on the box.",
+        task: "Review the suite's failures on the box.",
         target: { environmentId: box.environmentId },
+        role: "review",
       });
       expect(result.isError, JSON.stringify(result.content)).toBe(false);
       // The parent's model and options, and the link's modes rather than the parent's.
+      // The role goes along, so the box caps the review's rounds too.
       expect(yield* Ref.get(thread.launchedWith)).toEqual({
         modelSelection: parentModelSelection,
         runtimeMode: "auto-accept-edits",
         interactionMode: "default",
+        delegatedRole: "review",
       });
 
       // Asking for more than the link allows is still refused there.
@@ -1251,6 +1258,41 @@ it.effect("a task named only by environment inherits the parent's model, within 
         clientRequestId: "broader",
       });
       expect(broader.isError).toBe(true);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("reviews delegated there count toward the parent's review rounds", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread);
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const a = yield* makeLaptop(database, offers);
+      yield* linkTo(a.links, b, "full-access");
+      yield* seedParent(a);
+
+      const review = (round: number) =>
+        a.call("delegate_task", {
+          task: "Review the diff.",
+          role: "review",
+          target: { environmentId: box.environmentId },
+          clientRequestId: `review-round-${round}`,
+        });
+      for (const round of [1, 2, 3]) {
+        const result = yield* review(round);
+        expect(result.isError, JSON.stringify(result.content)).toBe(false);
+      }
+      const fourth = yield* review(4);
+      expect(fourth.isError).toBe(true);
+      expect(JSON.stringify(fourth.content)).toContain("Give the user the remaining findings");
+      // A retry of an accepted review is the same round.
+      expect((yield* review(3)).isError).toBe(false);
+      const { subagents } = yield* a.orchestrator.getThreadProjection(parentThreadId);
+      expect(subagents.filter((task) => task.delegatedRole === "review")).toHaveLength(3);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

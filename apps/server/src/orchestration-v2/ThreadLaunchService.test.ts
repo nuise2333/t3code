@@ -9,7 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as ServerConfig from "../config.ts";
 import { createPendingAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
-import { assert, it, vi } from "@effect/vitest";
+import { assert, describe, it, vi } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   ChatAttachmentId,
@@ -17,6 +17,7 @@ import {
   type ChatAttachment,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
   GitCommandError,
   MessageId,
   ProjectId,
@@ -24,6 +25,7 @@ import {
   ProviderInstanceId,
   OrchestrationV2ThreadProjectionJson,
   ScheduledTaskId,
+  type ModelSelection,
   type ServerProvider,
   ThreadId,
   TextGenerationError,
@@ -51,7 +53,9 @@ import * as ProjectStore from "./ProjectStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderRegistryMock from "../provider/testUtils/providerRegistryMock.ts";
+import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
@@ -221,6 +225,8 @@ function makeHarness(options: HarnessOptions = {}) {
       hasCommit: options.hasCommit ?? (() => Effect.succeed(false)),
       currentBranch: () => Effect.succeed(null),
       resolveWorktreeBaseRemote: () => Effect.succeed({ remoteName: "origin", branchName: "main" }),
+      resolvePrimaryRemoteName: () => Effect.succeed("origin"),
+      resolveDefaultBranchName: () => Effect.succeed("main"),
       remoteExists: options.remoteExists ?? (() => Effect.succeed(true)),
       remoteBranchExists: () => Effect.succeed(true),
       listLocalBranchNames: () => Effect.succeed([]),
@@ -244,6 +250,24 @@ function makeHarness(options: HarnessOptions = {}) {
         folderForThread: () => Effect.succeedNone,
       }),
   );
+  const layerLaunchSettings =
+    options.getLaunchSettings === undefined
+      ? Layer.empty
+      : Layer.mock(ServerSettings.ServerSettingsService)({
+          getSettings: options.getLaunchSettings,
+        });
+  const layerRouting = RoutingPolicy.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        ModelManifest.layerTest,
+        layerExternalServices,
+        layerLaunchSettings,
+        Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+          list: () => Effect.succeed([]),
+        }),
+      ),
+    ),
+  );
   const layerLaunch = ThreadLaunch.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -252,11 +276,8 @@ function makeHarness(options: HarnessOptions = {}) {
         layerReceipts,
         layerOrchestrator,
         IdAllocator.layer,
-        options.getLaunchSettings === undefined
-          ? Layer.empty
-          : Layer.mock(ServerSettings.ServerSettingsService)({
-              getSettings: options.getLaunchSettings,
-            }),
+        layerRouting,
+        layerLaunchSettings,
       ),
     ),
   );
@@ -463,6 +484,43 @@ it.effect(
     }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerScheduledTasks)));
   },
 );
+
+it.effect("leaves a task delegated from a linked environment out of the top-level list", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    yield* launches.launch(
+      launchInput({ command: "command:top-level", thread: "thread:top-level" }),
+    );
+    const delegated = yield* launches.launch({
+      ...launchInput({ command: "command:delegated", thread: "thread:delegated" }),
+      createdBy: "agent",
+      creationSource: "mcp",
+      linkOrigin: { sessionId: "mcp-session:linked", label: "Linked laptop" },
+      delegatedFrom: {
+        environmentId: EnvironmentId.make("environment:linked"),
+        threadId: ThreadId.make("thread:remote-parent"),
+        title: "Remote parent",
+      },
+      delegatedRole: "review",
+    });
+    assert.equal(
+      (yield* threads.getThreadProjection(delegated.threadId)).thread.delegatedRole,
+      "review",
+    );
+    const listed = yield* threads.listProjectThreads({ projectId, includeSubagents: false });
+    assert.deepEqual(
+      listed.map((thread) => thread.id),
+      [ThreadId.make("thread:top-level")],
+    );
+    const all = yield* threads.listProjectThreads({ projectId, includeSubagents: true });
+    assert.include(
+      all.map((thread) => thread.id),
+      delegated.threadId,
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
 
 it.effect("runs a thread-bound automation on the provider the thread uses now", () => {
   const harness = makeHarness({ adapters: [adapter, claudeAdapter] });
@@ -1329,6 +1387,140 @@ it.effect.each(["stable", "upstream/release"])(
     ),
 );
 
+const withRealGitRepo = <A, E, R>(
+  run: (repo: {
+    readonly directory: string;
+    readonly cwd: string;
+    readonly worktreePath: string;
+    readonly command: (
+      at: string,
+      args: string[],
+    ) => ReturnType<GitVcsDriver.GitVcsDriver["Service"]["execute"]>;
+    readonly harness: (options?: HarnessOptions) => ReturnType<typeof makeHarness>;
+  }) => Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const git = yield* GitVcsDriver.GitVcsDriver;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "launch-base-fallback-" });
+    const cwd = `${directory}/repo`;
+    const worktreePath = `${directory}/worktree`;
+    yield* fs.makeDirectory(cwd);
+    const command = (at: string, args: string[]) =>
+      git.execute({ operation: "launch-test", cwd: at, args });
+    yield* command(cwd, ["init", "-b", "beta"]);
+    yield* command(cwd, ["config", "user.name", "Test"]);
+    yield* command(cwd, ["config", "user.email", "test@example.test"]);
+    const harness = (options: HarnessOptions = {}) =>
+      makeHarness({
+        hasCommit: ({ refName }) =>
+          command(cwd, ["rev-parse", "--verify", `${refName}^{commit}`]).pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          ),
+        fetchWorktreeBaseCommit: (input) => git.fetchWorktreeBaseCommit({ ...input, cwd }),
+        createWorktree: (input, progress) =>
+          git.createWorktree({ ...input, cwd, path: worktreePath }, progress),
+        ...options,
+        git: {
+          resolveWorktreeBaseRemote: (input) => git.resolveWorktreeBaseRemote({ ...input, cwd }),
+          resolvePrimaryRemoteName: () => git.resolvePrimaryRemoteName(cwd),
+          resolveDefaultBranchName: (_cwd, remoteName) =>
+            git.resolveDefaultBranchName(cwd, remoteName),
+          currentBranch: () =>
+            command(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]).pipe(
+              Effect.map((result) => result.stdout.trim() || null),
+              Effect.orElseSucceed(() => null),
+            ),
+          hasRefNamed: () => Effect.succeed(false),
+          ...options.git,
+        },
+      });
+    return yield* run({ directory, cwd, worktreePath, command, harness });
+  }).pipe(
+    Effect.provide(
+      GitVcsDriver.layer.pipe(
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "launch-base-git-" })),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      ),
+    ),
+  );
+
+const launchFromBase = (harness: ReturnType<typeof makeHarness>, baseRef: string) =>
+  Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const launched = yield* launches.launch(
+      launchInput({
+        command: "command:launch:base-fallback",
+        thread: "thread:launch:base-fallback",
+        message: "Build the feature",
+        workspace: { type: "worktree", baseRef, branch: "feature", startFromOrigin: true },
+      }),
+    );
+    const projection = yield* preparationSettled(launched.threadId);
+    assert.equal(projection.runs[0]?.status, "starting");
+  }).pipe(Effect.provide(harness.layer));
+
+it.effect("re-bases a stored base that no longer exists on the remote default branch", () =>
+  withRealGitRepo(({ directory, cwd, worktreePath, command, harness }) =>
+    Effect.gen(function* () {
+      const remote = `${directory}/remote.git`;
+      yield* command(cwd, ["commit", "--allow-empty", "-m", "initial"]);
+      yield* command(cwd, ["init", "--bare", remote]);
+      yield* command(cwd, ["remote", "add", "origin", remote]);
+      yield* command(cwd, ["push", "-u", "origin", "beta"]);
+      yield* command(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/beta"]);
+      const remoteHead = (yield* command(cwd, ["rev-parse", "beta"])).stdout.trim();
+      yield* command(cwd, ["checkout", "--detach"]);
+      yield* command(cwd, ["commit", "--allow-empty", "-m", "local only"]);
+
+      // Tasks saved before the base followed the default branch still record "main".
+      yield* launchFromBase(harness(), "main");
+      assert.equal((yield* command(worktreePath, ["rev-parse", "HEAD"])).stdout.trim(), remoteHead);
+    }),
+  ),
+);
+
+it.effect("keeps a `:/` commit-search base instead of re-basing", () =>
+  withRealGitRepo(({ cwd, worktreePath, command, harness }) =>
+    Effect.gen(function* () {
+      yield* command(cwd, ["commit", "--allow-empty", "-m", "searched base"]);
+      const searchedHead = (yield* command(cwd, ["rev-parse", "HEAD"])).stdout.trim();
+      yield* command(cwd, ["commit", "--allow-empty", "-m", "later work"]);
+
+      yield* launchFromBase(harness(), ":/searched");
+      assert.equal(
+        (yield* command(worktreePath, ["rev-parse", "HEAD"])).stdout.trim(),
+        searchedHead,
+      );
+    }),
+  ),
+);
+
+it.effect("skips a stale tracking ref when the remote reports the base branch is gone", () =>
+  withRealGitRepo(({ cwd, worktreePath, command, harness }) =>
+    Effect.gen(function* () {
+      yield* command(cwd, ["commit", "--allow-empty", "-m", "stale point"]);
+      const staleHead = (yield* command(cwd, ["rev-parse", "HEAD"])).stdout.trim();
+      yield* command(cwd, ["commit", "--allow-empty", "-m", "current work"]);
+      const betaHead = (yield* command(cwd, ["rev-parse", "HEAD"])).stdout.trim();
+      // The deleted remote branch leaves its tracking ref (and origin/HEAD) behind.
+      yield* command(cwd, ["update-ref", "refs/remotes/origin/gone", staleHead]);
+      yield* command(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone"]);
+
+      yield* launchFromBase(
+        harness({
+          // A completed fetch that found no branch, as when the branch was deleted.
+          fetchWorktreeBaseCommit: () => Effect.succeed(null),
+          git: { resolvePrimaryRemoteName: () => Effect.succeed("origin") },
+        }),
+        "main",
+      );
+      assert.equal((yield* command(worktreePath, ["rev-parse", "HEAD"])).stdout.trim(), betaHead);
+    }),
+  ),
+);
+
 it.effect("fetches the origin base from the remote it already resolved", () => {
   let fetchInput: Deferred.Deferred<unknown> | null = null;
   const harness = makeHarness({
@@ -2143,67 +2335,83 @@ it.effect(
     }),
 );
 
-it.effect("schedules an accepted preparing message exactly once across concurrent retries", () =>
-  Effect.gen(function* () {
-    const setupEntered = yield* Deferred.make<void>();
-    const allowSetup = yield* Deferred.make<void>();
-    const harness = makeHarness({
-      runSetup: () =>
-        Deferred.succeed(setupEntered, undefined).pipe(
-          Effect.andThen(Deferred.await(allowSetup)),
-          Effect.as({ status: "no-script" as const }),
-        ),
-    });
-    yield* Effect.gen(function* () {
-      const launches = yield* ThreadLaunch.ThreadLaunchService;
-      const threads = yield* ThreadManagement.ThreadManagementService;
-      const input = launchInput({
-        command: "command:launch:accepted-before-fork",
-        thread: "thread:launch:accepted-before-fork",
-        message: "Resume preparation",
-        workspace: { type: "worktree", baseRef: "main" },
+it.effect(
+  "schedules an accepted preparing message exactly once, from its accepted worktree base",
+  () =>
+    Effect.gen(function* () {
+      const setupEntered = yield* Deferred.make<void>();
+      const allowSetup = yield* Deferred.make<void>();
+      const fetched: Array<string> = [];
+      const harness = makeHarness({
+        fetchWorktreeBaseCommit: ({ refName }) =>
+          Effect.sync(() => {
+            fetched.push(refName);
+            return null;
+          }),
+        hasCommit: ({ refName }) => Effect.succeed(refName === "main"),
+        runSetup: () =>
+          Deferred.succeed(setupEntered, undefined).pipe(
+            Effect.andThen(Deferred.await(allowSetup)),
+            Effect.as({ status: "no-script" as const }),
+          ),
       });
-      const messageId = MessageId.make("message:launch:accepted-before-fork");
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const input = launchInput({
+          command: "command:launch:accepted-before-fork",
+          thread: "thread:launch:accepted-before-fork",
+          message: "Resume preparation",
+          workspace: { type: "worktree", baseRef: "main" },
+        });
+        const messageId = MessageId.make("message:launch:accepted-before-fork");
 
-      yield* threads.dispatch({
-        type: "thread.create",
-        commandId: input.commandId,
-        threadId: input.threadId,
-        projectId: input.projectId,
-        title: input.title,
-        modelSelection: input.modelSelection,
-        runtimeMode: input.runtimeMode,
-        interactionMode: input.interactionMode,
-        branch: null,
-        worktreePath: null,
-        createdBy: input.createdBy,
-        creationSource: input.creationSource,
-      });
-      yield* threads.dispatch({
-        type: "message.dispatch",
-        commandId: CommandId.make(`${input.commandId}:initial-message`),
-        threadId: input.threadId,
-        messageId,
-        text: "Resume preparation",
-        attachments: [],
-        modelSelection: input.modelSelection,
-        dispatchMode: { type: "defer_start" },
-        createdBy: input.createdBy,
-        creationSource: input.creationSource,
-      });
-      const preparing = yield* threads.getThreadProjection(input.threadId);
-      assert.equal(preparing.runs[0]?.status, "preparing");
+        yield* threads.dispatch({
+          type: "thread.create",
+          commandId: input.commandId,
+          threadId: input.threadId,
+          projectId: input.projectId,
+          title: input.title,
+          modelSelection: input.modelSelection,
+          runtimeMode: input.runtimeMode,
+          interactionMode: input.interactionMode,
+          branch: null,
+          worktreePath: null,
+          createdBy: input.createdBy,
+          creationSource: input.creationSource,
+        });
+        yield* threads.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(`${input.commandId}:initial-message`),
+          threadId: input.threadId,
+          messageId,
+          text: "Resume preparation",
+          attachments: [],
+          modelSelection: input.modelSelection,
+          dispatchMode: {
+            type: "defer_start",
+            workspaceStrategy: { type: "worktree", baseRef: "main", startFromOrigin: true },
+          },
+          createdBy: input.createdBy,
+          creationSource: input.creationSource,
+        });
+        const preparing = yield* threads.getThreadProjection(input.threadId);
+        assert.equal(preparing.runs[0]?.status, "preparing");
 
-      const [first, second] = yield* Effect.all([launches.launch(input), launches.launch(input)], {
-        concurrency: "unbounded",
-      });
-      yield* Deferred.await(setupEntered);
-      assert.isTrue(first.resumed);
-      assert.isTrue(second.resumed);
-      assert.equal(harness.runSetup.mock.calls.length, 1);
-      yield* Deferred.succeed(allowSetup, undefined);
-    }).pipe(Effect.provide(harness.layer));
-  }),
+        const [first, second] = yield* Effect.all(
+          [launches.launch(input), launches.launch(input)],
+          {
+            concurrency: "unbounded",
+          },
+        );
+        yield* Deferred.await(setupEntered);
+        assert.isTrue(first.resumed);
+        assert.isTrue(second.resumed);
+        assert.equal(harness.runSetup.mock.calls.length, 1);
+        assert.deepEqual(fetched, ["main"]);
+        yield* Deferred.succeed(allowSetup, undefined);
+      }).pipe(Effect.provide(harness.layer));
+    }),
 );
 
 it.effect("creates a strong provider-thread mapping for an imported native session", () => {
@@ -3029,4 +3237,718 @@ it.effect("replays an accepted send after the project disables the instance", ()
       assert.fail(`expected ThreadManagementProviderInstanceDisabledError, got ${fresh._tag}`);
     }
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
+});
+
+describe("effort routing", () => {
+  const codexProvider = (levels: ReadonlyArray<string>) =>
+    ({
+      instanceId: modelSelection.instanceId,
+      driver: ProviderDriverKind.make("codex"),
+      models: [
+        {
+          slug: modelSelection.model,
+          name: "Codex",
+          isCustom: false,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                label: "Reasoning",
+                type: "select",
+                options: levels.map((id) => ({ id, label: id, isDefault: id === "medium" })),
+              },
+            ],
+          },
+        },
+      ],
+    }) as unknown as ServerProvider;
+  const planLaunch = (
+    command: string,
+    overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {},
+  ): ThreadLaunch.ThreadLaunchInput => ({
+    ...launchInput({ command, thread: `${command}:thread`, message: "Plan the checkout flow" }),
+    interactionMode: "plan",
+    ...overrides,
+  });
+  const launchedThread = (input: ThreadLaunch.ThreadLaunchInput) =>
+    Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(input);
+      const projection = yield* threads.getThreadProjection(launched.threadId);
+      return { thread: projection.thread, run: projection.runs[0] };
+    });
+
+  it.effect("starts a user's thread with their token saver and Council defaults", () => {
+    const harness = makeHarness({
+      providers: [codexProvider(["low", "medium", "high"])],
+      serverSettings: {
+        tokenSaverDefault: { packs: ["caveman", "quiet-tools"], level: "lite" },
+        councilDefaults: { target: 8.5, maxRounds: 5, reviewers: 3, newThreads: true },
+      },
+    });
+    return Effect.gen(function* () {
+      const { thread } = yield* launchedThread(planLaunch("assist-defaults"));
+      assert.deepStrictEqual(thread.tokenSaver?.packs, ["caveman", "quiet-tools"]);
+      assert.include(thread.council, { target: 8.5, maxRounds: 5, reviewers: 3 });
+      // The launch's own choice wins, and null starts it off.
+      const { thread: chosen } = yield* launchedThread(
+        planLaunch("assist-chosen", { tokenSaver: null, council: null }),
+      );
+      assert.isUndefined(chosen.tokenSaver);
+      assert.isUndefined(chosen.council);
+      // An agent's thread starts without the user's defaults.
+      const { thread: agents } = yield* launchedThread(
+        planLaunch("assist-agent", { createdBy: "agent", creationSource: "mcp" }),
+      );
+      assert.isUndefined(agents.tokenSaver);
+      assert.isUndefined(agents.council);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("records a shadow decision and keeps the selection while the setting is off", () => {
+    const harness = makeHarness({ providers: [codexProvider(["low", "medium", "high", "xhigh"])] });
+    return Effect.gen(function* () {
+      const { thread, run } = yield* launchedThread(
+        planLaunch("routing-off", { routing: { mode: "auto" } }),
+      );
+      assert.deepStrictEqual(thread.modelSelection, modelSelection);
+      assert.deepStrictEqual(run?.modelSelection, modelSelection);
+      assert.deepInclude(thread.routing, {
+        taskClass: "hard",
+        effort: "high",
+        applied: false,
+        baseline: "medium",
+      });
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("applies the routed effort, capped at high, when Auto is requested and enabled", () => {
+    const harness = makeHarness({
+      providers: [codexProvider(["low", "medium", "high", "xhigh"])],
+      serverSettings: { autoRouting: { enabled: true } },
+    });
+    return Effect.gen(function* () {
+      const { thread, run } = yield* launchedThread(
+        planLaunch("routing-on", {
+          routing: { mode: "auto" },
+          modelSelection: {
+            ...modelSelection,
+            options: [{ id: "reasoningEffort", value: "xhigh" }],
+          },
+        }),
+      );
+      const routed = { ...modelSelection, options: [{ id: "reasoningEffort", value: "high" }] };
+      assert.deepStrictEqual(thread.modelSelection, routed);
+      assert.deepStrictEqual(run?.modelSelection, routed);
+      assert.deepInclude(thread.routing, { effort: "high", applied: true, baseline: "xhigh" });
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("keeps an explicit effort when the launch does not ask for Auto", () => {
+    const harness = makeHarness({
+      providers: [codexProvider(["low", "medium", "high"])],
+      serverSettings: { autoRouting: { enabled: true } },
+    });
+    return Effect.gen(function* () {
+      const explicit = { ...modelSelection, options: [{ id: "reasoningEffort", value: "low" }] };
+      const { thread } = yield* launchedThread(
+        planLaunch("routing-explicit", { modelSelection: explicit }),
+      );
+      assert.deepStrictEqual(thread.modelSelection, explicit);
+      assert.deepInclude(thread.routing, { effort: "high", applied: false, baseline: "low" });
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("does not decide again when a launch is replayed", () => {
+    let enabled = false;
+    const harness = makeHarness({
+      providers: [codexProvider(["low", "medium", "high"])],
+      getLaunchSettings: Effect.sync(() => ({
+        ...DEFAULT_SERVER_SETTINGS,
+        autoRouting: { ...DEFAULT_SERVER_SETTINGS.autoRouting, enabled },
+      })),
+    });
+    return Effect.gen(function* () {
+      const input = planLaunch("routing-replay", { routing: { mode: "auto" } });
+      const first = yield* launchedThread(input);
+      enabled = true;
+      const replayed = yield* launchedThread(input);
+      assert.deepStrictEqual(replayed.thread.modelSelection, modelSelection);
+      assert.deepStrictEqual(replayed.thread.routing, first.thread.routing);
+      assert.isFalse(replayed.thread.routing?.applied);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("records a security prompt beside the effort reasons, not among them", () => {
+    const luna = { ...modelSelection, model: "gpt-6-luna" };
+    const provider = codexProvider(["low", "medium"]);
+    const harness = makeHarness({
+      providers: [
+        { ...provider, models: provider.models.map((model) => ({ ...model, slug: luna.model })) },
+      ],
+      serverSettings: { autoRouting: { enabled: true } },
+    });
+    return Effect.gen(function* () {
+      const { thread } = yield* launchedThread({
+        ...launchInput({
+          command: "routing-security",
+          thread: "routing-security:thread",
+          message: "Explain how a.ts, b.ts and c.ts handle the CVE-2026-1 exploit",
+        }),
+        modelSelection: luna,
+        routing: { mode: "auto", model: "auto" },
+      });
+      assert.deepStrictEqual(thread.routing?.reasons, [
+        "many_paths",
+        "question",
+        "model_row",
+        "nearest_level",
+      ]);
+      assert.strictEqual(thread.routing?.model?.kept, "security_prompt");
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  describe("routing groups", () => {
+    const ready = {
+      enabled: true,
+      installed: true,
+      status: "ready",
+      availability: "available",
+      auth: { status: "authenticated" },
+      showInteractionModeToggle: true,
+    };
+    const exhausted = {
+      usageLimits: {
+        windows: [
+          { id: "primary", label: "5h", usedPercent: 100, resetsAt: "2099-01-01T00:00:00Z" },
+        ],
+      },
+    };
+    const codex = (extra: object = {}) =>
+      ({
+        ...codexProvider(["low", "medium", "high", "xhigh"]),
+        ...ready,
+        ...extra,
+      }) as unknown as ServerProvider;
+    const claude = (extra: object = {}) =>
+      ({
+        instanceId: claudeModelSelection.instanceId,
+        driver: ProviderDriverKind.make("claudeAgent"),
+        models: [{ slug: claudeModelSelection.model, name: "Claude", isCustom: false }],
+        ...ready,
+        ...extra,
+      }) as unknown as ServerProvider;
+    const group = (members: ReadonlyArray<ModelSelection>) => ({
+      id: "fast",
+      name: "Fast",
+      members,
+      strategy: "order" as const,
+    });
+    const groupLaunch = (
+      command: string,
+      overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {},
+    ) => planLaunch(command, { routing: { mode: "group", groupId: "fast" }, ...overrides });
+
+    it.effect("launches the first usable member and records the skipped ones", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(exhausted), claude()],
+        serverSettings: { routingGroups: [group([modelSelection, claudeModelSelection])] },
+      });
+      return Effect.gen(function* () {
+        const { thread, run } = yield* launchedThread(groupLaunch("group-second"));
+        assert.deepStrictEqual(thread.modelSelection, claudeModelSelection);
+        assert.deepStrictEqual(run?.modelSelection, claudeModelSelection);
+        assert.deepStrictEqual(thread.routing?.group, {
+          id: "fast",
+          name: "Fast",
+          via: "picker",
+          chosen: 1,
+          member: {
+            instanceId: claudeModelSelection.instanceId,
+            model: claudeModelSelection.model,
+          },
+          skipped: [
+            {
+              index: 0,
+              instanceId: modelSelection.instanceId,
+              model: modelSelection.model,
+              reason: "usage_exhausted",
+            },
+          ],
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("launches a group without a first message", () => {
+      const harness = makeHarness({
+        providers: [codex()],
+        serverSettings: { routingGroups: [group([modelSelection])] },
+      });
+      return Effect.gen(function* () {
+        const { initialMessage: _initialMessage, ...idle } = groupLaunch("group-idle");
+        const { thread } = yield* launchedThread(idle);
+        assert.deepStrictEqual(thread.modelSelection, modelSelection);
+        assert.include(thread.routing?.group, { id: "fast", chosen: 0 });
+        assert.notProperty(thread.routing?.group, "team");
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("records that a thread launched through an agent team leads it", () => {
+      const harness = makeHarness({
+        providers: [codex()],
+        serverSettings: { routingGroups: [{ ...group([modelSelection]), team: true }] },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(groupLaunch("team-launch"));
+        assert.deepStrictEqual(thread.modelSelection, modelSelection);
+        assert.include(thread.routing?.group, { id: "fast", team: true, chosen: 0 });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("fails with every member's reason and creates no thread when none can run", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(exhausted), claude({ showInteractionModeToggle: false })],
+        serverSettings: { routingGroups: [group([modelSelection, claudeModelSelection])] },
+      });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const input = groupLaunch("group-none");
+        const error = yield* launches.launch(input).pipe(Effect.flip);
+        if (error._tag !== "RoutingGroupUnavailableError") {
+          return assert.fail(`expected RoutingGroupUnavailableError, got ${error._tag}`);
+        }
+        assert.deepStrictEqual(
+          error.skipped.map((skip) => [skip.index, skip.reason]),
+          [
+            [0, "usage_exhausted"],
+            [1, "plan_unsupported"],
+          ],
+        );
+        assert.include(error.message, "Fast");
+        assert.isNull(yield* threads.getThreadShell(input.threadId!));
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("fails clearly for a group that no longer exists", () => {
+      const harness = makeHarness({ providers: [codex()] });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* launches.launch(groupLaunch("group-gone")).pipe(Effect.flip);
+        if (error._tag !== "RoutingGroupUnavailableError") {
+          return assert.fail(`expected RoutingGroupUnavailableError, got ${error._tag}`);
+        }
+        assert.isNull(error.groupName);
+        assert.include(error.message, "no longer exists");
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("launches when the placeholder member is off for the project", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(), claude()],
+        serverSettings: {
+          routingGroups: [group([modelSelection, claudeModelSelection])],
+          projectSettingsOverrides: {
+            [projectId]: { providerInstances: { [modelSelection.instanceId]: { enabled: false } } },
+          },
+        },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(groupLaunch("group-placeholder-off"));
+        assert.deepStrictEqual(thread.modelSelection, claudeModelSelection);
+        assert.deepInclude(thread.routing?.group?.skipped[0], {
+          index: 0,
+          reason: "project_disabled",
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("refuses a group on a reused thread", () => {
+      const harness = makeHarness({
+        providers: [codex()],
+        serverSettings: { routingGroups: [group([modelSelection])] },
+      });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* launches
+          .launch(groupLaunch("group-reuse", { reuseExistingThread: true }))
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "ThreadLaunchError");
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("routes an Auto launch through the group its task class maps to", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(), claude()],
+        serverSettings: {
+          autoRouting: { enabled: true },
+          routingGroups: [group([claudeModelSelection])],
+          routingGroupRules: { hard: "fast" },
+        },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(
+          planLaunch("group-rule", { routing: { mode: "auto" } }),
+        );
+        assert.deepStrictEqual(thread.modelSelection, claudeModelSelection);
+        assert.include(thread.routing, { taskClass: "hard" });
+        assert.include(thread.routing?.group, { id: "fast", via: "rule", chosen: 0 });
+        // An unmapped class keeps the Auto effort path and its own model.
+        const quick = yield* launchedThread({
+          ...planLaunch("group-rule-unmapped", { routing: { mode: "auto" } }),
+          interactionMode: "default",
+          initialMessage: { text: "Rename foo to bar", attachments: [] },
+        });
+        assert.equal(quick.thread.modelSelection.instanceId, modelSelection.instanceId);
+        assert.isUndefined(quick.thread.routing?.group);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("does not resolve a group again when a launch is replayed", () => {
+      let members: ReadonlyArray<ModelSelection> = [modelSelection, claudeModelSelection];
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [codex(), claude()],
+        getLaunchSettings: Effect.sync(() => ({
+          ...DEFAULT_SERVER_SETTINGS,
+          routingGroups: [group(members)],
+        })),
+      });
+      return Effect.gen(function* () {
+        const input = groupLaunch("group-replay");
+        const first = yield* launchedThread(input);
+        // Resolving again would now fail: no member can run.
+        members = [{ instanceId: ProviderInstanceId.make("gone"), model: "gone-model" }];
+        const replayed = yield* launchedThread(input);
+        assert.deepStrictEqual(replayed.thread.modelSelection, modelSelection);
+        assert.deepStrictEqual(replayed.thread.routing, first.thread.routing);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("routes effort only for an Auto rule and keeps a member's own effort", () => {
+      const xhigh = { ...modelSelection, options: [{ id: "reasoningEffort", value: "xhigh" }] };
+      const harness = makeHarness({
+        providers: [codex()],
+        getLaunchSettings: Effect.sync(() => ({
+          ...DEFAULT_SERVER_SETTINGS,
+          autoRouting: { ...DEFAULT_SERVER_SETTINGS.autoRouting, enabled: true },
+          routingGroups: [group([modelSelection]), { ...group([xhigh]), id: "deep", name: "Deep" }],
+          routingGroupRules: { hard: "fast" },
+        })),
+      });
+      return Effect.gen(function* () {
+        const picked = yield* launchedThread(groupLaunch("group-effort-picked"));
+        assert.deepStrictEqual(picked.thread.modelSelection, modelSelection);
+        assert.include(picked.thread.routing, { effort: "high", applied: false });
+        const routed = yield* launchedThread(
+          planLaunch("group-effort-rule", { routing: { mode: "auto" } }),
+        );
+        assert.deepStrictEqual(routed.thread.modelSelection, {
+          ...modelSelection,
+          options: [{ id: "reasoningEffort", value: "high" }],
+        });
+        assert.include(routed.thread.routing, { effort: "high", applied: true });
+        const kept = yield* launchedThread(
+          groupLaunch("group-effort-kept", { routing: { mode: "group", groupId: "deep" } }),
+        );
+        assert.deepStrictEqual(kept.thread.modelSelection, xhigh);
+        assert.include(kept.thread.routing, { effort: null, applied: false });
+        assert.include(kept.thread.routing?.group, { id: "deep", chosen: 0 });
+      }).pipe(Effect.provide(harness.layer));
+    });
+  });
+
+  describe("model routing", () => {
+    const ready = {
+      enabled: true,
+      installed: true,
+      status: "ready",
+      availability: "available",
+      auth: { status: "authenticated" },
+    };
+    const exhausted = {
+      usageLimits: {
+        windows: [
+          { id: "primary", label: "5h", usedPercent: 100, resetsAt: "2099-01-01T00:00:00Z" },
+        ],
+      },
+    };
+    const effortSelect = (id: string, levels: ReadonlyArray<string>, defaultLevel: string) => ({
+      id,
+      label: "Effort",
+      type: "select",
+      options: levels.map((level) => ({
+        id: level,
+        label: level,
+        isDefault: level === defaultLevel,
+      })),
+    });
+    const claudeModel = (slug: string) => ({
+      slug,
+      name: slug,
+      isCustom: false,
+      capabilities: {
+        optionDescriptors: [
+          effortSelect("effort", ["low", "medium", "high", "xhigh", "max"], "high"),
+          { id: "fastMode", label: "Fast", type: "boolean" },
+        ],
+      },
+    });
+    const claude = (extra: object = {}) =>
+      ({
+        instanceId: claudeModelSelection.instanceId,
+        driver: ProviderDriverKind.make("claudeAgent"),
+        models: [claudeModel("claude-opus-5-5"), claudeModel("claude-haiku-5-5")],
+        ...ready,
+        ...extra,
+      }) as unknown as ServerProvider;
+    const codex = () =>
+      ({
+        instanceId: modelSelection.instanceId,
+        driver: ProviderDriverKind.make("codex"),
+        models: [
+          {
+            slug: "gpt-6-luna",
+            name: "Luna",
+            isCustom: false,
+            capabilities: {
+              optionDescriptors: [
+                effortSelect("reasoningEffort", ["low", "medium", "high", "xhigh"], "medium"),
+              ],
+            },
+          },
+        ],
+        ...ready,
+      }) as unknown as ServerProvider;
+    const opus = {
+      ...claudeModelSelection,
+      options: [
+        { id: "effort", value: "xhigh" },
+        { id: "fastMode", value: true },
+      ],
+    };
+    const askLaunch = (
+      command: string,
+      overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {},
+    ): ThreadLaunch.ThreadLaunchInput => ({
+      ...launchInput({
+        command,
+        thread: `${command}:thread`,
+        message: "Rename checkoutTotal to orderTotal",
+      }),
+      modelSelection: opus,
+      routing: { mode: "auto", model: "auto" },
+      ...overrides,
+    });
+    const autoRouting = (switches: { model?: boolean; provider?: boolean }) => ({
+      enabled: true,
+      allowModelSwitch: switches.model === true,
+      allowProviderSwitch: switches.provider === true,
+    });
+
+    it.effect("switches model on the same instance with fresh options when allowed", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({ model: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread, run } = yield* launchedThread(askLaunch("model-switch"));
+        const haiku = {
+          instanceId: claudeModelSelection.instanceId,
+          model: "claude-haiku-5-5",
+          options: [{ id: "effort", value: "medium" }],
+        };
+        assert.deepStrictEqual(thread.modelSelection, haiku);
+        assert.deepStrictEqual(run?.modelSelection, haiku);
+        assert.include(thread.routing, {
+          taskClass: "quick_edit",
+          effort: "medium",
+          applied: true,
+        });
+        assert.deepStrictEqual(thread.routing?.model, {
+          instanceId: claudeModelSelection.instanceId,
+          model: "claude-haiku-5-5",
+          tier: "B",
+          switched: "model",
+          applied: true,
+          skipped: 0,
+          from: { instanceId: claudeModelSelection.instanceId, model: "claude-opus-5-5" },
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("records the choice as a shadow and keeps the model while switching is off", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({}) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(askLaunch("model-shadow"));
+        assert.deepStrictEqual(thread.modelSelection, {
+          ...claudeModelSelection,
+          options: [
+            { id: "effort", value: "medium" },
+            { id: "fastMode", value: true },
+          ],
+        });
+        assert.deepStrictEqual(thread.routing?.model, {
+          instanceId: claudeModelSelection.instanceId,
+          model: "claude-haiku-5-5",
+          tier: "B",
+          switched: "model",
+          applied: false,
+          skipped: 0,
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("does not move a screenshot of UI work to a GPT model", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({ provider: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(
+          askLaunch("screenshot-ui", {
+            initialMessage: {
+              messageId: MessageId.make("screenshot-ui:id"),
+              text: "Rename the button in this screenshot to Pay",
+              attachments: [
+                {
+                  type: "image",
+                  id: ChatAttachmentId.make("screenshot-ui-image"),
+                  name: "screen.png",
+                  mimeType: "image/png",
+                  sizeBytes: 4,
+                },
+              ],
+            },
+          }),
+        );
+        assert.equal(thread.modelSelection.model, "claude-opus-5-5");
+        assert.include(thread.routing?.model, {
+          switched: "none",
+          reason: "image_frontend",
+          skipped: 1,
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("switches provider when the thread's instance is out of quota", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(exhausted), codex()],
+        serverSettings: { autoRouting: autoRouting({ provider: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(askLaunch("provider-switch"));
+        assert.deepStrictEqual(thread.modelSelection, {
+          instanceId: modelSelection.instanceId,
+          model: "gpt-6-luna",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        });
+        assert.include(thread.routing?.model, {
+          switched: "provider",
+          applied: true,
+          tier: "B",
+          skipped: 1,
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("switches provider, not model, when only provider switching is allowed", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({ provider: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(askLaunch("provider-only"));
+        assert.equal(thread.modelSelection.instanceId, modelSelection.instanceId);
+        assert.equal(thread.modelSelection.model, "gpt-6-luna");
+        assert.include(thread.routing?.model, { switched: "provider", applied: true });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("keeps a model the user picked and records no model choice", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: { autoRouting: autoRouting({ model: true, provider: true }) },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(
+          askLaunch("model-picked", { routing: { mode: "auto" } }),
+        );
+        assert.equal(thread.modelSelection.model, "claude-opus-5-5");
+        assert.include(thread.routing, { effort: "medium", applied: true });
+        assert.isUndefined(thread.routing?.model);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("does not choose a model again when a launch is replayed", () => {
+      let allowModelSwitch = true;
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        getLaunchSettings: Effect.sync(() => ({
+          ...DEFAULT_SERVER_SETTINGS,
+          autoRouting: autoRouting({ model: allowModelSwitch }),
+        })),
+      });
+      return Effect.gen(function* () {
+        const input = askLaunch("model-replay");
+        const first = yield* launchedThread(input);
+        allowModelSwitch = false;
+        const replayed = yield* launchedThread(input);
+        assert.equal(replayed.thread.modelSelection.model, "claude-haiku-5-5");
+        assert.deepStrictEqual(replayed.thread.routing, first.thread.routing);
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("lets a routing group rule decide without a model choice", () => {
+      const harness = makeHarness({
+        adapters: [adapter, claudeAdapter],
+        providers: [claude(), codex()],
+        serverSettings: {
+          autoRouting: autoRouting({ model: true, provider: true }),
+          routingGroups: [{ id: "ask", name: "Ask", members: [opus], strategy: "order" as const }],
+          routingGroupRules: { quick_edit: "ask" },
+        },
+      });
+      return Effect.gen(function* () {
+        const { thread } = yield* launchedThread(askLaunch("model-group-rule"));
+        assert.equal(thread.modelSelection.model, "claude-opus-5-5");
+        assert.include(thread.routing?.group, { id: "ask", via: "rule" });
+        assert.isUndefined(thread.routing?.model);
+      }).pipe(Effect.provide(harness.layer));
+    });
+  });
+
+  it.effect("leaves ACP Registry launches unchanged", () => {
+    const harness = makeHarness({
+      providers: [
+        {
+          ...codexProvider(["low", "medium", "high"]),
+          driver: ProviderDriverKind.make("acpRegistry"),
+        },
+      ],
+      serverSettings: { autoRouting: { enabled: true } },
+    });
+    return Effect.gen(function* () {
+      const { thread } = yield* launchedThread(
+        planLaunch("routing-acp", { routing: { mode: "auto" } }),
+      );
+      assert.deepStrictEqual(thread.modelSelection, modelSelection);
+      assert.deepInclude(thread.routing, { effort: null, applied: false });
+    }).pipe(Effect.provide(harness.layer));
+  });
 });

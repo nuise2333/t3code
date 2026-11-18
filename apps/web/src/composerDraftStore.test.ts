@@ -92,6 +92,7 @@ import {
   type ComposerFileAttachment,
   type ComposerImageAttachment,
   composerFileNeedsReattach,
+  hydrateImagesFromPersisted,
   partializeComposerDraftStoreState,
   useComposerDraftStore,
   DraftId,
@@ -261,29 +262,28 @@ describe("composerDraftStore addImages", () => {
     expect(revokeSpy).not.toHaveBeenCalled();
   });
 
-  it("deduplicates against existing images across calls by file signature", () => {
-    const first = makeImage({
-      id: "img-a",
-      previewUrl: "blob:a",
+  it("deduplicates byte-identical images across calls and keeps distinct bytes", () => {
+    // Hydrated copies get fresh lastModified values, like a restored stash or draft.
+    const persisted = (id: string, fill: number) => ({
+      id,
       name: "same.png",
       mimeType: "image/png",
       sizeBytes: 9,
-      lastModified: 777,
+      dataUrl: `data:image/png;base64,${btoa(String.fromCharCode(...new Uint8Array(9).fill(fill)))}`,
     });
-    const duplicateLater = makeImage({
-      id: "img-b",
-      previewUrl: "blob:b",
-      name: "same.png",
-      mimeType: "image/png",
-      sizeBytes: 9,
-      lastModified: 999,
-    });
+    const [first, repeat, different] = hydrateImagesFromPersisted([
+      persisted("img-a", 1),
+      persisted("img-b", 1),
+      persisted("img-c", 2),
+    ]);
+    const store = useComposerDraftStore.getState();
 
-    expect(useComposerDraftStore.getState().addImage(threadRef, first)).toBe(true);
-    expect(useComposerDraftStore.getState().addImage(threadRef, duplicateLater)).toBe(false);
+    expect(store.addImage(threadRef, first!)).toBe(true);
+    expect(store.addImage(threadRef, { ...repeat!, previewUrl: "blob:b" })).toBe(false);
+    expect(store.addImage(threadRef, different!)).toBe(true);
 
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
-    expect(draft?.images.map((image) => image.id)).toEqual(["img-a"]);
+    expect(draft?.images.map((image) => image.id)).toEqual(["img-a", "img-c"]);
     expect(revokeSpy).toHaveBeenCalledWith("blob:b");
   });
 });
@@ -1277,11 +1277,19 @@ describe("composerDraftStore project draft thread mapping", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId });
     store.setPrompt(draftId, "keep this prompt");
+    store.setRoutingGroup(draftId, {
+      id: "fast",
+      placeholder: modelSelection(CODEX_DRIVER, "gpt-5.5"),
+    });
+    store.setDraftThreadContext(draftId, { branch: "same-machine" });
+    expect(store.getComposerDraft(draftId)?.routingGroupId).toBe("fast");
     store.setDraftThreadContext(draftId, {
       projectRef: remoteProjectRef,
       environmentSelection: "auto",
       loadBalancedEnvironmentId: OTHER_TEST_ENVIRONMENT_ID,
     });
+    // The other machine's settings own its group ids.
+    expect(store.getComposerDraft(draftId)?.routingGroupId).toBeUndefined();
     expect(store.getDraftThread(draftId)).toMatchObject({
       environmentId: OTHER_TEST_ENVIRONMENT_ID,
       environmentSelection: "auto",
@@ -1791,6 +1799,22 @@ describe("composerDraftStore modelSelection", () => {
       replaceOptions: true,
     });
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBeUndefined();
+
+    store.setEffortManual(threadRef, true);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.effortManual).toBe(true);
+    store.setEffortManual(threadRef, false);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.effortManual).toBeUndefined();
+
+    const placeholder = modelSelection(CODEX_DRIVER, "gpt-5.5");
+    store.setRoutingGroup(threadRef, { id: "fast", placeholder });
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toMatchObject({
+      routingGroupId: "fast",
+      modelSelectionByProvider: { [placeholder.instanceId]: placeholder },
+    });
+    store.setModelSelection(threadRef, placeholder);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.routingGroupId).toBe("fast");
+    store.setModelSelection(threadRef, placeholder, { explicit: true });
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.routingGroupId).toBeUndefined();
   });
 
   it("replaces only the targeted provider options on the current model selection", () => {
@@ -2288,6 +2312,8 @@ describe("composerDraftStore model seed migration", () => {
               modelSelectionByProvider: { [CODEX_INSTANCE]: staleSelection },
               activeProvider: CODEX_INSTANCE,
               modelSelectionExplicit: true,
+              effortManual: true,
+              routingGroupId: "fast",
             },
             [serverThreadKey]: {
               prompt: "",
@@ -2326,6 +2352,8 @@ describe("composerDraftStore model seed migration", () => {
         modelSelectionByProvider: { [CODEX_INSTANCE]: staleSelection },
         activeProvider: CODEX_INSTANCE,
         modelSelectionExplicit: true,
+        effortManual: true,
+        routingGroupId: "fast",
       });
       expect(draftByKey(serverThreadKey)).toMatchObject({
         modelSelectionByProvider: { [CODEX_INSTANCE]: staleSelection },
@@ -2674,9 +2702,7 @@ describe("composerDraftStore attachment references", () => {
     const image = makeImage({ id: "img-1", previewUrl: "blob:img-1", name: "shot.png" });
     expect(store.addImages(threadRef, [image])).toEqual(["img-1"]);
     expect(
-      store.addImages(threadRef, [
-        makeImage({ id: "img-2", previewUrl: "blob:img-2", name: "shot.png" }),
-      ]),
+      store.addImages(threadRef, [{ ...image, id: "img-2", previewUrl: "blob:img-2" }]),
     ).toEqual([]);
   });
 

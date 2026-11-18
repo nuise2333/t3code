@@ -22,6 +22,8 @@ export * from "./providerUsageLimits.ts";
 export * from "./usageLimitSourceId.ts";
 export * from "./providerPolicy.ts";
 export * from "./modelSelection.ts";
+export * from "./routing.ts";
+export * from "./council.ts";
 export * from "./chatAttachment.ts";
 export * from "./checkpointDiff.ts";
 export * from "./model.ts";

@@ -14,6 +14,9 @@ import {
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
   type ProviderDriverKind,
+  type LaunchRoutingRequest,
+  type CouncilSettings,
+  type TokenSaverSettings,
   type ProviderInteractionMode,
   ProjectId,
   type RunId,
@@ -48,6 +51,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
@@ -93,6 +97,12 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
+  /** Auto effort or a routing group; every other launch keeps its selection. */
+  readonly routing?: LaunchRoutingRequest | undefined;
+  /** Absent uses the user's default for a thread the user starts; null starts it off. */
+  readonly tokenSaver?: TokenSaverSettings | null | undefined;
+  /** Absent uses the user's default for a thread the user starts; null starts it off. */
+  readonly council?: CouncilSettings | null | undefined;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -108,6 +118,8 @@ export interface ThreadLaunchInput {
   readonly linkOrigin?: OrchestrationV2LinkOrigin;
   /** The parent there, when that environment's agent delegated this as a task. */
   readonly delegatedFrom?: OrchestrationV2DelegatedFrom;
+  /** That task was a review, so its rounds are capped here too. */
+  readonly delegatedRole?: "review";
 }
 
 type PreparationInput = Pick<
@@ -206,7 +218,9 @@ export class ThreadLaunchService extends Context.Service<
       input: ThreadLaunchInput,
     ) => Effect.Effect<
       ThreadLaunchResult,
-      ThreadLaunchError | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+      | ThreadLaunchError
+      | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+      | RoutingPolicy.RoutingGroupUnavailableError
     >;
     /** Check a new worktree's base ref and branch name before creation for early errors; launch otherwise accepts and reports these failures inside the thread. */
     readonly checkWorktreeBase: (
@@ -252,12 +266,48 @@ const make = Effect.gen(function* () {
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  /**
+   * The token saver and Council a new thread starts with: the launch's own, else the user's
+   * defaults for a thread the user starts here. Agents' and linked environments' threads start
+   * without them unless the launch asks.
+   */
+  const launchAssists = Effect.fn("ThreadLaunchService.launchAssists")(function* (
+    input: ThreadLaunchInput,
+  ) {
+    const defaults =
+      input.createdBy === "user" &&
+      input.delegatedFrom === undefined &&
+      (input.tokenSaver === undefined || input.council === undefined)
+        ? yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null))
+        : null;
+    const tokenSaver =
+      input.tokenSaver !== undefined ? input.tokenSaver : (defaults?.tokenSaverDefault ?? null);
+    const councilDefaults = defaults?.councilDefaults;
+    const council =
+      input.council !== undefined
+        ? input.council
+        : councilDefaults?.newThreads === true
+          ? {
+              target: councilDefaults.target,
+              maxRounds: councilDefaults.maxRounds,
+              reviewers: councilDefaults.reviewers,
+            }
+          : null;
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
+    return {
+      ...(tokenSaver === null || tokenSaver.packs.length === 0
+        ? {}
+        : { tokenSaver: { ...tokenSaver, changedAt: now } }),
+      ...(council === null ? {} : { council: { ...council, since: now } }),
+    };
+  });
   const textGeneration = yield* TextGeneration.TextGeneration;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const eventSink = yield* EventSink.EventSinkV2;
   const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  const routingPolicy = yield* RoutingPolicy.RoutingPolicy;
   // A project-folder launch that names no branch records the folder's checkout, as the composer does.
   const launchBranch = (strategy: ThreadLaunchWorkspaceStrategy, workspaceRoot: string) =>
     strategy.type === "root" && strategy.branch === undefined
@@ -447,6 +497,55 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /**
+   * A recorded worktree strategy can outlive the ref it names: tasks saved before
+   * the base followed the repo's default branch kept `"main"`, and a base branch
+   * can be deleted after it was recorded. Re-base on the remote's default branch,
+   * then on the checked-out commit, instead of failing every launch.
+   */
+  const worktreeFallbackBase = Effect.fn("ThreadLaunchService.worktreeFallbackBase")(function* (
+    cwd: string,
+    remoteName: string | null,
+  ) {
+    if (remoteName !== null) {
+      const defaultBranch = yield* git.resolveDefaultBranchName(cwd, remoteName);
+      if (defaultBranch !== null) {
+        // Fetch freshens the default branch the way the recorded base would have been.
+        const remoteBase = yield* git
+          .fetchWorktreeBaseCommit({
+            cwd,
+            refName: defaultBranch,
+            remote: { remoteName, branchName: defaultBranch },
+          })
+          .pipe(
+            Effect.map((base) => ({ fetchFailed: false as const, base })),
+            Effect.orElseSucceed(() => ({ fetchFailed: true as const, base: null })),
+          );
+        if (remoteBase.base !== null) {
+          return {
+            startRef: remoteBase.base.commitSha,
+            baseRefName: `refs/remotes/${remoteBase.base.remoteRefName}`,
+          };
+        }
+        // A completed fetch that found no branch means the branch is gone and its
+        // tracking ref is stale; only a failed fetch can fall back to it.
+        if (remoteBase.fetchFailed) {
+          const trackingRef = `refs/remotes/${remoteName}/${defaultBranch}`;
+          if (yield* git.hasCommit({ cwd, refName: trackingRef })) {
+            return { startRef: trackingRef, baseRefName: trackingRef };
+          }
+        }
+      }
+    }
+    const currentBranch = yield* git.currentBranch(cwd);
+    if (currentBranch !== null) {
+      return { startRef: currentBranch, baseRefName: currentBranch };
+    }
+    return (yield* git.hasCommit({ cwd, refName: "HEAD" }))
+      ? { startRef: "HEAD", baseRefName: "HEAD" }
+      : null;
+  });
+
   const prepareInBackground = Effect.fn("ThreadLaunchService.prepareInBackground")(function* (
     input: PreparationInput,
     threadId: ThreadId,
@@ -579,6 +678,7 @@ const make = Effect.gen(function* () {
             : null;
         const shouldFetch = remote !== null;
         yield* setupTracker.stageStatus(threadId, "fetch", shouldFetch ? "running" : "skipped");
+        let fetchedBase = false;
         if (remote !== null) {
           const remoteBase = yield* git
             .fetchWorktreeBaseCommit({
@@ -590,9 +690,40 @@ const make = Effect.gen(function* () {
           if (remoteBase !== null) {
             startRef = remoteBase.commitSha;
             baseRefName = `refs/remotes/${remoteBase.remoteRefName}`;
+            fetchedBase = true;
           }
         }
         if (shouldFetch) yield* setupTracker.stageStatus(threadId, "fetch", "done");
+        // `:/text` bases are commit searches, not refs; `hasCommit` treats the appended
+        // `^{commit}` as part of the pattern (same guard as checkWorktreeBase).
+        const recordedBaseResolves =
+          fetchedBase ||
+          startRef.startsWith(":") ||
+          (yield* git
+            .hasCommit({
+              cwd: project.workspaceRoot,
+              // `git worktree add` reads `-` as the previous checkout.
+              refName: startRef === "-" ? "@{-1}" : startRef,
+            })
+            .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId))));
+        if (!recordedBaseResolves) {
+          const remoteName =
+            remote?.remoteName ??
+            (yield* git
+              .resolvePrimaryRemoteName(project.workspaceRoot)
+              .pipe(Effect.orElseSucceed(() => null)));
+          const fallback = yield* worktreeFallbackBase(project.workspaceRoot, remoteName).pipe(
+            Effect.orElseSucceed(() => null),
+          );
+          if (fallback !== null) {
+            startRef = fallback.startRef;
+            baseRefName = fallback.baseRefName;
+            yield* setupTracker.update(threadId, (snapshot) => ({
+              ...snapshot,
+              baseRef: fallback.baseRefName,
+            }));
+          }
+        }
         if (branch !== null && (generatedTemporaryBranch || isTemporaryWorktreeBranch(branch))) {
           const parts = branch.split("/");
           for (let depth = 1; depth < parts.length; depth++) {
@@ -1108,11 +1239,18 @@ const make = Effect.gen(function* () {
       }
 
       const launchReceipt = yield* readReceipt(input, input.commandId);
-      yield* threads.assertProviderInstanceEnabled({
-        projectId: input.projectId,
-        commandId: input.commandId,
-        instanceId: input.modelSelection.instanceId,
-      });
+      const groupRequested = input.routing?.mode === "group";
+      if (groupRequested && input.reuseExistingThread === true) {
+        return yield* mapError(input, "update-thread")("Routing groups apply only to new threads.");
+      }
+      // A group's placeholder member may be off here; its resolution checks every member.
+      if (!groupRequested) {
+        yield* threads.assertProviderInstanceEnabled({
+          projectId: input.projectId,
+          commandId: input.commandId,
+          instanceId: input.modelSelection.instanceId,
+        });
+      }
       return yield* Effect.gen(function* () {
         // Recover ids from accepted launch receipts before allocating; retries have no client id and new ids collide with receipts.
         const reusableLaunchReceipt =
@@ -1149,6 +1287,36 @@ const make = Effect.gen(function* () {
           yield* validateReusableThread(input, candidateThreadId);
         }
 
+        // Decided once, before the claim: a replay keeps what the accepted launch recorded.
+        const routed =
+          Option.isNone(launchReceipt) &&
+          input.reuseExistingThread !== true &&
+          (input.initialMessage !== undefined || groupRequested)
+            ? yield* routingPolicy.decide({
+                modelSelection: input.modelSelection,
+                prompt: input.initialMessage?.text ?? input.title,
+                interactionMode: input.interactionMode,
+                runtimeMode: input.runtimeMode,
+                projectId: input.projectId,
+                hasImage:
+                  input.initialMessage?.attachments.some(
+                    (attachment) => attachment.type === "image",
+                  ) === true,
+                requested: input.routing,
+              })
+            : null;
+        const modelSelection = routed?.selection ?? input.modelSelection;
+        const assists = yield* launchAssists(input);
+        if (
+          routed?.decision.group !== undefined ||
+          modelSelection.instanceId !== input.modelSelection.instanceId
+        ) {
+          yield* threads.assertProviderInstanceEnabled({
+            projectId: input.projectId,
+            commandId: input.commandId,
+            instanceId: modelSelection.instanceId,
+          });
+        }
         const workspaceStrategy: ThreadLaunchWorkspaceStrategy =
           input.workspaceStrategy.type === "root" && Option.isNone(launchReceipt)
             ? Option.match(
@@ -1202,10 +1370,12 @@ const make = Effect.gen(function* () {
                 threadId: candidateThreadId,
                 projectId: input.projectId,
                 title: input.title,
-                modelSelection: input.modelSelection,
+                modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
+                ...(routed === null ? {} : { routing: routed.decision }),
+                ...assists,
                 worktreePath: initialWorktreePath,
                 ...(input.importedNativeThread === undefined
                   ? {}
@@ -1214,6 +1384,9 @@ const make = Effect.gen(function* () {
                 ...(input.delegatedFrom === undefined
                   ? {}
                   : { delegatedFrom: input.delegatedFrom }),
+                ...(input.delegatedRole === undefined
+                  ? {}
+                  : { delegatedRole: input.delegatedRole }),
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,
                 ...(initialMessage === undefined
@@ -1252,7 +1425,7 @@ const make = Effect.gen(function* () {
                 type: "message.dispatch",
                 commandId: messageCommandId,
                 threadId,
-                modelSelection: input.modelSelection,
+                modelSelection,
                 dispatchMode: { type: "defer_start", workspaceStrategy },
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,
@@ -1304,16 +1477,21 @@ const make = Effect.gen(function* () {
               return yield* releasePreparation(input.commandId);
             }
             const boundWorktreePath = current?.thread.worktreePath ?? null;
+            // A retry prepares the worktree the accepted launch asked for, not the
+            // retry's own strategy, whose defaults may resolve differently.
+            const accepted = current?.runs.find((run) => run.id === runId)?.workspacePreparation;
             const preparationStrategy: ThreadLaunchWorkspaceStrategy =
-              Option.isSome(launchReceipt) &&
-              workspaceStrategy.type === "root" &&
-              boundWorktreePath !== null
-                ? {
-                    type: "existing_worktree",
-                    worktreePath: boundWorktreePath,
-                    branch: workspaceStrategy.branch,
-                  }
-                : workspaceStrategy;
+              Option.isSome(launchReceipt) && accepted?.type === "worktree"
+                ? accepted
+                : Option.isSome(launchReceipt) &&
+                    workspaceStrategy.type === "root" &&
+                    boundWorktreePath !== null
+                  ? {
+                      type: "existing_worktree",
+                      worktreePath: boundWorktreePath,
+                      branch: workspaceStrategy.branch,
+                    }
+                  : workspaceStrategy;
             yield* schedulePreparation(
               { ...input, workspaceStrategy: preparationStrategy },
               threadId,

@@ -224,6 +224,14 @@ describe("searchSettings", () => {
       ["Native sessions", "providers"],
       ["CODEX_HOME path", "providers"],
       ["Shadow home path", "providers"],
+      ["reasoning routing", "auto-effort-beta"],
+      ["Auto can switch model", "auto-model-switch-beta"],
+      ["Auto can switch provider", "auto-provider-switch-beta"],
+      ["model group", "routing-groups"],
+      ["failover", "routing-groups"],
+      ["group preset", "routing-groups"],
+      ["agent team", "agent-teams"],
+      ["lead guidance", "agent-teams"],
     ] as const) {
       expect(searchSettings(title)[0]?.id, title).toBe(id);
     }

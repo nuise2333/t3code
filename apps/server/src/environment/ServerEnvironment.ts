@@ -25,6 +25,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import { isSpeechPlatformSupported } from "../speech/platform.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 import { detectServerEnvironmentMachineKind } from "./ServerEnvironmentMachine.ts";
+import { rtkInstalled } from "../assist/ThreadAssists.ts";
 
 export class ServerEnvironmentIdPersistenceError extends Schema.TaggedError<ServerEnvironmentIdPersistenceError>()(
   "ServerEnvironmentIdPersistenceError",
@@ -208,6 +209,7 @@ export const make = Effect.gen(function* () {
     serverConfig.desktopTelemetryControlFd !== undefined;
 
   const databaseMigration = databaseMigrationHead(serverConfig.dbPath);
+  const rtk = yield* rtkInstalled.pipe(Effect.orElseSucceed(() => false));
   const descriptor: ExecutionEnvironmentDescriptor = {
     environmentId,
     label,
@@ -248,6 +250,16 @@ export const make = Effect.gen(function* () {
       projectSettingsOverrides: true,
       projectProviderInstanceOverrides: true,
       threadSnooze: true,
+      autoRouting: true,
+      autoModelRouting: true,
+      routingGroups: true,
+      routingGroupQuota: true,
+      scheduledTaskRoutingGroups: true,
+      agentTeams: true,
+      threadAssists: true,
+      rtk,
+      crossVendorModel: true,
+      routingSummary: true,
       threadForceStop: true,
       environmentThemes: true,
       usageLimitSources: true,

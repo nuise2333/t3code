@@ -13,31 +13,60 @@ import {
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Semaphore from "effect/Semaphore";
 
 import type { OrchestratorV2Error } from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { resolveInteractionMode, resolveRuntimeMode } from "./delegatedTaskModes.ts";
+import { fencingLinkOrigin } from "./linkOrigin.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 
+const delegatedTaskPrefix = "thread:delegated-task:";
+
+const suggestedThreadId = (threadId: ThreadId) => {
+  if (!threadId.startsWith(delegatedTaskPrefix)) return ThreadId.make(`mcp:${threadId}`);
+  const rest = threadId.slice(delegatedTaskPrefix.length);
+  // encodeURIComponent throws on lone surrogates, which a JSON string can carry.
+  if (!rest.isWellFormed()) return null;
+  const encoded = encodeURIComponent(rest);
+  return encoded === rest ? null : ThreadId.make(`${delegatedTaskPrefix}${encoded}`);
+};
+
 /**
- * Threads an agent starts over MCP are `mcp:<uuid>`, and agents often paste the
- * bare uuid. The id is never rewritten, so permission checks keyed on it still
- * hold; the miss only names a live thread the caller could read by its full id.
+ * Agents paste bare uuids for `mcp:<uuid>` threads and unencoded delegated-task ids.
+ * The id is never rewritten, so permission checks keyed on it still hold; the miss
+ * only names a live thread the caller could read by its full id. Ids from another
+ * machine miss here too. The link hint is static: listing links probes peers.
  */
 export const threadNotFound = Effect.fn("OrchestratorMcpService.threadNotFound")(function* (
   threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadShell">,
+  scope: McpInvocationContext.McpInvocationScope,
   threadId: ThreadId,
   message: string,
 ) {
-  const prefixed = ThreadId.make(`mcp:${threadId}`);
-  const shell = yield* threads.getThreadShell(prefixed).pipe(Effect.orElseSucceed(() => null));
+  const suggested = suggestedThreadId(threadId);
+  const shell =
+    suggested === null
+      ? null
+      : yield* threads.getThreadShell(suggested).pipe(Effect.orElseSucceed(() => null));
+  const mcpHint =
+    shell === null || shell.deletedAt !== null ? "" : ` Did you mean \`${suggested}\`?`;
+  const caller =
+    scope.thread === undefined
+      ? null
+      : yield* threads.getThreadShell(scope.thread.threadId).pipe(Effect.orElseSucceed(() => null));
+  // A peer link's caller would be pointed at this machine's links, and a fenced one may not use them.
+  const linksHint =
+    scope.linkedEnvironments === false ||
+    scope.client?.linked === true ||
+    fencingLinkOrigin({ scope, caller: caller ?? undefined }) !== undefined
+      ? ""
+      : " Thread ids belong to one environment: for a thread on a linked one, find it with `t3_environment_links` and pass its `environmentId` to a tool that takes one.";
   return yield* new OrchestratorMcpFailure({
     code: "thread_not_found",
-    message:
-      shell === null || shell.deletedAt !== null
-        ? message
-        : `${message} Did you mean \`${prefixed}\`?`,
+    message: `${message}${mcpHint}${linksHint}`,
   });
 });
 
@@ -115,13 +144,122 @@ export const loadCaller = Effect.fn("mcp.loadCaller")(function* () {
   } satisfies Caller;
 });
 
+// Reviewer reports (2026-11): only about 21% of re-reviews pass, so a fourth round rarely helps.
+const MAX_REVIEW_ROUNDS = 3;
+
+/** Every agent send to a review child counts as a round; a replay of an accepted one does not. */
+export const assertReviewRoundLeft = (
+  thread: { readonly delegatedRole?: "review" | undefined },
+  messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly createdBy?: string;
+  }>,
+  messageId: string,
+) => {
+  if (thread.delegatedRole !== "review") return Effect.void;
+  const rounds = messages.filter(
+    (message) => message.role === "user" && message.createdBy === "agent",
+  );
+  return rounds.length >= MAX_REVIEW_ROUNDS && !rounds.some((message) => message.id === messageId)
+    ? Effect.fail(
+        new OrchestratorMcpFailure({
+          code: "thread_not_sendable",
+          message: `This review has had its ${MAX_REVIEW_ROUNDS} rounds. Give the user the remaining findings instead of reviewing again.`,
+        }),
+      )
+    : Effect.void;
+};
+
+/** Review delegations count until the user writes in the parent; a scheduled delivery is not that. */
+const assertReviewDelegationLeft = Effect.fn("OrchestratorMcpService.assertReviewDelegationLeft")(
+  function* (
+    threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadRecords">,
+    parentThreadId: ThreadId,
+  ) {
+    const { messages, subagents } = yield* threads
+      .getThreadRecords(parentThreadId, ["messages", "subagents"], { messageRoles: ["user"] })
+      .pipe(
+        Effect.mapError(
+          () =>
+            new OrchestratorMcpFailure({
+              code: "orchestration_error",
+              message: `Unable to read thread ${parentThreadId}.`,
+            }),
+        ),
+      );
+    const lastReply = messages.reduce(
+      (latest, message) =>
+        message.createdBy === "user" && message.scheduledTaskId === undefined
+          ? Math.max(latest, DateTime.toEpochMillis(message.createdAt))
+          : latest,
+      Number.NEGATIVE_INFINITY,
+    );
+    const rounds = subagents.filter(
+      (task) =>
+        task.origin === "app_owned" &&
+        task.delegatedRole === "review" &&
+        DateTime.toEpochMillis(task.startedAt ?? task.updatedAt) > lastReply,
+    );
+    if (rounds.length >= MAX_REVIEW_ROUNDS) {
+      return yield* new OrchestratorMcpFailure({
+        code: "invalid_request",
+        message: `This review has had its ${MAX_REVIEW_ROUNDS} rounds since the user last replied. Give the user the remaining findings instead of reviewing again.`,
+      });
+    }
+  },
+);
+
+const reviewDelegationGates = new Map<ThreadId, { gate: Semaphore.Semaphore; users: number }>();
+
+/**
+ * Runs `record` only if the parent has a review round left, holding that parent's gate until it
+ * returns so parallel review delegations cannot all read the same count. `counted` is false for
+ * other roles and for replays of an accepted delegation.
+ */
+export const withReviewDelegationLeft = <A, E, R>(
+  threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadRecords">,
+  parentThreadId: ThreadId,
+  counted: boolean,
+  record: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | OrchestratorMcpFailure, R> =>
+  counted
+    ? Effect.suspend(() => {
+        const held = reviewDelegationGates.get(parentThreadId) ?? {
+          gate: Semaphore.makeUnsafe(1),
+          users: 0,
+        };
+        reviewDelegationGates.set(parentThreadId, held);
+        held.users++;
+        return held.gate
+          .withPermit(
+            assertReviewDelegationLeft(threads, parentThreadId).pipe(Effect.andThen(record)),
+          )
+          .pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                held.users--;
+                if (held.users === 0) reviewDelegationGates.delete(parentThreadId);
+              }),
+            ),
+          );
+      })
+    : record;
+
 export const assertTargetWithinLimits = (
   limits: CallerLimits,
-  target: { readonly runtimeMode: RuntimeMode; readonly interactionMode: ProviderInteractionMode },
+  target: Pick<OrchestrationV2ThreadShell, "id" | "runtimeMode" | "interactionMode">,
 ) =>
   resolveRuntimeMode(limits.runtimeMode, target.runtimeMode).pipe(
     Effect.andThen(resolveInteractionMode(limits.interactionMode, target.interactionMode)),
     Effect.asVoid,
+    Effect.mapError(
+      (error) =>
+        new OrchestratorMcpFailure({
+          code: error.code,
+          message: `Thread "${target.id}" runs in ${target.runtimeMode}/${target.interactionMode}, above this caller's ${limits.runtimeMode}/${limits.interactionMode} limit. For linked calls, this limit is also capped by the link's approved access. This call does not create an approval request. Have the user act directly in the target thread through an authorized client.`,
+        }),
+    ),
   );
 
 /** Background subagents retain credentials until provider exit; archived threads and other instances cannot act. */
@@ -190,7 +328,12 @@ export const readThread = Effect.fn("mcp.readThread")(function* <
   const targetId = yield* resolveThreadId(context, threadId);
   const shell = yield* context.threads.getThreadShell(targetId).pipe(Effect.mapError(unavailable));
   if (shell === null || shell.deletedAt !== null) {
-    return yield* threadNotFound(context.threads, targetId, "The thread was not found.");
+    return yield* threadNotFound(
+      context.threads,
+      context.scope,
+      targetId,
+      "The thread was not found.",
+    );
   }
   const projection = yield* context.threads
     .getProjectThreadRecords({ projectId: shell.projectId, threadId: targetId }, fields, {

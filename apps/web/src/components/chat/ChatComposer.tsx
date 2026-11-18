@@ -53,7 +53,7 @@ import * as Schema from "effect/Schema";
 import { formatComposerModelMention } from "@t3tools/client-runtime/composer-model-mentions";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import { parseSideChatCommand, serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { type FolderDropTarget, folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { splitTransferredFiles } from "./workspaceFileDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
@@ -189,15 +189,19 @@ import {
 } from "~/lib/composerContextRecords";
 import { rememberCopiedComposerAttachments } from "~/lib/copiedComposerAttachments";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
+import { droppedThreadContextRecord } from "./threadContextDrop.logic";
 import { readThreadShell } from "~/state/entities";
 import { useLinkedEnvironments } from "~/state/peerLinks";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import type {
   ComposerContextRecord,
   OrchestrationV2Run,
+  RouteDecision,
+  ThreadAgentTeam,
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { threadContextAttachment } from "~/lib/threadContextAttachment";
+import type { ThreadAssistsState } from "./ComposerThreadAssists";
 import {
   type ComposerCommandItem,
   ComposerCommandMenu,
@@ -249,7 +253,7 @@ import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelS
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { isVideoAttachment, type SessionPhase, type Thread } from "../../types";
 import { type ComposerPromptHistoryPosition } from "./composerPromptHistory";
-import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/pending-user-input";
+import { usePendingUserInputDraft } from "./usePendingThreadRequests";
 import type { PendingApproval, PendingUserInput, TimelineEntry } from "../../session-logic";
 import {
   resolveComposerDispatchMode,
@@ -398,23 +402,7 @@ export interface ChatComposerProps {
   pendingApprovals: PendingApproval[];
   onHeldRequestIdsChange: (requestIds: ReadonlySet<string>) => void;
   pendingUserInputs: PendingUserInput[];
-  activePendingProgress: {
-    questionIndex: number;
-    isLastQuestion: boolean;
-    canAdvance: boolean;
-    customAnswer: string;
-    activeQuestion: {
-      id: string;
-      options: ReadonlyArray<unknown>;
-      initialAnswer?: string | undefined;
-      multiSelect?: boolean | undefined;
-      allowCustomAnswer?: boolean | undefined;
-    } | null;
-  } | null;
-  activePendingResolvedAnswers: Record<string, unknown> | null;
   activePendingIsResponding: boolean;
-  activePendingDraftAnswers: Record<string, PendingUserInputDraftAnswer>;
-  activePendingQuestionIndex: number;
   respondingRequestIds: RuntimeRequestId[];
 
   runtimeMode: RuntimeMode;
@@ -425,6 +413,9 @@ export interface ChatComposerProps {
   providerCatalogKnown: boolean;
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
   activeThreadModelSelection: ModelSelection | null | undefined;
+  activeThreadRouting?: RouteDecision | null | undefined;
+  activeThreadAgentTeam?: ThreadAgentTeam | null | undefined;
+  activeThreadAssists?: ThreadAssistsState | undefined;
   reportedModelSelection?: ModelSelection | null;
   activeProjectId: ProjectId | null;
   projectName?: string | undefined;
@@ -532,11 +523,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pendingApprovals,
     onHeldRequestIdsChange,
     pendingUserInputs: incomingPendingUserInputs,
-    activePendingProgress: incomingPendingProgress,
-    activePendingResolvedAnswers,
     activePendingIsResponding: incomingPendingIsResponding,
-    activePendingDraftAnswers,
-    activePendingQuestionIndex,
     respondingRequestIds,
     runtimeMode,
     lockedProvider,
@@ -587,6 +574,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
+  const {
+    activePendingProgress: incomingPendingProgress,
+    activePendingResolvedAnswers,
+    activePendingDraftAnswers,
+    activePendingQuestionIndex,
+  } = usePendingUserInputDraft({
+    environmentId,
+    activeThreadId,
+    activePendingUserInput: incomingPendingUserInputs[0] ?? null,
+    supportsQuestionAttachments,
+  });
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
   const {
@@ -910,13 +908,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ? providerInstanceEntries.find((entry) => hasProviderSetup(entry.snapshot))?.instanceId
         : undefined))
     : undefined;
+  // Called before the derivation below: a hook between it and its uses stops React Compiler
+  // from caching the mode options, and the footer then re-renders on every keystroke.
+  const managedPolicy = useManagedPolicy(environmentId);
   const { modes: compatibleRuntimeModes, mode: compatibleRuntimeMode } =
     resolveCompatibleRuntimeMode(
       runtimeMode,
       selectedProviderEntry?.snapshot.supportedRuntimeModes,
     );
   // Modes above an administrator's ceiling stay listed, disabled with the reason.
-  const managedPolicy = useManagedPolicy(environmentId);
   const compatibleRuntimeModeOptions = resolveRuntimeModeOptions(
     compatibleRuntimeModes,
     managedPolicy,
@@ -2346,6 +2346,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerMenuItemsRef,
       activeComposerMenuItemRef,
       setComposerDraftPrompt,
+      setComposerDraftThreadContexts,
+      setComposerDraftEnvironmentContexts,
       setComposerCursor,
       setComposerTrigger,
       setComposerHighlightedItemId,
@@ -2470,6 +2472,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedModelSelection={selectedModelSelection}
       onProviderModelSelect={onProviderModelSelect}
       activeThreadModelSelection={activeThreadModelSelection}
+      activeThreadRouting={props.activeThreadRouting}
+      activeThreadAgentTeam={props.activeThreadAgentTeam}
+      activeThreadAssists={props.activeThreadAssists}
       selectedModelForPickerWithCustomFallback={selectedModelForPickerWithCustomFallback}
       lockedProvider={lockedProvider}
       lockedContinuationGroupKey={lockedContinuationGroupKey}
@@ -2873,8 +2878,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         );
         return [];
       }
-      const shell = readThreadShell(ref);
-      return shell ? [threadContextRecord(ref, shell.title)] : [];
+      const record = droppedThreadContextRecord(ref, readThreadShell(ref));
+      return record ? [record] : [];
     });
     if (records.length === 0) return;
     if (questionAttachmentTarget !== null) {
@@ -3051,6 +3056,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (noProviderAvailable || pendingUserInputs.length > 0 || isEditingQueuedMessage) {
           return;
         }
+        // A routing group sets each member's effort, so the shown placeholder has none to step.
+        if (
+          useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.routingGroupId
+        ) {
+          return;
+        }
         const change = getComposerReasoningStep({
           provider: selectedProvider,
           instanceId: selectedInstanceId,
@@ -3070,6 +3081,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             model: selectedModel,
             persistSticky: true,
           });
+        useComposerDraftStore.getState().setEffortManual(composerDraftTarget, true);
         applyThreadModelPick(composerDraftTarget);
         if (change.prompt !== promptRef.current) {
           applyPromptReplacementStable(0, promptRef.current.length, change.prompt, {
@@ -3521,7 +3533,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )}
             >
               {isStashMenuOpen && !composerMenuOpen && (
-                <ComposerCommandMenuLayer anchor={composerMenuAnchor}>
+                <ComposerCommandMenuLayer anchor={composerMenuAnchor} canOverflowTop>
                   <ComposerStashMenu
                     composerFormRef={composerFormRef}
                     entries={stashQueue}
@@ -3683,12 +3695,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             />
 
             {speechInput.preview ? (
+              // column-reverse pins the scroll to the bottom; the single inner div keeps the text in normal order.
               <div
                 aria-label="Live transcription"
-                className="mx-3 mb-3 max-h-32 overflow-y-auto rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap sm:mx-4"
+                className="mx-3 mb-3 flex max-h-32 flex-col-reverse overflow-y-auto rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap sm:mx-4"
               >
-                <span>{speechInput.preview.committed}</span>
-                <span className="text-muted-foreground">{speechInput.preview.tentative}</span>
+                <div>
+                  <span>{speechInput.preview.committed}</span>
+                  <span className="text-muted-foreground">{speechInput.preview.tentative}</span>
+                </div>
               </div>
             ) : null}
 
@@ -3731,7 +3746,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     compact={isComposerPrimaryActionsCompact}
                     canOperateThread={canOperateThread}
                     pendingAction={pendingPrimaryAction}
-                    isRunning={phase === "running" || phase === "connecting"}
+                    // A side-chat command starts a side chat; it never queues or steers the turn.
+                    isRunning={
+                      (phase === "running" || phase === "connecting") &&
+                      !(props.sideChatAvailable === true && parseSideChatCommand(prompt) !== null)
+                    }
                     canInterrupt={canInterrupt}
                     runId={activeThread?.runtime?.activeRunId ?? null}
                     followUpBehavior={followUpBehavior}

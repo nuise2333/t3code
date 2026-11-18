@@ -1,3 +1,4 @@
+import { routedEffortDisplay, routedGroupDisplay } from "@t3tools/client-runtime/routing";
 import { useSidebarWorkspaceTabs } from "../layout/workspace/useSystemWorkspaceTabBar";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
@@ -24,12 +25,14 @@ import {
   type ModelSelection,
   type ServerConfig as T3ServerConfig,
   type UsageLimitsReport,
+  type RouteDecision,
 } from "@t3tools/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
   isUsageLimitsCommand,
 } from "@t3tools/shared/usageLimits";
+import { parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
@@ -214,6 +217,11 @@ function useCompactComposerEditor(text: ScaledTextRole, value: string) {
 
 export interface ThreadComposerProps {
   readonly isDraft?: boolean;
+  /** A new thread's draft leaves its effort to Auto. */
+  readonly draftAutoEffort?: boolean;
+  /** A new thread's draft launches through this routing group. */
+  readonly draftRoutingGroupName?: string | null;
+  readonly threadRouting?: RouteDecision | null;
   readonly canOperateThread: boolean;
   readonly placeholder: string;
   readonly contentMaxWidth?: number;
@@ -236,6 +244,8 @@ export interface ThreadComposerProps {
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
   readonly activeThreadBusy: boolean;
+  /** Sending declines a pending approval and redirects the agent, so `/side` is plain text. */
+  readonly redirectsApproval: boolean;
   readonly canStopThread: boolean;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
@@ -499,7 +509,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     });
   const sendPresentation = resolveComposerSendPresentation({
     editingQueuedMessage: queuedEdit !== null,
-    running: props.activeThreadBusy,
+    // A side-chat command starts a side chat; it never queues or steers the running turn.
+    running:
+      props.activeThreadBusy &&
+      (props.redirectsApproval || parseSideChatCommand(draftMessage) === null),
     canSteer: props.canSteerActiveTurn,
     followUpBehavior: props.followUpBehavior,
     deliveryDeferred:
@@ -585,6 +598,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     offersUsageLimits: usageLimitsOffered,
     onUsageLimits:
       usageLimitsOffered && draftAttachments.length === 0 ? openUsageLimits : undefined,
+    onOpenModelPicker: settingsSheetPresentation.open,
     modelOptions: mentionModelOptions,
     modelProviders: props.serverConfig?.providers,
     ...(props.onFreshSession === undefined ? {} : { onFreshSession: props.onFreshSession }),
@@ -744,6 +758,25 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         option.selection.instanceId === currentModelSelection.instanceId &&
         option.selection.model === currentModelSelection.model,
     ) ?? null;
+  const routedEffort = props.isDraft
+    ? null
+    : routedEffortDisplay({
+        routing: props.threadRouting,
+        selection: currentModelSelection,
+        descriptors: currentModelOption?.capabilities?.optionDescriptors,
+      });
+  const routedGroup = props.isDraft
+    ? null
+    : routedGroupDisplay({
+        routing: props.threadRouting,
+        selection: currentModelSelection,
+        providers: props.serverConfig?.providers ?? [],
+      });
+  const reasoningLabel = props.draftAutoEffort
+    ? "Auto"
+    : routedEffort
+      ? `Auto · ${routedEffort.levelLabel}`
+      : undefined;
   const openSettings = () => {
     settingsSheetPresentation.open();
   };
@@ -822,6 +855,12 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         selection={currentModelSelection}
         provider={selectedProviderStatus?.driver}
         reportedSelection={props.reportedModelSelection}
+        reasoningLabel={reasoningLabel}
+        {...(props.draftRoutingGroupName
+          ? { routingGroup: { name: props.draftRoutingGroupName, draft: true } }
+          : routedGroup
+            ? { routingGroup: { name: routedGroup.groupName, draft: false } }
+            : {})}
         prompt={draftMessage}
         surfaceColor={composerPanel}
         iconOnly={!compactEditor.isExpanded}

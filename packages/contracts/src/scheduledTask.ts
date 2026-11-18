@@ -17,6 +17,7 @@ import {
   OrchestrationV2ThreadLaunchWorkspaceStrategy,
 } from "./orchestrationV2.ts";
 import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
+import { RoutingGroupId } from "./routing.ts";
 
 const TimeOfDay = TrimmedNonEmptyString.check(
   Schema.isPattern(/^([01]?\d|2[0-3]):([0-5]\d)$/),
@@ -249,6 +250,8 @@ export const ScheduledTask = Schema.Struct({
   threadMode: Schema.optional(ScheduledTaskThreadMode),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
+  /** Each launch resolves this group; `modelSelection` is what the client showed for it. */
+  routingGroupId: Schema.optionalKey(RoutingGroupId),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   createdBy: OrchestrationV2Actor,
@@ -292,6 +295,8 @@ export const ScheduledTaskUpsertInput = Schema.Struct({
   threadMode: Schema.optional(ScheduledTaskThreadMode),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
+  /** Null clears it. Omitted keeps the stored group unless `modelSelection` changed. */
+  routingGroupId: Schema.optional(Schema.NullOr(RoutingGroupId)),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   createdBy: Schema.optional(OrchestrationV2Actor),

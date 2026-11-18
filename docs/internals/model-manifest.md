@@ -31,6 +31,26 @@ Catalog-aware releases use `providers.claudeAgent.models[].status` instead.
 Codex uses `currentModels.codex` as a legacy-classification overlay for discovered
 models.
 
+`routing` is the auto effort table. The envelope leaves it unvalidated and
+`resolveRoutingTable` decodes it apart, so an invalid or newer table falls back
+to the bundled one without costing the model catalog. A remote table only tunes
+drivers the bundled table already routes; ACP Registry is never routed.
+A row's `tierByClass` makes its exact model a candidate for those task classes when
+Auto may switch model, but only with `verified: true` and a `relativeCost`: mark a
+row verified only when an independent benchmark measured that harness and model and
+its slug is in the bundled catalog. Leave out a class whose sources are thin or
+disagree; vendor-only or single-source data stays unverified or out of the table.
+`relativeCost` is `round(log2(cost per run at high / $0.12))` from FrontierCode 2.0,
+so each step is about double; Auto orders a tier by it and never moves a task short
+of hard to a model that costs more than the thread's.
+A gateway-prefixed id such as magpie's `auto/<slug>` reads the row whose model is its
+last segment, on its own driver first and otherwise for tier and cost only on another
+driver; an effort-pinned `group/<slug>-high` or a user's group matches nothing.
+`effortChangeKeepsCache` is a per-channel marker that nothing reads yet; the
+channel comes from `ServerProvider.auth.type` (`bedrock`, `customEndpoint`, otherwise
+direct). A Vertex user with an API key would read as direct, so map `apiProvider`
+explicitly before using it.
+
 Model data is schema-validated configuration. Tests should cover resolver, cache,
 and adapter semantics with synthetic model names, so adding a model never requires
 tests that repeat the configuration.

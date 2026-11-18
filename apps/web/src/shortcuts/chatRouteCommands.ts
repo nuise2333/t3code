@@ -65,6 +65,13 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     const target = readRouteTarget();
     return target?.kind === "server" ? target.threadRef : null;
   };
+  const readRouteEnvironmentId = () => {
+    const target = readRouteTarget();
+    if (!target) return null;
+    return target.kind === "server"
+      ? target.threadRef.environmentId
+      : (useComposerDraftStore.getState().getDraftSession(target.draftId)?.environmentId ?? null);
+  };
   const readPreviewOpen = () => {
     const threadRef = readRouteThreadRef();
     // Store-only on purpose: the URL-aware arbitration lives in ChatView's
@@ -131,9 +138,9 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         zoomReader(readerZoomChange);
         return;
       }
-      const threadRef = readRouteThreadRef();
+      const environmentId = readRouteEnvironmentId();
       // Only a browser preview needs the scope; find also serves files and rendered documents.
-      if (threadRef && (action === "find" || canOperatePreview(threadRef.environmentId))) {
+      if (environmentId && (action === "find" || canOperatePreview(environmentId))) {
         dispatchPreviewAction(action);
       }
     };

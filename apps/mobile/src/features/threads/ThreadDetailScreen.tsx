@@ -13,7 +13,11 @@ import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
 import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-visits";
-import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
+import {
+  useChildThreadInputs,
+  useThreadReportedModelSelection,
+  useThreadRouting,
+} from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
@@ -31,7 +35,6 @@ import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-e
 import {
   childThreadInputsTitle,
   type CodexFeedbackSubmission,
-  type EnvironmentThreadStatus,
 } from "@t3tools/client-runtime/state/threads";
 import { useKeyboardScrollToEnd } from "@legendapp/list/keyboard";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
@@ -229,6 +232,10 @@ export interface ThreadDetailScreenProps {
     readonly editorRef: React.RefObject<ComposerEditorHandle | null>;
     readonly sendBlockedReason: string | null;
     readonly interactionLocked: boolean;
+    /** The new thread leaves its effort to Auto. */
+    readonly autoEffort?: boolean;
+    /** The new thread launches through this routing group. */
+    readonly routingGroupName?: string | null;
   };
   readonly worktreeSetup?: WorktreeSetupCardProps | null;
   readonly setupWorkingStartedAt?: string | null;
@@ -269,7 +276,6 @@ export interface ThreadDetailScreenProps {
   readonly respondingUserInputId: RuntimeRequestId | null;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
   readonly connectionAwaitingApproval?: boolean;
-  readonly threadSyncStatus?: EnvironmentThreadStatus;
   readonly historyControls?: ThreadFeedHistoryControls;
   readonly activeThreadBusy: boolean;
   readonly canStopThread: boolean;
@@ -425,6 +431,7 @@ function ThreadDetailBody(
   const openInspector = useOpenThreadInspector();
   const { session: voiceInputSession } = useGlobalVoiceInput();
   const reportedModelSelection = useThreadReportedModelSelection(props.selectedThreadDetailRef);
+  const threadRouting = useThreadRouting(props.selectedThreadDetailRef);
   const deviceState = useEnvironmentQuery(
     deviceEnvironment.state({ environmentId: props.environmentId, input: {} }),
   );
@@ -568,20 +575,6 @@ function ThreadDetailBody(
   );
   const composerKeyboardOffset = composerBottomInset;
   const contentPresentationKind = props.contentPresentation.kind;
-  const realThreadSyncLabel = (() => {
-    switch (props.threadSyncStatus) {
-      case "empty":
-      case "cached":
-      case "synchronizing":
-        if (contentPresentationKind === "ready") {
-          return "Syncing messages...";
-        }
-        return contentPresentationKind === "loading" ? "Loading messages..." : null;
-      default:
-        return null;
-    }
-  })();
-  const threadSyncLabel = useDelayedStatus(selectedThreadKey, realThreadSyncLabel);
   const connectionRetrying =
     props.connectionStateLabel === "connecting" || props.connectionStateLabel === "reconnecting";
   const retryError = connectionRetrying ? props.connectionError : null;
@@ -804,17 +797,12 @@ function ThreadDetailBody(
       return null;
     }
     if (props.creationState?.kind === "preparing") {
-      if (props.worktreeSetup) return null;
-      return {
-        kind: "preparing",
-        label: props.creationState.preparingWorktree ? "Setting up worktree…" : "Starting…",
-      };
+      // The feed shows worktree setup in place, so only a plain start needs the pill.
+      if (props.worktreeSetup || props.creationState.preparingWorktree) return null;
+      return { kind: "preparing", label: "Starting…" };
     }
     if (props.creationState?.kind === "failed") {
       return null;
-    }
-    if (threadSyncLabel !== null) {
-      return { kind: "syncing", label: threadSyncLabel };
     }
     const childInput = childThreadInputs[0];
     if (childInput && contentPresentationKind === "ready") {
@@ -1493,6 +1481,11 @@ function ThreadDetailBody(
                   pendingHandoff={props.pendingHandoff}
                   worktreeSetup={props.worktreeSetup}
                   setupWorkingStartedAt={props.setupWorkingStartedAt}
+                  preparingWorktree={
+                    props.creationState?.kind === "preparing" &&
+                    props.creationState.preparingWorktree &&
+                    !props.worktreeSetup
+                  }
                   queuedMessages={props.queuedMessages}
                   dispatchingMessageId={props.dispatchingMessageId}
                   // A native subagent has no composer to edit a pending message in;
@@ -1855,6 +1848,9 @@ function ThreadDetailBody(
                     <>
                       <ThreadComposer
                         isDraft={Boolean(props.draftMode)}
+                        draftAutoEffort={props.draftMode?.autoEffort === true}
+                        draftRoutingGroupName={props.draftMode?.routingGroupName ?? null}
+                        threadRouting={threadRouting}
                         canOperateThread={props.canOperateThread}
                         reportedModelSelection={reportedModelSelection}
                         editorRef={composerEditorRef}
@@ -1890,6 +1886,10 @@ function ThreadDetailBody(
                         serverConfig={props.serverConfig}
                         queueCount={props.selectedThreadQueueCount}
                         activeThreadBusy={props.activeThreadBusy}
+                        redirectsApproval={
+                          props.activePendingApprovals.length > 0 &&
+                          props.activePendingUserInput === null
+                        }
                         canStopThread={props.canStopThread}
                         environmentId={props.environmentId}
                         projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}

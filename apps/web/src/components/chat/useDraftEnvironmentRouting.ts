@@ -143,6 +143,8 @@ export function useDraftEnvironmentRouting(input: DraftEnvironmentRoutingInput) 
       return null;
     const originalDraft = getDraftSession(draftId);
     const composerDraft = useComposerDraftStore.getState().getComposerDraft(draftId);
+    // A picked routing group belongs to the machine whose settings list it.
+    if (composerDraft?.routingGroupId !== undefined) return null;
     return loadBalancing.refreshSelection(loadBalancingCandidates).then((environmentId) => {
       const current = readRouting();
       if (

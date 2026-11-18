@@ -32,12 +32,15 @@ import {
   ThreadPullRequestKey,
   ThreadPullRequestLinkSource,
 } from "./threadPullRequest.ts";
+import { RoutingGroupId } from "./routing.ts";
+import { CouncilLens } from "./council.ts";
 import { secretRequestPageUrl } from "./secretRequest.ts";
 import { hasOnlyPairedSurrogates } from "./threadMetadataMcp.ts";
 import { LastThreadTitleRegeneration, ThreadTitleRegeneration } from "./threadTitle.ts";
 import {
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
+  OrchestrationV2DelegatedFrom,
   OrchestrationV2RunStatus,
   OrchestrationV2TurnItemStatus,
 } from "./orchestrationV2.ts";
@@ -170,8 +173,15 @@ export type OrchestratorMcpTerminalDelegatedTaskStatus =
 export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   task: OrchestratorMcpPrompt,
   target: Schema.optional(OrchestratorMcpTarget),
+  routingGroupId: Schema.optional(RoutingGroupId).annotate({
+    description:
+      "Group id from orchestrator_capabilities; runs a usable member here. Not with a target model or environment.",
+  }),
   title: Schema.optional(OrchestratorMcpTitle),
-  role: Schema.optional(OrchestratorMcpTaskRole),
+  role: Schema.optional(OrchestratorMcpTaskRole).annotate({
+    description:
+      "Without a target, the user's Auto settings may pick the child's model: review on another vendor, research cheaper. A vendor the user requires still needs target.model. Web research: give the task a search budget, and ask it to check that cited links open and quotes appear, and to list sources it couldn't reach apart from ones that had nothing.",
+  }),
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
@@ -195,6 +205,9 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
     }),
   ),
   interactionMode: Schema.optional(OrchestratorMcpInteractionMode),
+  councilLens: Schema.optional(CouncilLens).annotate({
+    description: "Council on only: a reviewer for this lens, such as 'correctness'.",
+  }),
 });
 export type OrchestratorMcpDelegateTaskInput = typeof OrchestratorMcpDelegateTaskInput.Type;
 
@@ -342,7 +355,7 @@ export const OrchestratorMcpEnvironmentTarget = Schema.optional(
 // Codex hides `minimum` and `maximum` from the model, so a value above the maximum clamps on
 // decode instead of failing the call; pagination returns the rest. Values below 1 still fail:
 // 0 asks for nothing, and answering it with one item would be a different request.
-const clampedPositiveInt = (maximum: number) =>
+export const clampedPositiveInt = (maximum: number) =>
   PositiveInt.pipe(
     Schema.decodeTo(
       PositiveInt.check(Schema.isLessThanOrEqualTo(maximum)),
@@ -414,11 +427,15 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   snoozed: Schema.Boolean,
   snoozedUntil: Schema.NullOr(IsoDateTime),
   /** Absent from linked environments that predate it. */
+  pinned: Schema.optional(Schema.Boolean),
+  /** Absent from linked environments that predate it. */
   blockedOnThreadWait: Schema.optional(Schema.Boolean),
   /** Absent from linked environments that predate it. */
   pendingBackgroundTasks: Schema.optional(Schema.Array(OrchestratorMcpThreadBackgroundTask)),
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
+  /** The linked environment's thread that delegated this one; absent otherwise. */
+  delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
   itemCount: NonNegativeInt,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -476,6 +493,8 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
+  /** The linked environment's thread that delegated this one; absent otherwise. */
+  delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
   runCount: NonNegativeInt,
   itemCount: NonNegativeInt,
   pendingRequestCount: NonNegativeInt,
@@ -484,6 +503,8 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   settledAt: Schema.NullOr(IsoDateTime),
   snoozed: Schema.Boolean,
   snoozedUntil: Schema.NullOr(IsoDateTime),
+  /** Absent from linked environments that predate it. */
+  pinned: Schema.optional(Schema.Boolean),
   /** Absent from linked environments that predate it. */
   blockedOnThreadWait: Schema.optional(Schema.Boolean),
   /** Absent from linked environments that predate it. */
@@ -682,6 +703,23 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   providers: Schema.Array(OrchestratorMcpProviderCapability),
+  /** This environment's routing groups; absent when it has none. */
+  routingGroups: Schema.optional(
+    Schema.Array(Schema.Struct({ id: RoutingGroupId, name: Schema.String })),
+  ),
+  /** The agent team this thread leads; `delegate_task` accepts only these members. */
+  agentTeam: Schema.optional(
+    Schema.Struct({
+      name: Schema.String,
+      members: Schema.Array(
+        Schema.Struct({
+          providerInstanceId: ProviderInstanceId,
+          model: Schema.String,
+          options: Schema.optional(Schema.Array(ProviderOptionSelection)),
+        }),
+      ),
+    }),
+  ),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,
     asyncPolling: Schema.Boolean,
@@ -714,6 +752,10 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
         "Runs share one thread but each starts a fresh session. Unbound: the first run makes the thread.",
     }),
   ),
+  routingGroupId: Schema.optional(Schema.NullOr(RoutingGroupId)).annotate({
+    description:
+      "Group id from orchestrator_capabilities; each run that starts a thread uses a usable member. Not for a bound thread. null clears.",
+  }),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
 });
 export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTaskInput.Type;
@@ -736,6 +778,7 @@ export const OrchestratorMcpScheduledTask = Schema.Struct({
   projectId: ProjectId,
   boundThreadId: Schema.NullOr(ThreadId),
   freshSession: Schema.Boolean,
+  routingGroupId: Schema.optional(RoutingGroupId),
   schedule: ScheduledTaskSchedule,
   nextRunAt: Schema.NullOr(IsoDateTime),
   lastRunStatus: ScheduledTaskRunStatus,
@@ -780,6 +823,7 @@ export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   bindToCurrentThread: Schema.optional(Schema.Boolean),
   freshSession: Schema.optional(Schema.Boolean),
+  routingGroupId: Schema.optional(Schema.NullOr(RoutingGroupId)),
 });
 export type OrchestratorMcpUpdateScheduledTaskInput =
   typeof OrchestratorMcpUpdateScheduledTaskInput.Type;

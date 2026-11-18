@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 
 import type { ModelEsque } from "./providerIconUtils";
 
@@ -16,3 +16,5 @@ export function retainedModelWhileProviderLocked(
   if (entry.driverKind === "opencode" || entry.driverKind === "antigravity") return undefined;
   return entry.models.find((candidate) => candidate.slug === model) ?? { slug: model, name: model };
 }
+
+export type ModelPickerTab = ProviderInstanceId | "favorites" | "groups";

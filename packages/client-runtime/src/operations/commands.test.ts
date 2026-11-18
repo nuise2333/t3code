@@ -243,6 +243,7 @@ describe("V2 environment commands", () => {
         runtimeMode: "full-access",
         interactionMode: "default",
         titleSeed: "Continue here",
+        routing: { mode: "auto" },
         bootstrap: {
           createThread: {
             projectId: ProjectId.make("project-1"),
@@ -261,6 +262,7 @@ describe("V2 environment commands", () => {
         threadId: v2ThreadId,
         title: "Continue here",
         generateTitle: true,
+        routing: { mode: "auto" },
         workspaceStrategy: {
           type: "existing_worktree",
           worktreePath: "/workspace/project-worktrees/feature",

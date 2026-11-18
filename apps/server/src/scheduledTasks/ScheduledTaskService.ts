@@ -53,6 +53,8 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as Metrics from "../observability/Metrics.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { OrchestratorDispatchError } from "../orchestration-v2/Orchestrator.ts";
+import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as DueHint from "../scheduling/DueHint.ts";
@@ -79,6 +81,7 @@ import { constantTimeEquals, verifyWebhookSignature } from "./webhookVerificatio
 
 export const WEBHOOK_ROUTE_PREFIX = "/api/hooks";
 const isScheduledTaskError = Schema.is(ScheduledTaskError);
+const isOrchestratorDispatchError = Schema.is(OrchestratorDispatchError);
 const PROMPT_TOO_LONG = "The filled-in prompt is too long.";
 const WEBHOOK_DELIVERY_RETENTION = 50;
 const WEBHOOK_DEDUPE_DELIVERY_RETENTION = 20;
@@ -218,6 +221,7 @@ interface ScheduledTaskRow {
   readonly thread_mode: string;
   readonly workspace_strategy_json: string;
   readonly model_selection_json: string;
+  readonly routing_group_id: string | null;
   readonly runtime_mode: string;
   readonly interaction_mode: string;
   readonly created_by: string;
@@ -364,6 +368,14 @@ function errorMessage(error: unknown): string {
   return failure instanceof Error ? failure.message : String(failure);
 }
 
+function dispatchErrorMessage(cause: Cause.Cause<unknown>): string {
+  const failure = Cause.squash(cause);
+  // Direct orchestration refusals are user-facing; nested defects can contain private data.
+  return isOrchestratorDispatchError(failure) && typeof failure.cause === "string"
+    ? (userFacingDispatchErrorMessage(failure.cause) ?? errorMessage(failure))
+    : errorMessage(failure);
+}
+
 function webhookPath(taskId: string, token: string): string {
   return `${WEBHOOK_ROUTE_PREFIX}/${encodeURIComponent(taskId)}/${token}`;
 }
@@ -399,6 +411,7 @@ const decodeRow = Effect.fnUntraced(
       threadMode: row.thread_mode,
       workspaceStrategy,
       modelSelection,
+      ...(row.routing_group_id === null ? {} : { routingGroupId: row.routing_group_id }),
       runtimeMode: row.runtime_mode,
       interactionMode: row.interaction_mode,
       createdBy: row.created_by,
@@ -523,6 +536,7 @@ export const layer = Layer.effect(
         thread_mode,
         workspace_strategy_json,
         model_selection_json,
+        routing_group_id,
         runtime_mode,
         interaction_mode,
         created_by,
@@ -565,6 +579,7 @@ export const layer = Layer.effect(
         thread_mode,
         workspace_strategy_json,
         model_selection_json,
+        routing_group_id,
         runtime_mode,
         interaction_mode,
         created_by,
@@ -643,6 +658,7 @@ export const layer = Layer.effect(
           thread_mode,
           workspace_strategy_json,
           model_selection_json,
+          routing_group_id,
           runtime_mode,
           interaction_mode,
           created_by,
@@ -668,6 +684,7 @@ export const layer = Layer.effect(
           ${scheduledTaskThreadMode(task)},
           ${JSON.stringify(task.workspaceStrategy)},
           ${JSON.stringify(task.modelSelection)},
+          ${task.routingGroupId ?? null},
           ${task.runtimeMode},
           ${task.interactionMode},
           ${task.createdBy},
@@ -700,6 +717,7 @@ export const layer = Layer.effect(
           thread_mode = excluded.thread_mode,
           workspace_strategy_json = excluded.workspace_strategy_json,
           model_selection_json = excluded.model_selection_json,
+          routing_group_id = excluded.routing_group_id,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
           creation_source = excluded.creation_source,
@@ -1067,6 +1085,9 @@ export const layer = Layer.effect(
                     projectId: active.projectId,
                     title: active.title,
                     modelSelection: active.modelSelection,
+                    ...(active.routingGroupId === undefined
+                      ? {}
+                      : { routing: { mode: "group", groupId: active.routingGroupId } }),
                     runtimeMode: active.runtimeMode,
                     interactionMode: active.interactionMode,
                     workspaceStrategy: active.workspaceStrategy,
@@ -1098,7 +1119,7 @@ export const layer = Layer.effect(
         if (webhook !== undefined && runSucceeded) yield* Ref.set(webhook.dispatched, true);
         const completedAt = yield* localNow;
         const lastRunStatus = runSucceeded ? ("succeeded" as const) : ("failed" as const);
-        const lastRunError = runSucceeded ? null : errorMessage(result.cause);
+        const lastRunError = runSucceeded ? null : dispatchErrorMessage(result.cause);
         const threadId = runSucceeded ? result.value : null;
         // One transaction, so an edit cannot land between reading the schedule and
         // writing the next run computed from it. The origin is read first: it reads
@@ -1524,6 +1545,15 @@ export const layer = Layer.effect(
         isSameSchedule(existingTask.schedule, schedule);
       if (!scheduleUnchanged)
         yield* requireFutureOnce({ enabled: input.enabled, schedule }, now, id);
+      // A client that predates groups sends no field; its model change still leaves the group.
+      const routingGroupId =
+        input.routingGroupId !== undefined
+          ? input.routingGroupId
+          : existingTask?.routingGroupId !== undefined &&
+              existingTask.modelSelection.instanceId === input.modelSelection.instanceId &&
+              existingTask.modelSelection.model === input.modelSelection.model
+            ? existingTask.routingGroupId
+            : null;
       const task: ScheduledTask = {
         id,
         title: input.title,
@@ -1535,6 +1565,7 @@ export const layer = Layer.effect(
         threadMode,
         workspaceStrategy,
         modelSelection: input.modelSelection,
+        ...(routingGroupId === null ? {} : { routingGroupId }),
         runtimeMode: input.runtimeMode,
         interactionMode: input.interactionMode,
         createdBy: existingTask?.createdBy ?? input.createdBy ?? "user",

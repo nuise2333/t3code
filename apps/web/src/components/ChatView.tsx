@@ -48,8 +48,21 @@ import { RightPanelSurfaceContent } from "./chat/RightPanelSurfaceContent";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
-import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+import type { ScopedProjectRef, UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
+import {
+  agentTeamProgress,
+  agentTeamSummary,
+  higherEffortRetry,
+  rootCausePrompt,
+  routingProviderSource,
+} from "@t3tools/client-runtime/routing";
+import { threadAgentTeam } from "@t3tools/shared/agentTeam";
+import { councilApplies, councilStatus, councilUserMessageTimes } from "@t3tools/shared/council";
+import { councilBannerItem } from "./chat/CouncilStrip";
+import { agentTeamBannerItem } from "./chat/AgentTeamStrip";
+import { effortRetryBannerItem } from "./chat/ComposerEffortRetry";
+import { useCrossVendorModel } from "./chat/crossVendorModel";
 import { freshSessionBannerItem } from "./chat/ComposerFreshSession";
 import { armFreshSession, disarmFreshSession, useFreshSessionArmed } from "./chat/freshSessionArms";
 import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
@@ -157,6 +170,7 @@ import {
   derivePhase,
   deriveActiveWorkStartedAt,
   deriveCanInterruptRunningThread,
+  deriveRevertTurnCountByUserMessageId,
   findRevertCheckpoint,
   isLatestRunSettled,
 } from "../session-logic";
@@ -208,7 +222,11 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newMessageId } from "~/lib/utils";
-import { isInSideChatPane, type SideChatParentPanel } from "~/lib/sideChatPane";
+import {
+  isInSideChatPane,
+  resolveThreadOpenRoute,
+  type SideChatParentPanel,
+} from "~/lib/sideChatPane";
 import {
   NO_PROVIDER_MODEL_SELECTION,
   providerInstanceEntriesFor,
@@ -432,7 +450,7 @@ type ChatViewProps =
       draftId: DraftId;
     };
 
-const DismissedFallbackWindowSchema = Schema.NullOr(Schema.String);
+const DismissedKeySchema = Schema.NullOr(Schema.String);
 
 const ignoreComposerFocus = () => {};
 
@@ -798,6 +816,11 @@ export default function ChatView(props: ChatViewProps) {
     }
   }
   const nowMinute = useNowMinute();
+  // The team strip's task list stays as the user left it across threads.
+  const [agentTeamTasksExpanded, setAgentTeamTasksExpanded] = useState(false);
+  const [councilSeatsExpanded, setCouncilSeatsExpanded] = useState(false);
+  // A settled Council strip the user closed, by thread, cycle and state.
+  const [dismissedCouncilKey, setDismissedCouncilKey] = useState<string | null>(null);
   const draftDefaultModelSelection = draftThread
     ? resolveProjectSettings(
         settings,
@@ -928,7 +951,9 @@ export default function ChatView(props: ChatViewProps) {
         open: (): void => {
           void navigate({
             to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(parentSubagentThreadRef),
+            params: buildThreadRouteParams(
+              resolveThreadOpenRoute(parentSubagentThreadRef, parentSubagentThread),
+            ),
           });
         },
       };
@@ -1146,6 +1171,27 @@ export default function ChatView(props: ChatViewProps) {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   };
   const handleNewThreadInActiveProjectStable = useStableCallback(handleNewThreadInActiveProject);
+  const openRootCauseThread = async (
+    projectRef: ScopedProjectRef,
+    selection: ModelSelection,
+    commands: ReadonlyArray<string>,
+  ) => {
+    // The other model has to read the failing worktree, uncommitted changes included.
+    const opened = await handleNewThread(projectRef, {
+      prompt: rootCausePrompt(commands),
+      branch: activeThread?.branch ?? null,
+      worktreePath: activeThread?.worktreePath ?? null,
+      envMode: activeThread?.worktreePath ? "worktree" : "local",
+      startFromOrigin: false,
+    });
+    if (opened === null) return;
+    const { setModelSelection, setInteractionMode } = useComposerDraftStore.getState();
+    setModelSelection(opened.draftId, selection, { explicit: true, replaceOptions: true });
+    const planMode = providerStatuses.find(
+      (provider) => provider.instanceId === selection.instanceId,
+    )?.showInteractionModeToggle;
+    setInteractionMode(opened.draftId, planMode === true ? "plan" : "default");
+  };
   const projectGroupingSettings = selectProjectGroupingSettings(settings);
   const activeDraftLogicalProjectKey =
     !isServerThread && activeProject
@@ -1385,10 +1431,6 @@ export default function ChatView(props: ChatViewProps) {
     pendingUserInputs,
     activePendingApproval,
     activePendingUserInput,
-    activePendingDraftAnswers,
-    activePendingQuestionIndex,
-    activePendingProgress,
-    activePendingResolvedAnswers,
     activePendingIsResponding,
     respondingRequestIds,
     onRespondToApproval: onRespondToApprovalStable,
@@ -1735,7 +1777,7 @@ export default function ChatView(props: ChatViewProps) {
   const [dismissedFallbackWindow, setDismissedFallbackWindow] = useLocalStorage(
     `t3code:fallback-notice-dismissed:${environmentId}`,
     null,
-    DismissedFallbackWindowSchema,
+    DismissedKeySchema,
   );
   const providerStatusDismissalKey = getProviderStatusDismissalKey(
     providerEnvironmentId,
@@ -2607,6 +2649,159 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
+  // One key per thread: a newer repeated failure replaces the dismissed run.
+  const [dismissedEffortRetryKey, setDismissedEffortRetryKey] = useLocalStorage(
+    `t3code:effort-retry-dismissed:${routeThreadKey}`,
+    null,
+    DismissedKeySchema,
+  );
+  const effortRetryScan = (() => {
+    const nextSelection =
+      (composerModelSelectionApplies ? composerSelectedModelSelection : null) ??
+      serverProjection?.thread.modelSelection;
+    if (!serverProjection || !nextSelection || isWorking || phase === "running") return null;
+    const provider = providerStatuses.find(
+      (status) => status.instanceId === nextSelection.instanceId,
+    );
+    const descriptors = provider?.models.find(
+      (model) => model.slug === nextSelection.model || model.aliases?.includes(nextSelection.model),
+    )?.capabilities?.optionDescriptors;
+    const retry = higherEffortRetry({
+      runs: serverProjection.runs,
+      turnItems: serverProjection.turnItems,
+      nodes: serverProjection.nodes,
+      messages: serverProjection.messages,
+      descriptors,
+      selection: nextSelection,
+    });
+    if (!provider || !retry || dismissedEffortRetryKey === retry.key) return null;
+    return { nextSelection, provider, retry };
+  })();
+  const rootCause = useCrossVendorModel(
+    effortRetryScan !== null &&
+      activeProjectRef !== null &&
+      serverConfig?.environment.capabilities.crossVendorModel === true
+      ? {
+          environmentId: activeProjectRef.environmentId,
+          failing: effortRetryScan.nextSelection,
+          projectId: activeProjectRef.projectId,
+        }
+      : null,
+  );
+  const effortRetryItems = ((): ComposerBannerStackItem[] => {
+    if (effortRetryScan === null) return [];
+    const { nextSelection, provider, retry } = effortRetryScan;
+    const { effort } = retry;
+    const turnCount =
+      effort !== null && supportsConversationRollback
+        ? deriveRevertTurnCountByUserMessageId({
+            timelineEntries,
+            checkpoints: turnDiffSummaries,
+            threadStartCheckpointAvailable,
+            availableRevertTurnCounts,
+          }).get(retry.messageId)
+        : undefined;
+    if ((effort === null || turnCount === undefined) && rootCause === null) return [];
+    return [
+      effortRetryBannerItem({
+        retry:
+          effort === null || turnCount === undefined
+            ? null
+            : {
+                levelLabel: effort.label,
+                onRetry: () =>
+                  onRetryWithEffortStable(turnCount, retry.messageId, {
+                    ...effort,
+                    provider: provider.driver,
+                    selection: nextSelection,
+                  }),
+              },
+        rootCause:
+          rootCause === null || activeProjectRef === null
+            ? null
+            : {
+                modelName: rootCause.modelName,
+                onOpen: () =>
+                  void openRootCauseThread(activeProjectRef, rootCause.selection, retry.commands),
+              },
+        onDismiss: () => setDismissedEffortRetryKey(retry.key),
+      }),
+    ];
+  })();
+  const activeThreadAssists =
+    serverProjection === null
+      ? undefined
+      : {
+          tokenSaver: serverProjection.thread.tokenSaver,
+          council: serverProjection.thread.council,
+          councilApplies: councilApplies(serverProjection.thread),
+        };
+  const leadTeam =
+    isServerThread &&
+    serverProjection !== null &&
+    serverConfig?.environment.capabilities.agentTeams === true
+      ? threadAgentTeam({
+          routing: serverProjection.thread.routing,
+          agentTeam: serverProjection.thread.agentTeam,
+          modelSelection: serverProjection.thread.modelSelection,
+          groups: serverConfig.settings.routingGroups ?? [],
+        })
+      : null;
+  const agentTeamItems: ComposerBannerStackItem[] = (() => {
+    if (leadTeam === null || serverProjection === null) return [];
+    const nowMs = Date.parse(nowMinute);
+    const providers = providerStatuses.map((provider) => routingProviderSource(provider, nowMs));
+    return [
+      agentTeamBannerItem({
+        name: leadTeam.name,
+        summary: agentTeamSummary(leadTeam, serverProjection.thread.modelSelection, providers),
+        progress: agentTeamProgress({
+          threadId: serverProjection.thread.id,
+          team: leadTeam,
+          subagents: serverProjection.subagents,
+          providers,
+        }),
+        expanded: agentTeamTasksExpanded,
+        onToggle: () => setAgentTeamTasksExpanded((expanded) => !expanded),
+        onOpenThread: onOpenRelatedThreadStable,
+      }),
+    ];
+  })();
+  const councilItems: ComposerBannerStackItem[] = (() => {
+    const thread = serverProjection?.thread;
+    const council = thread?.council;
+    if (!isServerThread || serverProjection === null || !thread || !council) return [];
+    if (!councilApplies(thread)) return [];
+    const status = councilStatus({
+      threadId: thread.id,
+      council,
+      subagents: serverProjection.subagents,
+      userMessageTimesMs: councilUserMessageTimes(serverProjection.messages),
+    });
+    const threadIdle = serverProjection.runs.every(
+      (run) => !["preparing", "queued", "starting", "running", "waiting"].includes(run.status),
+    );
+    if (status.rounds.length === 0 && status.state !== "accepted") return [];
+    const settled =
+      status.state === "passed" || status.state === "accepted" || status.state === "limit";
+    const dismissKey = `${thread.id}:${status.cycleStartMs}:${status.state}`;
+    if (settled && dismissedCouncilKey === dismissKey) return [];
+    return [
+      councilBannerItem({
+        status,
+        threadIdle,
+        expanded: councilSeatsExpanded,
+        onToggle: () => setCouncilSeatsExpanded((expanded) => !expanded),
+        onAccept: () =>
+          void updateThreadMetadata({
+            environmentId,
+            input: { threadId: thread.id, councilAccept: true },
+          }),
+        ...(settled ? { onDismiss: () => setDismissedCouncilKey(dismissKey) } : {}),
+        onOpenThread: onOpenRelatedThreadStable,
+      }),
+    ];
+  })();
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2674,7 +2869,10 @@ export default function ChatView(props: ChatViewProps) {
         ...usageLimitsItems,
         ...projectCloneItems,
         ...freshSessionItems,
+        ...effortRetryItems,
         ...systemComposerBannerItems,
+        ...agentTeamItems,
+        ...councilItems,
       ];
     }
     return [
@@ -2685,7 +2883,10 @@ export default function ChatView(props: ChatViewProps) {
       ...usageLimitsItems,
       ...projectCloneItems,
       ...freshSessionItems,
+      ...effortRetryItems,
       ...systemComposerBannerItems,
+      ...agentTeamItems,
+      ...councilItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,
         mismatch: localCheckoutBranchMismatch,
@@ -2719,6 +2920,7 @@ export default function ChatView(props: ChatViewProps) {
     terminalOpen: Boolean(terminalUiState.terminalOpen),
     previewFocus: isPreviewFocused(),
     previewOpen: previewPanelOpen,
+    rightPanelOpen,
     editableFocus: isEditableFocused(eventTarget),
     modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
     composerFocus:
@@ -2854,26 +3056,30 @@ export default function ChatView(props: ChatViewProps) {
                 : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
   const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
-  const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =
-    useTimelineRewind({
-      environmentId,
-      routeThreadRef,
-      routeThreadKey,
-      currentRouteThreadKeyRef,
-      serverProjection,
-      activeThread,
-      timelineMessages,
-      phase,
-      isSendBusy,
-      isRevertingCheckpoint,
-      supportsConversationRollback,
-      activeEnvironmentUnavailable,
-      activeEnvironmentUnavailableLabel,
-      promptRef,
-      composerRef,
-      composerDraftTarget,
-      setThreadError,
-    });
+  const {
+    onConfirmRevertStable,
+    onForkFromRunStable,
+    onRetryWithEffortStable,
+    onRevertTimelineTurnStable,
+  } = useTimelineRewind({
+    environmentId,
+    routeThreadRef,
+    routeThreadKey,
+    currentRouteThreadKeyRef,
+    serverProjection,
+    activeThread,
+    timelineMessages,
+    phase,
+    isSendBusy,
+    isRevertingCheckpoint,
+    supportsConversationRollback,
+    activeEnvironmentUnavailable,
+    activeEnvironmentUnavailableLabel,
+    promptRef,
+    composerRef,
+    composerDraftTarget,
+    setThreadError,
+  });
   const onCompactContext = () => {
     if (compactDisabled) return;
     void sendStandaloneCommand("/compact", "Failed to compact context.");
@@ -2976,7 +3182,7 @@ export default function ChatView(props: ChatViewProps) {
     readPendingEnvironmentChange,
     pendingApprovals,
     respondingRequestIds,
-    activePendingProgress,
+    activePendingUserInput,
     onAdvanceActivePendingUserInput,
     onRespondToApproval: onRespondToApprovalStable,
     beginLocalDispatch,
@@ -3095,7 +3301,7 @@ export default function ChatView(props: ChatViewProps) {
     clientSettingsHydrated &&
     !needsLoadBalancing &&
     !activeEnvironmentUnavailable &&
-    !activePendingProgress &&
+    !activePendingUserInput &&
     !feedbackUploading;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- switches the draft to local mode, then resends the waiting message once sending is idle
   useEffect(() => {
@@ -3706,11 +3912,7 @@ export default function ChatView(props: ChatViewProps) {
                                 pendingApprovals={pendingApprovals}
                                 onHeldRequestIdsChange={onHeldRequestIdsChange}
                                 pendingUserInputs={pendingUserInputs}
-                                activePendingProgress={activePendingProgress}
-                                activePendingResolvedAnswers={activePendingResolvedAnswers}
                                 activePendingIsResponding={activePendingIsResponding}
-                                activePendingDraftAnswers={activePendingDraftAnswers}
-                                activePendingQuestionIndex={activePendingQuestionIndex}
                                 respondingRequestIds={respondingRequestIds}
                                 runtimeMode={runtimeMode}
                                 defaultRuntimeMode={defaultRuntimeMode}
@@ -3721,6 +3923,9 @@ export default function ChatView(props: ChatViewProps) {
                                   activeProjectDefaultModelSelection
                                 }
                                 activeThreadModelSelection={activeThread?.modelSelection}
+                                activeThreadRouting={serverProjection?.thread.routing}
+                                activeThreadAgentTeam={serverProjection?.thread.agentTeam}
+                                activeThreadAssists={activeThreadAssists}
                                 activeProjectId={activeProject?.id ?? null}
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}

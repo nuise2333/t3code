@@ -11,6 +11,7 @@ import {
   type ModelSelection,
   type RuntimeMode,
   type OrchestrationV2ThreadShell,
+  type ServerSettings as ServerSettingsType,
   ThreadId,
 } from "@t3tools/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -33,6 +34,7 @@ import { OrchestratorRuntimeModeAboveCeilingError } from "../../../orchestration
 import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ServerConfig from "../../../config.ts";
+import * as RoutingPolicy from "../../../routing/RoutingPolicy.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
@@ -50,6 +52,7 @@ import { ProjectToolkit } from "./tools.ts";
 const clientLaunchHarness = (input: {
   readonly runtimeModeCeiling: RuntimeMode;
   readonly defaultRuntimeMode?: RuntimeMode;
+  readonly newWorktreesStartFromOrigin?: boolean;
   readonly fallbackModel?: ModelSelection;
   readonly providers?: readonly ServerProvider[];
   /** Where Settings saves a project's model; the legacy project field stays null. */
@@ -60,6 +63,9 @@ const clientLaunchHarness = (input: {
   readonly hostedAppUrl?: string;
   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
   readonly refusedByCeiling?: true;
+  readonly routingGroups?: ServerSettingsType["routingGroups"];
+  /** The launch finds no usable member in the group it asked for. */
+  readonly noUsableMember?: true;
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = {
@@ -76,9 +82,13 @@ const clientLaunchHarness = (input: {
     }),
     ServerSettings.layerTest({
       fallbackModelSelection: input.fallbackModel ?? null,
+      ...(input.routingGroups === undefined ? {} : { routingGroups: input.routingGroups }),
       ...(input.defaultRuntimeMode === undefined
         ? {}
         : { defaultRuntimeMode: input.defaultRuntimeMode }),
+      ...(input.newWorktreesStartFromOrigin === undefined
+        ? {}
+        : { newWorktreesStartFromOrigin: input.newWorktreesStartFromOrigin }),
       ...(input.overrideModel === undefined
         ? {}
         : {
@@ -121,6 +131,22 @@ const clientLaunchHarness = (input: {
       checkWorktreeBase: input.checkWorktreeBase ?? (() => Effect.void),
       launch: (launch) => {
         input.launched.push(launch);
+        if (input.noUsableMember) {
+          return Effect.fail(
+            new RoutingPolicy.RoutingGroupUnavailableError({
+              groupId: "cheap",
+              groupName: "Cheap",
+              skipped: [
+                {
+                  index: 0,
+                  instanceId: ProviderInstanceId.make("pi"),
+                  model: "pi-model",
+                  reason: "usage_exhausted",
+                },
+              ],
+            }),
+          );
+        }
         if (input.refusedByCeiling) {
           return Effect.fail(
             new ThreadLaunch.ThreadLaunchError({
@@ -166,7 +192,10 @@ const clientLaunchHarness = (input: {
         ),
     }),
     Layer.mock(PeerForwarding.PeerForwarding)({}),
-    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/projects" }),
+    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: "/projects",
+      isScratchProject: () => Effect.succeed(false),
+    }),
     DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer)),
   ).pipe(
     Layer.provideMerge(GitVcsDriver.layer),
@@ -339,6 +368,72 @@ it.effect("a launch steps an inherited mode down to the provider's, and refuses 
   }),
 );
 
+it.effect("a launch with a routing group hands the group to the launch, unstepped", () =>
+  Effect.gen(function* () {
+    const pi = ProviderInstanceId.make("pi");
+    const member = { instanceId: pi, model: "pi-model" };
+    const launchGroup = Effect.fn("test.launchGroup")(function* (
+      params: { readonly modelSelection?: ModelSelection; readonly noUsableMember?: true } = {},
+    ) {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const { projectId, dependencies } = clientLaunchHarness({
+        runtimeModeCeiling: "auto",
+        launched,
+        routingGroups: [{ id: "cheap", name: "Cheap", members: [member], strategy: "order" }],
+        ...(params.noUsableMember === undefined ? {} : { noUsableMember: true }),
+        providers: [
+          {
+            instanceId: pi,
+            driver: ProviderDriverKind.make("pi"),
+            enabled: true,
+            installed: true,
+            status: "ready",
+            version: null,
+            auth: { status: "authenticated" },
+            checkedAt: "2026-01-01T00:00:00Z",
+            models: [],
+            slashCommands: [],
+            skills: [],
+            supportedRuntimeModes: ["approval-required", "full-access"],
+          },
+        ],
+      });
+      const toolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
+      const result = yield* toolkit
+        .handle("t3_thread_launch", {
+          projectId,
+          title: "Fix",
+          routingGroupId: "cheap",
+          ...(params.modelSelection === undefined ? {} : { modelSelection: params.modelSelection }),
+        })
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+      return { result: result.at(-1)?.result, launched };
+    });
+
+    const grouped = yield* launchGroup();
+    expect(grouped.launched[0]).toMatchObject({
+      routing: { mode: "group", groupId: "cheap" },
+      modelSelection: member,
+      // A member that lacks the mode is skipped by the group, not stepped down here.
+      runtimeMode: "auto",
+    });
+
+    const both = yield* launchGroup({ modelSelection: member });
+    expect(both.result).toMatchObject({ code: "invalid_request" });
+    expect(both.launched).toHaveLength(0);
+
+    const none = yield* launchGroup({ noUsableMember: true });
+    expect(none.result).toMatchObject({ code: "model_unavailable" });
+    expect((none.result as { readonly message: string }).message).toContain("usage limit reached");
+  }),
+);
+
 it.effect("a launch with a model its provider does not advertise creates no thread", () =>
   Effect.gen(function* () {
     const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
@@ -395,7 +490,9 @@ it.effect("a launch with a model its provider does not advertise creates no thre
     ] as const) {
       expect(yield* launchWith(instanceId, model)).toMatchObject({
         code: "model_unavailable",
-        message: `Model ${model} is not advertised by provider ${instanceId}.`,
+        message: expect.stringContaining(
+          `Model ${model} is not advertised by provider ${instanceId}. Advertised models: `,
+        ),
       });
     }
     expect(launched).toHaveLength(0);
@@ -601,6 +698,51 @@ it.effect("a launch into a new worktree creates nothing when its base ref has no
 
     expect((yield* launchFrom("main")).at(-1)?.result).toMatchObject({ projectId });
     expect(launched).toHaveLength(1);
+  }),
+);
+
+it.effect("a worktree launch that omits startFromOrigin follows the new-worktree setting", () =>
+  Effect.gen(function* () {
+    const cases = [
+      { setting: true, given: undefined, expected: true },
+      { setting: false, given: undefined, expected: false },
+      { setting: true, given: false, expected: false },
+    ];
+    for (const { setting, given, expected } of cases) {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const checked: Array<ThreadLaunch.ThreadLaunchInput["workspaceStrategy"]> = [];
+      const { projectId, dependencies } = clientLaunchHarness({
+        runtimeModeCeiling: "auto",
+        launched,
+        newWorktreesStartFromOrigin: setting,
+        checkWorktreeBase: ({ workspaceStrategy }) =>
+          Effect.sync(() => {
+            checked.push(workspaceStrategy);
+          }),
+      });
+      const toolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
+      yield* toolkit
+        .handle("t3_thread_launch", {
+          title: "Fix",
+          projectId,
+          workspaceStrategy: {
+            type: "worktree",
+            baseRef: "main",
+            ...(given === undefined ? {} : { startFromOrigin: given }),
+          },
+        })
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+      const strategy = { type: "worktree", baseRef: "main", startFromOrigin: expected };
+      expect(checked).toEqual([strategy]);
+      expect(launched.map((launch) => launch.workspaceStrategy)).toEqual([strategy]);
+    }
   }),
 );
 
@@ -835,6 +977,22 @@ it.effect("an agent's clone is not cut off while git is still transferring", () 
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+const deletedProject = (id: ProjectId) => ({
+  id,
+  title: "client-target",
+  workspaceRoot: "/projects/client-target",
+  repositoryIdentity: null,
+  faviconPath: null,
+  defaultModelSelection: null,
+  defaultThreadEnvMode: null,
+  autoPull: false,
+  projectIcon: null,
+  scripts: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  deletedAt: "2026-01-01T00:00:00.000Z",
+});
+
 it.effect("deleting a project through MCP also discards its clone record", () =>
   Effect.gen(function* () {
     const discarded: Array<ProjectId> = [];
@@ -843,22 +1001,7 @@ it.effect("deleting a project through MCP also discards its clone record", () =>
       harness.dependencies,
       Layer.mergeAll(
         Layer.mock(Project.ProjectService)({
-          delete: (input) =>
-            Effect.succeed({
-              id: input.projectId,
-              title: "client-target",
-              workspaceRoot: "/projects/client-target",
-              repositoryIdentity: null,
-              faviconPath: null,
-              defaultModelSelection: null,
-              defaultThreadEnvMode: null,
-              autoPull: false,
-              projectIcon: null,
-              scripts: [],
-              createdAt: "2026-01-01T00:00:00.000Z",
-              updatedAt: "2026-01-01T00:00:00.000Z",
-              deletedAt: "2026-01-01T00:00:00.000Z",
-            }),
+          delete: (input) => Effect.succeed(deletedProject(input.projectId)),
         }),
         Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({
           discard: (projectId) => Effect.sync(() => void discarded.push(projectId)),
@@ -876,6 +1019,45 @@ it.effect("deleting a project through MCP also discards its clone record", () =>
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
 
     expect(discarded).toEqual([harness.projectId]);
+  }),
+);
+
+it.effect("an agent cannot delete the built-in scratch project, even with force", () =>
+  Effect.gen(function* () {
+    const deleted: Array<ProjectId> = [];
+    const harness = clientLaunchHarness({ runtimeModeCeiling: "full-access", launched: [] });
+    const dependencies = Layer.merge(
+      harness.dependencies,
+      Layer.mergeAll(
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          namedProjectsRoot: "/projects",
+          isScratchProject: (projectId) => Effect.succeed(projectId === harness.projectId),
+        }),
+        Layer.mock(Project.ProjectService)({
+          delete: (input) =>
+            Effect.sync(() => {
+              deleted.push(input.projectId);
+              return deletedProject(input.projectId);
+            }),
+        }),
+        Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ discard: () => Effect.void }),
+      ),
+    );
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+
+    const refused = yield* toolkit
+      .handle("t3_project_delete", { projectId: harness.projectId, force: true })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+    expect(deleted).toEqual([]);
+    expect(refused.at(-1)?.result).toMatchObject({
+      code: "invalid_request",
+      message: expect.stringMatching(/scratch|no project/i),
+    });
   }),
 );
 

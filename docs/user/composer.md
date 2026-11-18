@@ -126,6 +126,136 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
+## Auto effort
+
+Turn on **Settings → Labs → Auto effort** for a machine to add **Auto** to the
+effort levels of a new thread. Auto keeps your provider and model (unless you
+allow switching below or an [Auto rule](#routing-groups) sends that kind of task
+to a group) and picks Low,
+Medium, or High from the first message, once, when the thread starts. It never
+picks a level above High, and a model without those levels keeps its own. The
+started thread names the level Auto picked and why. Pick a level yourself, before
+or after sending, to stop using Auto for that thread. Typing Ultrathink or
+turning on Ultracode also counts as your choice. Sending to several models at
+once keeps each model's own level.
+
+Under Auto effort you can also let Auto switch the model (on the same provider)
+or the provider of a new thread. It decides once, at launch, only when you
+didn't pick a model in that draft, and only among models T3 Code has benchmark
+data for on that kind of task. It takes the cheapest model rated well enough,
+moves to a pricier model than yours only for large changes, and keeps questions
+on a capable model (it lowers their level instead). With a screenshot of UI work
+attached, it does not switch to a GPT model or to another provider, though it may
+still pick another model on yours. It does not pick Gemini 4 models, which are
+slow to answer; picking one yourself still works. A message about security or
+vulnerabilities keeps your model, because some Claude models quietly hand those
+to an older model. It never turns on fast mode, a
+larger context, or other paid extras. A started thread shows the model Auto
+picked and the provider account that pays for it; with switching off, it shows
+what Auto would have picked.
+
+The **Routing** section of the Usage page counts, for threads started in the
+chosen window, how often Auto set a level, switched the model or launched through
+a group, by kind of task, and how many it would have changed with its switches
+on. These are decisions, not a measure of what they saved.
+
+With Auto effort on, a subtask an agent delegates as a review prefers a model
+from another vendor at High effort; with provider switching off it stays on the
+current model and is raised to at least High. A research subtask
+may run on a cheaper model or level. Other subtasks, and any the agent names a
+model for, keep their model. This applies only to subtasks run on this machine.
+
+When the same command fails in your last two turns, the composer offers **Retry
+with** the next higher level. It rewinds to your earlier message, like
+[Edit from here](#edit-an-earlier-prompt), and raises the composer's level,
+which stays until you change it. Auto never does this on its own. **Find the
+cause on** opens a new thread in the same project on a model from another
+vendor that reads code at least as well as the failing one, whether or not
+Auto is on, in plan mode where that provider has it, with a draft that asks
+for a read-only root-cause analysis of the failing command; nothing sends until
+you do. It shows only when such a model is ready.
+
+## Routing groups
+
+A routing group is an ordered list of models, each with its own options. Create
+one in **Settings → Providers → Routing groups** on web and desktop, or
+**Settings → Routing groups** on mobile, then pick it from a new thread's model
+picker. Only models that are set up, have usage left, and support the thread's
+permissions and plan mode can run it. **In order** runs the first of those in the
+list. **Most quota left** starts on the subscription with the most usage left to
+spend per hour before its tightest window resets, then plan credits, then
+pay-as-you-go accounts. A subscription with 15% or less left in a window goes
+last, so it is used only when nothing else can run. Either way it decides once, when the
+thread starts; later turns stay on that model, and the thread names the group and
+any model it skipped. If no model qualifies, the thread does not start and the
+error lists why each one was skipped.
+
+**Add from preset** starts a group for Chinese writing, batch translation, video,
+research, or office work from reviewers' picks, using the models your providers
+offer. It is an ordinary group: nothing uses it until you pick it, and you can
+edit or delete it like any other.
+
+On web and desktop, a scheduled task that starts new threads can also run
+through a group: pick it from the task's model picker. Each run that starts a
+thread chooses again, so a run skips a model that is out of usage. If the group
+is deleted, the task's runs fail until you pick another model or group.
+
+With Auto effort on, a group can also be chosen by the kind of first message:
+set **Auto rules** under the groups, and a new thread left on Auto starts through
+that kind's group instead of only picking an effort.
+
+## Agent teams
+
+An agent team is a lead model and the models it may hand work to, each with its
+own options such as effort. Create one in **Settings → Providers → Agent teams**
+on web and desktop; the first model leads, and the next one leads if the first
+can't run. Turn a team on with the **Team** button (the people icon) beside the
+model picker, or pick it from a new thread's model picker. The lead plans the
+work, delegates each task to a team model as a delegated task, checks the
+results, and answers you. It can delegate only to the team's models.
+
+On a new thread the team's first available model leads. In a thread that is
+already running, the thread's own model leads from your next message; choose
+**No team** in the same menu to turn it off. While a thread leads a team, a strip
+above the composer shows the team, its lead and a tally of delegated tasks;
+expand it to see each task's member, status and time, and open a task's thread.
+
+**Lead guidance** under the teams is added to every lead's instructions from its
+next turn, for example "you only lead; never edit files yourself".
+
+In a thread that launched through a team, picking another model leaves the
+team; one turned on with the Team button stays on until you turn it off. Deleting
+a team stops its threads from leading it. Forks, side chats and the team's own
+task threads never lead a team. Mobile starts threads with a team and shows it, but
+teams are edited on web and desktop.
+
+## Token saver
+
+The leaf button beside the model picker turns on guidance that makes the agent
+spend fewer tokens in this thread: **Caveman** (terse replies, with Lite, Full
+and Ultra levels), **Lean code**, **Quiet tools** and **RTK compression** (needs
+the `rtk` command installed). The panel shows a rough estimate of the saving.
+The guidance goes with your next message and is restated every few messages.
+**Start new threads like this** makes the current choice the default for new
+threads; **Turn all off** clears it.
+
+## Council
+
+The balance button turns on Council: independent reviewers score the work out of
+10, and every one of them must reach your target (the lowest score counts, not
+the average). The agent convenes 2 to 5 reviewers with `delegate_task`, each
+checking one lens such as correctness or tests, fixes what they find and
+convenes fresh rounds, up to the round limit. Set the target, the round limit
+and the number of reviewers in the panel; they become your defaults, and
+**Start new threads with Council on** turns it on for every new thread.
+
+While a cycle runs, a strip above the composer shows the round, the lowest score
+against the target and, expanded, each reviewer's lens and score. If the agent
+stops below the target, T3 Code brings it back once per round; if it stops
+again, the strip says Council needs you: reply to keep fixing, lower the target,
+or choose **Accept and finish**. A new message after a pass, an accept or the
+round limit starts a new cycle that reviews only what comes next.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

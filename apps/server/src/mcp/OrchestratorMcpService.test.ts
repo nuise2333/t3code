@@ -10,6 +10,7 @@ import {
   NodeId,
   ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
   type OrchestratorMcpCapabilitiesResult,
+  type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpListScheduledTasksInput,
   type Project,
   OrchestratorMcpTarget,
@@ -27,6 +28,7 @@ import {
   type OrchestrationV2ServerCommand,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
+  type RouteDecision,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
@@ -62,8 +64,10 @@ import {
 } from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { buildUnavailableProviderSnapshot } from "../provider/unavailableProviderSnapshot.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -82,6 +86,7 @@ const decodeTarget = Schema.decodeUnknownEffect(OrchestratorMcpTarget);
 
 const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
 );
 
@@ -259,6 +264,8 @@ describe("OrchestratorMcpService", () => {
       const parentThreadId = ThreadId.make("thread:mcp-restart-parent");
       const childThreadId = ThreadId.make("thread:mcp-restart-child");
       const taskId = NodeId.make("node:mcp-restart-task");
+      const cutRunId = RunId.make("run:mcp-restart-child");
+      const continuationRunId = RunId.make("run:mcp-restart-continuation");
       const dispatched = yield* Ref.make(0);
       let awaitsRestart = true;
       let readFails = true;
@@ -284,10 +291,12 @@ describe("OrchestratorMcpService", () => {
         thread: { id: childThreadId, title: "Child" },
         runs: [
           {
-            id: RunId.make("run:mcp-restart-child"),
+            id: cutRunId,
             ordinal: 1,
             status: "cancelled",
             delegatedTaskId: taskId,
+            startedAt: DateTime.makeUnsafe("2026-10-03T10:00:00Z"),
+            completedAt: DateTime.makeUnsafe("2026-10-03T10:05:00Z"),
           },
           { id: RunId.make("run:mcp-restart-later"), ordinal: 2, status: "running" },
         ],
@@ -299,12 +308,17 @@ describe("OrchestratorMcpService", () => {
         runtimeRequests: [],
         turnItems: [],
       } as unknown as OrchestrationV2ThreadProjection;
+      let childRuns = childProjection.runs;
       const layerDependencies = Layer.mergeAll(
         NodeServices.layer,
         NodeCrypto.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
-            Effect.succeed(threadId === parentThreadId ? parentProjection : childProjection),
+            Effect.succeed(
+              threadId === parentThreadId
+                ? parentProjection
+                : { ...childProjection, runs: childRuns },
+            ),
           delegatedTaskResultPending: () =>
             readFails
               ? Effect.fail(new OrchestratorProjectionError({ threadId: childThreadId }))
@@ -344,11 +358,63 @@ describe("OrchestratorMcpService", () => {
         assert.equal(held.status, "running");
         assert.equal(held.workState, "working");
         assert.isNull(held.summary);
+        assert.isNull(held.latestTerminalRunId);
+        assert.isNull(held.latestTerminalStatus);
         assert.equal(yield* Ref.get(dispatched), 0);
+
+        const continuationRun = {
+          id: continuationRunId,
+          ordinal: 3,
+          status: "running",
+          delegatedTaskId: taskId,
+          startedAt: DateTime.makeUnsafe("2026-10-03T10:06:00Z"),
+          restartContinuationOfRunId: cutRunId,
+        } as unknown as (typeof childRuns)[number];
+        childRuns = [...childProjection.runs, continuationRun];
+        const continuing = yield* service.taskStatus(scope, taskId);
+        assert.equal(continuing.status, "running");
+        assert.isNull(continuing.latestTerminalRunId);
+        assert.isNull(continuing.latestTerminalStatus);
+
+        // A second restart cut the continuation, and its own continuation declined.
+        childRuns = [
+          ...childProjection.runs,
+          {
+            ...continuationRun,
+            status: "cancelled",
+            completedAt: DateTime.makeUnsafe("2026-10-03T10:10:00Z"),
+          },
+        ];
         awaitsRestart = false;
         const settled = yield* service.taskStatus(scope, taskId);
         assert.equal(settled.status, "cancelled");
+        assert.equal(settled.latestTerminalRunId, continuationRunId);
+        assert.equal(settled.latestTerminalStatus, "cancelled");
         assert.equal(yield* Ref.get(dispatched), 1);
+
+        // A continuation cancelled before it started leaves the cut run as the result.
+        childRuns = [
+          ...childProjection.runs,
+          { ...continuationRun, status: "cancelled", startedAt: null },
+        ];
+        const unstarted = yield* service.taskStatus(scope, taskId);
+        assert.equal(unstarted.latestTerminalRunId, cutRunId);
+        assert.equal(unstarted.latestTerminalStatus, "cancelled");
+
+        // That unstarted continuation was itself continued, so the whole chain is still live.
+        childRuns = [
+          ...childProjection.runs,
+          { ...continuationRun, status: "cancelled", startedAt: null },
+          {
+            ...continuationRun,
+            id: RunId.make("run:mcp-restart-continuation-2"),
+            ordinal: 4,
+            restartContinuationOfRunId: continuationRunId,
+          },
+        ];
+        const chained = yield* service.taskStatus(scope, taskId);
+        assert.isNull(chained.latestTerminalRunId);
+        assert.isNull(chained.latestTerminalStatus);
       }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
     }),
   );
@@ -1429,6 +1495,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       readonly model: string;
       readonly options?: ReadonlyArray<{ readonly id: string; readonly value: unknown }>;
     } = { instanceId: codexInstanceId, model: "gpt-5.4" },
+    messages: ReadonlyArray<unknown> = [],
   ): OrchestrationV2ThreadProjection =>
     ({
       thread: {
@@ -1452,6 +1519,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         },
       ],
       contextTransfers: [],
+      messages,
       subagents,
     }) as unknown as OrchestrationV2ThreadProjection;
 
@@ -2430,6 +2498,68 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
   );
 
+  it.effect("an unadvertised model refusal names advertised slugs to retry with", () =>
+    Effect.gen(function* () {
+      const codex = providerSnapshot({
+        instanceId: codexInstanceId,
+        driver: ProviderDriverKind.make("codex"),
+      });
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          hasReceipt: () => Effect.succeed(false),
+          getThreadRecords: () => Effect.succeed(parentProjection([])),
+        }),
+        ServerSettings.layerTest(),
+        providerRegistryLayer([
+          {
+            ...codex,
+            models: [
+              { slug: "claude-opus-4-1", isLegacy: true },
+              ...Array.from({ length: 9 }, (_, index) => ({ slug: `claude-opus-5-${index + 1}` })),
+            ].map((model) => ({ ...model, name: model.slug, isCustom: false, capabilities: null })),
+          },
+        ]),
+        adapterRegistryLayer([codexInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const refuse = (model: string) =>
+          service
+            .delegateTask(scope, {
+              task: "Summarize the diff.",
+              target: { providerInstanceId: codexInstanceId, model },
+              mode: "async",
+              clientRequestId: `delegate-unadvertised-${model}`,
+            })
+            .pipe(Effect.flip);
+
+        const prefixed = yield* refuse("anthropic/claude-opus-5-3");
+        assert.equal(prefixed.code, "model_unavailable");
+        assert.equal(
+          prefixed.message,
+          "Model anthropic/claude-opus-5-3 is not advertised by provider codex. " +
+            "Did you mean claude-opus-5-3?",
+        );
+
+        const unmatched = yield* refuse("opus-5.5");
+        assert.equal(
+          unmatched.message,
+          "Model opus-5.5 is not advertised by provider codex. Advertised models: " +
+            "claude-opus-5-1, claude-opus-5-2, claude-opus-5-3, claude-opus-5-4, claude-opus-5-5, " +
+            "claude-opus-5-6, claude-opus-5-7, claude-opus-5-8 and 2 more; " +
+            "orchestrator_capabilities with search finds them.",
+        );
+      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
   it.effect("driver-only delegation skips an instance the project turned off", () =>
     Effect.gen(function* () {
       const altInstanceId = ProviderInstanceId.make("codex-alt");
@@ -3244,6 +3374,831 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
   );
 
+  it.effect(
+    "delegates to the member a routing group picks and replays without resolving again",
+    () =>
+      Effect.gen(function* () {
+        const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        const resolved = yield* Ref.make<ReadonlyArray<RoutingPolicy.RoutingGroupInput>>([]);
+        let accepted = false;
+        let delegated = false;
+        const chosen = {
+          instanceId: ProviderInstanceId.make("claude_fake"),
+          model: "claude-fake-1",
+        };
+        const decision = {
+          taskClass: "implement",
+          effort: null,
+          applied: false,
+          reasons: ["default_class"],
+          group: {
+            id: "cheap",
+            name: "Cheap",
+            via: "picker",
+            chosen: 1,
+            member: chosen,
+            skipped: [
+              {
+                index: 0,
+                instanceId: ProviderInstanceId.make("codex_fake"),
+                model: "codex-fake-1",
+                reason: "usage_exhausted",
+              },
+            ],
+          },
+        } as const;
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          runId: parentRunId,
+          parentNodeId,
+          origin: "app_owned",
+          createdBy: "agent",
+          driver: ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId: chosen.instanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Review the change.",
+          title: null,
+          model: chosen.model,
+          status: "running",
+          result: null,
+          startedAt: null,
+          completedAt: null,
+        };
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.sync(() => accepted),
+            assertProviderInstanceEnabled: () => Effect.void,
+            isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+            getThreadRecords: (threadId) =>
+              Effect.succeed(
+                threadId === parentThreadId
+                  ? parentProjection(delegated ? [task] : [])
+                  : childProjection,
+              ),
+            dispatch: (command) =>
+              Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    delegated = true;
+                  }),
+                ),
+                Effect.as({
+                  sequence: 1,
+                  storedEvents: [
+                    {
+                      sequence: 1,
+                      commandId: null,
+                      event: { type: "subagent.updated", payload: task },
+                    },
+                  ],
+                } as never),
+              ),
+          }),
+          ServerSettings.layerTest({
+            routingGroups: [{ id: "cheap", name: "Cheap", members: [chosen], strategy: "order" }],
+          }),
+          providerRegistryLayer([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+          ]),
+          adapterRegistryLayer([codexInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        const layer = OrchestratorMcpService.layer.pipe(
+          Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+          Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          Layer.provide(
+            Layer.mock(RoutingPolicy.RoutingPolicy)({
+              resolveGroup: (input) =>
+                input.groupId === "gone"
+                  ? Effect.fail(
+                      new RoutingPolicy.RoutingGroupUnavailableError({
+                        groupId: "gone",
+                        groupName: null,
+                        skipped: [],
+                      }),
+                    )
+                  : Ref.update(resolved, (inputs) => [...inputs, input]).pipe(
+                      Effect.as({ selection: chosen, decision }),
+                    ),
+            }),
+          ),
+          Layer.provide(layerDependencies),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const both = yield* service
+            .delegateTask(scope, {
+              task: "Review the change.",
+              routingGroupId: "cheap",
+              target: { model: "gpt-5.4" },
+            })
+            .pipe(Effect.flip);
+          assert.equal(both.code, "invalid_request");
+          const gone = yield* service
+            .delegateTask(scope, { task: "Review the change.", routingGroupId: "gone" })
+            .pipe(Effect.flip);
+          assert.equal(gone.code, "model_unavailable");
+          assert.include(gone.message, "no longer exists");
+
+          const request = { task: "Review the change.", routingGroupId: "cheap" } as const;
+          yield* service.delegateTask(scope, { ...request, clientRequestId: "delegate-group" });
+          accepted = true;
+          yield* service.delegateTask(scope, { ...request, clientRequestId: "delegate-group" });
+          const inputs = yield* Ref.get(resolved);
+          assert.equal(inputs.length, 1);
+          assert.include(inputs[0], {
+            groupId: "cheap",
+            via: "picker",
+            runtimeMode: "full-access",
+          });
+          assert.deepEqual([...(inputs[0]?.runnableInstanceIds ?? [])], [codexInstanceId]);
+          const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+            readonly modelSelection: unknown;
+            readonly routing?: unknown;
+          }>;
+          assert.deepEqual(commands[0]?.modelSelection, chosen);
+          assert.deepEqual(commands[0]?.routing, decision);
+
+          const capabilities = yield* service.capabilities(scope);
+          assert.deepEqual(capabilities.routingGroups, [{ id: "cheap", name: "Cheap" }]);
+        }).pipe(Effect.provide(layer));
+      }),
+  );
+
+  it.effect("a team lead delegates only to its members", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      const claudeInstanceId = ProviderInstanceId.make("claude_fake");
+      const lead = { instanceId: codexInstanceId, model: "gpt-5.4" };
+      const member = { instanceId: claudeInstanceId, model: "claude-fake-1" };
+      const routing = {
+        taskClass: "implement",
+        effort: null,
+        applied: false,
+        reasons: [],
+        group: {
+          id: "crew",
+          name: "Crew",
+          via: "picker",
+          team: true,
+          chosen: 0,
+          member: lead,
+          skipped: [],
+        },
+      };
+      const parent = parentProjection([], lead);
+      const teamParent = {
+        ...parent,
+        thread: { ...parent.thread, routing },
+      } as unknown as OrchestrationV2ThreadProjection;
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          hasReceipt: () => Effect.succeed(false),
+          assertProviderInstanceEnabled: () => Effect.void,
+          isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+          getThreadRecords: (threadId) =>
+            Effect.succeed(threadId === parentThreadId ? teamParent : childProjection),
+          dispatch: (command) =>
+            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+              Effect.andThen(Effect.fail(new Error("stop after dispatch") as never)),
+            ),
+        }),
+        ServerSettings.layerTest({
+          routingGroups: [
+            { id: "crew", name: "Crew", members: [lead, member], strategy: "order", team: true },
+            { id: "cheap", name: "Cheap", members: [member], strategy: "order" },
+          ],
+        }),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+          providerSnapshot({
+            instanceId: claudeInstanceId,
+            driver: ProviderDriverKind.make("claudeAgent"),
+            model: "claude-fake-1",
+          }),
+        ]),
+        adapterRegistryLayer([codexInstanceId, claudeInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const layer = OrchestratorMcpService.layer.pipe(
+        Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
+        Layer.provide(layerDependencies),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const outside = yield* service
+          .delegateTask(scope, { task: "Review.", target: { model: "haiku-fake" } })
+          .pipe(Effect.flip);
+        assert.equal(outside.code, "invalid_request");
+        assert.include(outside.message, "model `claude-fake-1`");
+        const grouped = yield* service
+          .delegateTask(scope, { task: "Review.", routingGroupId: "cheap" })
+          .pipe(Effect.flip);
+        assert.equal(grouped.code, "invalid_request");
+        assert.lengthOf(yield* Ref.get(dispatched), 0);
+
+        yield* service
+          .delegateTask(scope, { task: "Review.", target: { model: "claude-fake-1" } })
+          .pipe(Effect.flip);
+        const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+          readonly modelSelection: { readonly instanceId: string; readonly model: string };
+        }>;
+        assert.include(commands[0]?.modelSelection, member);
+
+        const capabilities = yield* service.capabilities(scope);
+        assert.deepEqual(capabilities.routingGroups, [{ id: "cheap", name: "Cheap" }]);
+        assert.deepEqual(capabilities.agentTeam, {
+          name: "Crew",
+          members: [
+            { providerInstanceId: codexInstanceId, model: "gpt-5.4" },
+            { providerInstanceId: claudeInstanceId, model: "claude-fake-1" },
+          ],
+        });
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("seats a Council reviewer only while Council is on", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      const parent = parentProjection([]);
+      const councilOn = yield* Ref.make(false);
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          hasReceipt: () => Effect.succeed(false),
+          assertProviderInstanceEnabled: () => Effect.void,
+          isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+          getThreadRecords: (threadId) =>
+            Ref.get(councilOn).pipe(
+              Effect.map((on) =>
+                threadId !== parentThreadId
+                  ? childProjection
+                  : ({
+                      ...parent,
+                      thread: {
+                        ...parent.thread,
+                        lineage: {
+                          parentThreadId: null,
+                          relationshipToParent: null,
+                          rootThreadId: parentThreadId,
+                        },
+                        council: on
+                          ? { target: 9, maxRounds: 10, reviewers: "auto", since: 0 }
+                          : null,
+                      },
+                    } as unknown as OrchestrationV2ThreadProjection),
+              ),
+            ),
+          dispatch: (command) =>
+            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+              Effect.andThen(Effect.fail(new Error("stop after dispatch") as never)),
+            ),
+        }),
+        ServerSettings.layerTest({}),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+        ]),
+        adapterRegistryLayer([codexInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const layer = OrchestratorMcpService.layer.pipe(
+        Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
+        Layer.provide(layerDependencies),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const refused = yield* service
+          .delegateTask(scope, { task: "Review the parser.", councilLens: "correctness" })
+          .pipe(Effect.flip);
+        assert.equal(refused.code, "invalid_request");
+        assert.include(refused.message, "Council is off");
+        assert.lengthOf(yield* Ref.get(dispatched), 0);
+
+        yield* Ref.set(councilOn, true);
+        yield* service
+          .delegateTask(scope, { task: "Review the parser.", councilLens: "correctness" })
+          .pipe(Effect.flip);
+        const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+          readonly task: string;
+          readonly title?: string;
+          readonly councilLens?: string;
+        }>;
+        assert.equal(commands[0]?.councilLens, "correctness");
+        assert.equal(commands[0]?.title, "Council: correctness");
+        assert.include(commands[0]?.task, "Council score: 7.5/10");
+        assert.include(commands[0]?.task, "Review the parser.");
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  describe("a delegated role picks the child's model", () => {
+    const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+    const effortModel = (slug: string, id: string, levels: ReadonlyArray<string>, def: string) => ({
+      slug,
+      name: slug,
+      isCustom: false,
+      capabilities: {
+        optionDescriptors: [
+          {
+            id,
+            label: "Effort",
+            type: "select",
+            options: levels.map((level) => ({ id: level, label: level, isDefault: level === def })),
+          },
+        ],
+      },
+    });
+    const providers = [
+      {
+        ...providerSnapshot({
+          instanceId: codexInstanceId,
+          driver: ProviderDriverKind.make("codex"),
+        }),
+        models: [
+          effortModel(
+            "gpt-6.1-sol",
+            "reasoningEffort",
+            ["low", "medium", "high", "xhigh"],
+            "medium",
+          ),
+          effortModel("gpt-6-luna", "reasoningEffort", ["low", "medium", "high", "xhigh"], "high"),
+        ],
+      },
+      {
+        ...providerSnapshot({
+          instanceId: claudeInstanceId,
+          driver: ProviderDriverKind.make("claudeAgent"),
+        }),
+        models: [
+          effortModel(
+            "claude-opus-5-5",
+            "effort",
+            ["low", "medium", "high", "xhigh", "max"],
+            "high",
+          ),
+          effortModel(
+            "claude-sonnet-5-5",
+            "effort",
+            ["low", "medium", "high", "xhigh", "max"],
+            "high",
+          ),
+        ],
+      },
+    ] as unknown as ReadonlyArray<ServerProvider>;
+    const sol = (effort: string, model = "gpt-6.1-sol") => ({
+      instanceId: codexInstanceId,
+      model,
+      options: [{ id: "reasoningEffort", value: effort }],
+    });
+    const auto = (provider: boolean) => ({
+      enabled: true,
+      allowModelSwitch: provider,
+      allowProviderSwitch: provider,
+    });
+    const sonnetHigh = {
+      instanceId: claudeInstanceId,
+      model: "claude-sonnet-5-5",
+      options: [{ id: "effort", value: "high" }],
+    };
+
+    it.effect.each<{
+      readonly name: string;
+      readonly autoRouting: ReturnType<typeof auto> | { readonly enabled: false };
+      readonly parentEffort: string;
+      readonly parentModel?: string;
+      readonly input: Partial<OrchestratorMcpDelegateTaskInput>;
+      readonly replay?: boolean;
+      readonly modelSelection: unknown;
+      readonly routing?: {
+        readonly role: RouteDecision["role"];
+        readonly effort: RouteDecision["effort"];
+        readonly switched: string;
+      };
+    }>([
+      {
+        name: "no role keeps the parent's model",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: {},
+        modelSelection: sol("xhigh"),
+      },
+      {
+        name: "implementation keeps the parent's model",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "implementation" },
+        modelSelection: sol("xhigh"),
+      },
+      {
+        name: "review moves to another vendor at high",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review" },
+        modelSelection: sonnetHigh,
+        routing: { role: "review", effort: "high", switched: "provider" },
+      },
+      {
+        name: "review in place raises low to high",
+        autoRouting: auto(false),
+        parentEffort: "low",
+        input: { role: "review" },
+        modelSelection: sol("high"),
+        routing: { role: "review", effort: "high", switched: "provider" },
+      },
+      {
+        name: "review in place raises medium to high",
+        autoRouting: auto(false),
+        parentEffort: "medium",
+        parentModel: "gpt-6-luna",
+        input: { role: "review" },
+        modelSelection: sol("high", "gpt-6-luna"),
+        routing: { role: "review", effort: "high", switched: "provider" },
+      },
+      {
+        name: "review in place keeps xhigh",
+        autoRouting: auto(false),
+        parentEffort: "xhigh",
+        input: { role: "review" },
+        modelSelection: sol("xhigh"),
+        routing: { role: "review", effort: "high", switched: "provider" },
+      },
+      {
+        name: "research runs at the readonly effort",
+        autoRouting: auto(false),
+        parentEffort: "xhigh",
+        input: { role: "research" },
+        modelSelection: sol("low"),
+        routing: { role: "research", effort: "low", switched: "none" },
+      },
+      {
+        name: "a target model wins over the role",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review", target: { model: "gpt-6.1-sol" } },
+        modelSelection: sol("xhigh"),
+      },
+      {
+        name: "target options win over the role",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review", target: { options: [{ id: "reasoningEffort", value: "high" }] } },
+        modelSelection: sol("high"),
+      },
+      {
+        name: "a routing group wins over the role",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review", routingGroupId: "deep" },
+        modelSelection: { instanceId: claudeInstanceId, model: "claude-opus-5-5" },
+      },
+      {
+        name: "Auto off keeps the parent's model",
+        autoRouting: { enabled: false },
+        parentEffort: "xhigh",
+        input: { role: "review" },
+        modelSelection: sol("xhigh"),
+      },
+      {
+        name: "a replay does not route again",
+        autoRouting: auto(true),
+        parentEffort: "xhigh",
+        input: { role: "review" },
+        replay: true,
+        modelSelection: sol("xhigh"),
+      },
+    ])("$name", (row) =>
+      Effect.gen(function* () {
+        const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        let delegated = false;
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          runId: parentRunId,
+          parentNodeId,
+          origin: "app_owned",
+          createdBy: "agent",
+          driver: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Look over the change.",
+          title: null,
+          model: "gpt-6.1-sol",
+          status: "running",
+          result: null,
+          startedAt: null,
+          completedAt: null,
+        };
+        const parent = sol(row.parentEffort, row.parentModel);
+        const registry = providerRegistryLayer(providers);
+        const settings = ServerSettings.layerTest({
+          autoRouting: row.autoRouting,
+          routingGroups: [
+            {
+              id: "deep",
+              name: "Deep",
+              members: [{ instanceId: claudeInstanceId, model: "claude-opus-5-5" }],
+              strategy: "order",
+              rank: "quota",
+            },
+          ],
+        });
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.succeed(row.replay === true),
+            assertProviderInstanceEnabled: () => Effect.void,
+            isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+            getThreadRecords: (threadId) =>
+              Effect.succeed(
+                threadId === parentThreadId
+                  ? parentProjection(delegated ? [task] : [], parent)
+                  : childProjection,
+              ),
+            dispatch: (command) =>
+              Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    delegated = true;
+                  }),
+                ),
+                Effect.as({
+                  sequence: 1,
+                  storedEvents: [
+                    {
+                      sequence: 1,
+                      commandId: null,
+                      event: { type: "subagent.updated", payload: task },
+                    },
+                  ],
+                } as never),
+              ),
+          }),
+          settings,
+          registry,
+          adapterRegistryLayer([codexInstanceId, claudeInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        const layer = OrchestratorMcpService.layer.pipe(
+          Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+          Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          Layer.provide(
+            RoutingPolicy.layer.pipe(
+              Layer.provide(Layer.mergeAll(ModelManifest.layerTest, registry, settings)),
+            ),
+          ),
+          Layer.provide(layerDependencies),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          yield* service.delegateTask(scope, {
+            task: "Look over the change.",
+            clientRequestId: "delegate-role",
+            ...row.input,
+          });
+          const [command] = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+            readonly modelSelection: unknown;
+            readonly routing?: RouteDecision;
+            readonly delegatedRole?: string;
+          }>;
+          assert.deepEqual(command?.modelSelection, row.modelSelection);
+          assert.equal(command?.delegatedRole, row.input.role === "review" ? "review" : undefined);
+          if (row.input.routingGroupId !== undefined) {
+            assert.include(command?.routing?.group, { id: "deep", rank: "quota" });
+            assert.isUndefined(command?.routing?.role);
+            return;
+          }
+          if (row.routing === undefined) return assert.isUndefined(command?.routing);
+          const routing = command?.routing;
+          const recorded: unknown = {
+            role: routing?.role,
+            effort: routing?.effort,
+            switched: routing?.model?.switched,
+          };
+          assert.deepEqual(recorded, row.routing);
+        }).pipe(Effect.provide(layer));
+      }),
+    );
+
+    type Prior = "review" | "research" | "user" | "agent" | "scheduled";
+    it.effect.each<{
+      readonly name: string;
+      readonly prior: ReadonlyArray<Prior>;
+      readonly role?: OrchestratorMcpDelegateTaskInput["role"];
+      readonly replay?: boolean;
+      readonly parallel?: boolean;
+      readonly refused?: boolean;
+    }>([
+      { name: "a first review goes out", prior: [] },
+      { name: "a third review goes out", prior: ["review", "review"] },
+      {
+        name: "a fourth review is refused",
+        prior: ["review", "review", "review"],
+        refused: true,
+      },
+      {
+        name: "the user's reply starts the count again",
+        prior: ["review", "review", "review", "user"],
+      },
+      {
+        name: "reviews since the user's reply still count",
+        prior: ["review", "user", "review", "review", "review"],
+        refused: true,
+      },
+      {
+        name: "an agent's message does not start the count again",
+        prior: ["review", "review", "review", "agent"],
+        refused: true,
+      },
+      {
+        name: "a scheduled delivery does not start the count again",
+        prior: ["review", "review", "review", "scheduled"],
+        refused: true,
+      },
+      { name: "other roles do not count", prior: ["research", "research", "research"] },
+      {
+        name: "a task in another role is not capped",
+        prior: ["review", "review", "review"],
+        role: "research",
+      },
+      {
+        name: "a replay of an accepted review is not counted again",
+        prior: ["review", "review", "review"],
+        replay: true,
+      },
+      {
+        name: "parallel reviews cannot all take the last round",
+        prior: ["review", "review"],
+        parallel: true,
+        refused: true,
+      },
+    ])("$name", (row) =>
+      Effect.gen(function* () {
+        const dispatched = yield* Ref.make(0);
+        const at = (index: number) => DateTime.makeUnsafe(Date.UTC(2026, 10, 15, 10, index));
+        const record = (kind: Prior, index: number) =>
+          kind === "user" || kind === "agent" || kind === "scheduled"
+            ? {
+                id: MessageId.make(`message:${index}`),
+                role: "user",
+                createdBy: kind === "agent" ? "agent" : "user",
+                ...(kind === "scheduled"
+                  ? { scheduledTaskId: ScheduledTaskId.make("scheduled-task:daily") }
+                  : {}),
+                createdAt: at(index),
+              }
+            : {
+                id: NodeId.make(`node:task-${index}`),
+                origin: "app_owned",
+                status: "completed",
+                ...(kind === "review" ? { delegatedRole: "review" } : {}),
+                startedAt: at(index),
+                updatedAt: at(index),
+              };
+        const records = yield* Ref.make(row.prior.map(record));
+        const isMessage = (entry: ReturnType<typeof record>) => "createdBy" in entry;
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          origin: "app_owned",
+          childThreadId,
+          driver: ProviderDriverKind.make("codex"),
+          model: "gpt-6.1-sol",
+          status: "running",
+          result: null,
+        };
+        const parent = sol("high");
+        const registry = providerRegistryLayer(providers);
+        const settings = ServerSettings.layerTest({ autoRouting: { enabled: false } });
+        const layer = OrchestratorMcpService.layer.pipe(
+          Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+          Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          Layer.provide(
+            RoutingPolicy.layer.pipe(
+              Layer.provide(Layer.mergeAll(ModelManifest.layerTest, registry, settings)),
+            ),
+          ),
+          Layer.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              NodeCrypto.layer,
+              Layer.mock(ThreadManagementService.ThreadManagementService)({
+                hasReceipt: () => Effect.succeed(row.replay === true),
+                assertProviderInstanceEnabled: () => Effect.void,
+                isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+                getThreadRecords: (threadId) =>
+                  Ref.get(records).pipe(
+                    Effect.map((entries) =>
+                      threadId === parentThreadId
+                        ? parentProjection(
+                            [...entries.filter((entry) => !isMessage(entry)), task],
+                            parent,
+                            entries.filter(isMessage),
+                          )
+                        : childProjection,
+                    ),
+                  ),
+                // Yields before recording so a parallel call would read the old count.
+                dispatch: () =>
+                  Effect.yieldNow.pipe(
+                    Effect.andThen(Ref.update(dispatched, (count) => count + 1)),
+                    Effect.andThen(
+                      Ref.update(records, (entries) => [...entries, record("review", 30)]),
+                    ),
+                    Effect.as({
+                      sequence: 1,
+                      storedEvents: [
+                        {
+                          sequence: 1,
+                          commandId: null,
+                          event: { type: "subagent.updated", payload: task },
+                        },
+                      ],
+                    } as never),
+                  ),
+              }),
+              settings,
+              registry,
+              adapterRegistryLayer([codexInstanceId, claudeInstanceId]),
+              Layer.mock(ProjectService.ProjectService)({}),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+              Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+            ),
+          ),
+        );
+
+        const results = yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const call = (clientRequestId: string) =>
+            service
+              .delegateTask(scope, {
+                task: "Look over the fixes.",
+                clientRequestId,
+                role: row.role ?? "review",
+              })
+              .pipe(Effect.flip, Effect.option);
+          return yield* Effect.all(
+            row.parallel === true
+              ? [call("review-again"), call("review-too")]
+              : [call("review-again")],
+            { concurrency: "unbounded" },
+          );
+        }).pipe(Effect.provide(layer));
+        const refusals = results.filter(Option.isSome);
+        assert.equal(yield* Ref.get(dispatched), results.length - refusals.length);
+        assert.equal(refusals.length, row.refused === true ? 1 : 0);
+        if (row.refused !== true) return;
+        const error = Option.getOrThrow(refusals[0]!);
+        assert.equal(error.code, "invalid_request");
+        assert.include(error.message, "Give the user the remaining findings");
+      }),
+    );
+  });
+
   describe("scheduled tasks at modes above the caller's", () => {
     const projectId = ProjectId.make("project:scheduled");
     const boundThreadId = ThreadId.make("thread:scheduled-bound");
@@ -3295,6 +4250,7 @@ describe("OrchestratorMcpService provider resolution", () => {
     ) =>
       OrchestratorMcpService.layer.pipe(
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
         Layer.provide(
           Layer.mock(GitVcsDriver.GitVcsDriver)({
             resolvePrimaryRemoteName: () => Effect.succeed("origin"),
@@ -3506,6 +4462,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       lastRunError: null,
       runCount: 0,
     };
+    const officeMember = { instanceId: ProviderInstanceId.make("claude"), model: "opus" };
     const client: McpInvocationScope = {
       environmentId: EnvironmentId.make("environment:scheduled-base"),
       requestNamespace: "client:scheduled-base",
@@ -3526,6 +4483,7 @@ describe("OrchestratorMcpService provider resolution", () => {
     ) =>
       OrchestratorMcpService.layer.pipe(
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
         Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)(git)),
         Layer.provide(
           Layer.mergeAll(
@@ -3534,7 +4492,11 @@ describe("OrchestratorMcpService provider resolution", () => {
             Layer.mock(ThreadManagementService.ThreadManagementService)({
               getThreadShell: () => Effect.succeed(null),
             }),
-            ServerSettings.layerTest(),
+            ServerSettings.layerTest({
+              routingGroups: [
+                { id: "office", name: "Office", members: [officeMember], strategy: "order" },
+              ],
+            }),
             Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
             Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
               list: () => Effect.succeed([]),
@@ -3613,6 +4575,63 @@ describe("OrchestratorMcpService provider resolution", () => {
         assert.deepEqual(
           (yield* Ref.get(inputs)).map((input) => input.title),
           [title],
+        );
+      }),
+    );
+
+    it.effect("a routing group seeds new-thread runs and leaves with a thread binding", () =>
+      Effect.gen(function* () {
+        const inputs = yield* Ref.make<ReadonlyArray<ScheduledTaskUpsertInput>>([]);
+        const withTask = (task: ScheduledTask) =>
+          OrchestratorMcpService.OrchestratorMcpService.pipe(
+            Effect.provide(
+              service(
+                masterRepository,
+                Ref.makeUnsafe<ReadonlyArray<ScheduledTask["workspaceStrategy"]>>([]),
+                task,
+                inputs,
+              ),
+            ),
+          );
+        const mcp = yield* withTask(existing);
+        yield* mcp.scheduleTask(client, {
+          projectId,
+          prompt: "Digest",
+          schedule,
+          routingGroupId: "office",
+        });
+        const unknown = yield* mcp
+          .scheduleTask(client, { projectId, prompt: "Digest", schedule, routingGroupId: "gone" })
+          .pipe(Effect.flip);
+        assert.include(unknown.message, "No routing group gone");
+
+        const grouped = yield* withTask({ ...existing, routingGroupId: "deleted-later" });
+        // An unrelated edit keeps the group without checking it still exists.
+        yield* grouped.updateScheduledTask(client, {
+          scheduledTaskId: existing.id,
+          prompt: "Digest v2",
+        });
+        yield* grouped.updateScheduledTask(client, {
+          scheduledTaskId: existing.id,
+          routingGroupId: null,
+        });
+        const bound = yield* withTask({
+          ...existing,
+          threadId: ThreadId.make("thread:scheduled-base"),
+          threadMode: "continue",
+        });
+        const refused = yield* bound
+          .updateScheduledTask(client, { scheduledTaskId: existing.id, routingGroupId: "office" })
+          .pipe(Effect.flip);
+        assert.include(refused.message, "only to runs that start a thread");
+
+        assert.deepEqual(
+          (yield* Ref.get(inputs)).map((input) => [input.routingGroupId, input.modelSelection]),
+          [
+            ["office", officeMember],
+            ["deleted-later", existing.modelSelection],
+            [null, existing.modelSelection],
+          ],
         );
       }),
     );
@@ -4290,6 +5309,7 @@ describe("OrchestratorMcpService thread lookup", () => {
     client: { sessionId: "thread-lookup", label: "Claude Code", access: "full-access" },
     capabilities: new Set(["orchestration"]),
     issuedAt: 1,
+    linkedEnvironments: false,
   };
   const service = (
     shells: ReadonlyArray<OrchestrationV2ThreadShell>,
@@ -4365,6 +5385,36 @@ describe("OrchestratorMcpService thread lookup", () => {
     }),
   );
 
+  it.effect("tells an agent steering a finished thread to start a new turn instead", () =>
+    Effect.gen(function* () {
+      const sent = yield* Ref.make(0);
+      return yield* Effect.gen(function* () {
+        const mcp = yield* OrchestratorMcpService.OrchestratorMcpService;
+        for (const mode of ["steer", "restart"] as const) {
+          const error = yield* mcp
+            .sendToThread(client, { threadId: launched.id, message: "hello", mode })
+            .pipe(Effect.flip);
+          assert.equal(error.code, "thread_not_sendable");
+          assert.include(error.message, 'mode: "auto"');
+          assert.include(error.message, '"queue"');
+        }
+      }).pipe(
+        Effect.provide(
+          service([launched], sent, {
+            getProjectThreadRecords: () => Effect.succeed(idleThreadProjection(launched)),
+            sendToThread: (input) =>
+              Effect.fail(
+                new ThreadManagementService.ThreadManagementNoSteerableRunError({
+                  threadId: input.threadId,
+                  mode: input.mode === "restart" ? "restart" : "steer",
+                }),
+              ),
+          }),
+        ),
+      );
+    }),
+  );
+
   it.effect("records the linked environment's thread that sent a message", () =>
     Effect.gen(function* () {
       const target = liveThreadShell(ThreadId.make("thread:target"));
@@ -4411,6 +5461,67 @@ describe("OrchestratorMcpService thread lookup", () => {
       assert.deepStrictEqual(fromLink?.linkedSender, sender);
       assert.isUndefined(fromLink?.senderThreadId);
       assert.isUndefined((yield* sendAs(linked()))?.linkedSender);
+    }),
+  );
+
+  it.effect.each<{
+    readonly name: string;
+    readonly review: boolean;
+    readonly agentSends: number;
+    readonly userSends?: number;
+    readonly refused?: boolean;
+  }>([
+    { name: "a review's second round goes out", review: true, agentSends: 1 },
+    { name: "a review's third round goes out", review: true, agentSends: 2 },
+    { name: "a review's fourth round is refused", review: true, agentSends: 3, refused: true },
+    { name: "a child that is not a review is not capped", review: false, agentSends: 3 },
+    { name: "the user's own sends are not rounds", review: true, agentSends: 2, userSends: 3 },
+  ])("$name", (row) =>
+    Effect.gen(function* () {
+      const child = liveThreadShell(ThreadId.make("thread:review-child"));
+      const projection = idleThreadProjection(child);
+      const message = (index: number, createdBy: "agent" | "user") => ({
+        id: MessageId.make(`message:${createdBy}-${index}`),
+        role: "user",
+        createdBy,
+      });
+      const messages = [
+        ...Array.from({ length: row.agentSends }, (_, index) => message(index, "agent")),
+        ...Array.from({ length: row.userSends ?? 0 }, (_, index) => message(index, "user")),
+      ];
+      const sent = yield* Ref.make(0);
+      const result = yield* Effect.gen(function* () {
+        const mcp = yield* OrchestratorMcpService.OrchestratorMcpService;
+        return yield* mcp
+          .sendToThread(client, { threadId: child.id, message: "Look again." })
+          .pipe(Effect.flip, Effect.option);
+      }).pipe(
+        Effect.provide(
+          service([child], sent, {
+            getProjectThreadRecords: () =>
+              Effect.succeed({
+                ...projection,
+                thread: {
+                  ...projection.thread,
+                  ...(row.review ? { delegatedRole: "review" as const } : {}),
+                },
+              }),
+            getThreadRecords: () => Effect.succeed({ messages } as never),
+            sendToThread: () =>
+              Ref.update(sent, (count) => count + 1).pipe(
+                Effect.as({
+                  run: { id: RunId.make("run:sent"), status: "running" },
+                  delivery: "started",
+                } as never),
+              ),
+          }),
+        ),
+      );
+      assert.equal(yield* Ref.get(sent), row.refused === true ? 0 : 1);
+      if (row.refused !== true) return assert.isTrue(Option.isNone(result));
+      const error = Option.getOrThrow(result);
+      assert.equal(error.code, "thread_not_sendable");
+      assert.include(error.message, "Give the user the remaining findings");
     }),
   );
 
@@ -4478,11 +5589,18 @@ describe("OrchestratorMcpService thread list", () => {
     capabilities: new Set(["orchestration"]),
     issuedAt: 1,
   };
-  const shell = (id: string, projectId: string, snoozed: boolean, waiting = false) => ({
+  const shell = (
+    id: string,
+    projectId: string,
+    snoozed: boolean,
+    waiting = false,
+    pinned = false,
+  ) => ({
     ...liveThreadShell(ThreadId.make(id)),
     projectId: ProjectId.make(projectId),
     status: "completed" as const,
     snoozedUntil: snoozed ? DateTime.makeUnsafe("2099-01-01T00:00:00Z") : null,
+    pinnedAt: pinned ? DateTime.makeUnsafe("2026-01-01T00:00:00Z") : null,
     blockedOnThreadWait: waiting,
     pendingBackgroundTasks: waiting
       ? [
@@ -4501,7 +5619,7 @@ describe("OrchestratorMcpService thread list", () => {
   const shells = [
     shell("thread:a-snoozed", "project:a", true),
     shell("thread:a-awake", "project:a", false),
-    shell("thread:b-snoozed", "project:b", true, true),
+    shell("thread:b-snoozed", "project:b", true, true, true),
     {
       ...shell("thread:a-awaiting-command", "project:a", false),
       activityRunStatus: null,
@@ -4573,6 +5691,10 @@ describe("OrchestratorMcpService thread list", () => {
           ["thread:a-snoozed", "project:a"],
           ["thread:b-snoozed", "project:b"],
         ],
+      );
+      assert.deepStrictEqual(
+        listed.threads.map((thread) => thread.pinned),
+        [false, true],
       );
       assert.deepStrictEqual(
         listed.threads.map((thread) => [thread.blockedOnThreadWait, thread.pendingBackgroundTasks]),

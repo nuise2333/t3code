@@ -4,6 +4,8 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
 import { CircleAlertIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import { ComposerAgentTeamControl } from "./ComposerAgentTeamControl";
+import { ComposerThreadAssists, type ThreadAssistsState } from "./ComposerThreadAssists";
 import { ComposerControl } from "./ComposerControl";
 import {
   ComposerFooterModeControls,
@@ -11,8 +13,23 @@ import {
   type RuntimeModeOption,
 } from "./ComposerFooterControls";
 import {
+  autoEffortOffered,
+  autoEffortSupported,
+  autoRoutingNote,
+  routedEffortDisplay,
+  pickerRoutingGroups,
+  routingProviderSource,
+  routedGroupDisplay,
+  routedModelDisplay,
+  threadTeamChoices,
+} from "@t3tools/client-runtime/routing";
+import { threadAgentTeamRef } from "@t3tools/shared/agentTeam";
+import { useNavigate } from "@tanstack/react-router";
+import {
   type EnvironmentId,
   type ModelSelection,
+  type RouteDecision,
+  type ThreadAgentTeam,
   type ProviderDriverKind,
   type ProviderInstanceId,
   type RuntimeMode,
@@ -23,11 +40,18 @@ import { cn } from "~/lib/utils";
 import { resolveComposerTraitsInput } from "./composerProviderState";
 import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import {
   ComposerEffortColumn,
+  type ComposerEffortRouting,
   ComposerPickerFooter,
+  ComposerRoutingGroupColumn,
   describeComposerEffort,
 } from "./ComposerModelEffort";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { useServerConfigs } from "../../state/entities";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import type { useComposerProviderModel } from "./useComposerProviderModel";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 
@@ -75,6 +99,11 @@ export function ComposerControlsBar(props: {
   selectedModelSelection: ModelSelection;
   onProviderModelSelect: ChatComposerProps["onProviderModelSelect"];
   activeThreadModelSelection: ChatComposerProps["activeThreadModelSelection"];
+  activeThreadRouting: RouteDecision | null | undefined;
+  /** The team the user turned on (or off, null) after launch. */
+  activeThreadAgentTeam: ThreadAgentTeam | null | undefined;
+  /** The running thread's token saver and Council. */
+  activeThreadAssists: ThreadAssistsState | undefined;
   selectedModelForPickerWithCustomFallback: string;
   lockedProvider: ChatComposerProps["lockedProvider"];
   lockedContinuationGroupKey: string | null;
@@ -161,7 +190,214 @@ export function ComposerControlsBar(props: {
     promptUltrathink,
     onPromptEdit,
   });
-  const effort = describeComposerEffort(traitsInput, props.effortDisplay, controlSize);
+  const serverConfig = useServerConfigs().get(environmentId);
+  const autoOffered = autoEffortOffered({
+    capability: serverConfig?.environment.capabilities.autoRouting,
+    settingEnabled: serverConfig?.settings.autoRouting?.enabled,
+  });
+  const draftEffortManual = useComposerDraftStore((store) =>
+    draftId ? store.getComposerDraft(draftId)?.effortManual === true : false,
+  );
+  const draftModelExplicit = useComposerDraftStore((store) =>
+    draftId ? store.getComposerDraft(draftId)?.modelSelectionExplicit === true : false,
+  );
+  const setEffortManual = useComposerDraftStore((store) => store.setEffortManual);
+  const setRoutingGroup = useComposerDraftStore((store) => store.setRoutingGroup);
+  const draftRoutingGroupId = useComposerDraftStore((store) =>
+    routeKind === "draft" && draftId
+      ? (store.getComposerDraft(draftId)?.routingGroupId ?? null)
+      : null,
+  );
+  const nowMs = Date.parse(useNowMinute());
+  const providerModels = providerInstanceEntries.map((entry) =>
+    routingProviderSource(entry.snapshot, nowMs),
+  );
+  const routingGroups = pickerRoutingGroups({
+    newThread: routeKind === "draft" && draftId !== null && draftId !== undefined,
+    multiModel: multipleModelSelections !== null,
+    capability: serverConfig?.environment.capabilities.routingGroups,
+    groups: serverConfig?.settings.routingGroups,
+    providers: providerModels,
+  });
+  const pickedGroup =
+    draftRoutingGroupId === null
+      ? null
+      : (routingGroups.find((group) => group.id === draftRoutingGroupId) ?? {
+          id: draftRoutingGroupId,
+          name: "Missing group",
+          team: false,
+          summary: null,
+        });
+  const clearPickedGroup = () => {
+    if (draftId && draftRoutingGroupId !== null) setRoutingGroup(draftId, null);
+  };
+  // Groups launch one model, so a second model leaves the group for a manual pick.
+  const handleMultipleModelSelectionsChange = useStableCallback(
+    (selections: ReadonlyArray<ModelSelection> | null) => {
+      if (selections !== null) clearPickedGroup();
+      onMultipleModelSelectionsChange(selections);
+    },
+  );
+  // Re-picking the group's first member is still a manual pick of that model.
+  const handleProviderModelSelect = useStableCallback(
+    (...args: Parameters<typeof onProviderModelSelect>) => {
+      clearPickedGroup();
+      onProviderModelSelect(...args);
+    },
+  );
+  const handleRoutingGroupSelect = useStableCallback((groupId: string) => {
+    const group = routingGroups.find((candidate) => candidate.id === groupId);
+    if (draftId && group)
+      setRoutingGroup(draftId, { id: group.id, placeholder: group.placeholder });
+  });
+  const routedGroup =
+    routeKind === "server"
+      ? routedGroupDisplay({
+          routing: props.activeThreadRouting,
+          agentTeam: props.activeThreadAgentTeam,
+          selection: selectedModelSelection,
+          providers: providerModels,
+        })
+      : null;
+  const routedModel =
+    routeKind === "server"
+      ? routedModelDisplay({
+          routing: props.activeThreadRouting,
+          selection: selectedModelSelection,
+          providers: providerModels,
+        })
+      : null;
+  const selectedDescriptors = selectedProviderModels.find((model) => model.slug === selectedModel)
+    ?.capabilities?.optionDescriptors;
+  const routedDisplay =
+    routeKind === "server"
+      ? routedEffortDisplay({
+          routing: props.activeThreadRouting,
+          selection: selectedModelSelection,
+          descriptors: selectedDescriptors,
+        })
+      : null;
+  const effortRouting: ComposerEffortRouting =
+    pickedGroup === null &&
+    routeKind === "draft" &&
+    draftId &&
+    autoOffered &&
+    multipleModelSelections === null &&
+    autoEffortSupported({
+      driver: selectedProvider,
+      descriptors: selectedDescriptors,
+      selection: selectedModelSelection,
+      ultrathinkPrompt: promptUltrathink !== "none",
+    })
+      ? {
+          kind: "draft",
+          auto: !draftEffortManual,
+          note: autoRoutingNote({
+            capability: serverConfig?.environment.capabilities.autoModelRouting,
+            settings: serverConfig?.settings.autoRouting,
+            modelExplicit: draftModelExplicit,
+          }),
+          onPickAuto: () => setEffortManual(draftId, false),
+        }
+      : routedDisplay
+        ? { kind: "routed", display: routedDisplay }
+        : null;
+  const traitsEffort = describeComposerEffort(
+    traitsInput,
+    props.effortDisplay,
+    controlSize,
+    effortRouting,
+  );
+  const effort = pickedGroup
+    ? {
+        suffix: null,
+        detail: pickedGroup.summary
+          ? pickedGroup.team
+            ? `Agent team: ${pickedGroup.summary}`
+            : `Routing group: a usable member of ${pickedGroup.summary}`
+          : "This routing group no longer exists",
+      }
+    : routedGroup
+      ? {
+          suffix: traitsEffort.suffix,
+          detail: [routedGroup.label, routedGroup.skipped, traitsEffort.detail]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : routedModel
+        ? {
+            suffix: traitsEffort.suffix,
+            detail: [routedModel, traitsEffort.detail].filter(Boolean).join(" · "),
+          }
+        : traitsEffort;
+  const navigate = useNavigate();
+  const updateThreadMetadata = useAtomCommand(
+    threadEnvironment.updateMetadata,
+    "agent team change",
+  );
+  const teamsCapability =
+    serverConfig?.environment.capabilities.agentTeams === true &&
+    serverConfig.environment.capabilities.routingGroups === true;
+  const serverThreadId = routeKind === "server" ? routeThreadRef?.threadId : undefined;
+  const teamChoices =
+    routeKind === "server"
+      ? threadTeamChoices({
+          capability: teamsCapability,
+          groups: serverConfig?.settings.routingGroups,
+          lead: selectedModelSelection,
+          providers: providerModels,
+        })
+      : routingGroups
+          .filter((group) => group.team)
+          .map((group) => ({ id: group.id, name: group.name, summary: group.summary }));
+  const activeTeam =
+    routeKind === "server"
+      ? teamsCapability
+        ? threadAgentTeamRef({
+            routing: props.activeThreadRouting,
+            agentTeam: props.activeThreadAgentTeam,
+            modelSelection: selectedModelSelection,
+          })
+        : null
+      : pickedGroup?.team
+        ? { id: pickedGroup.id, name: pickedGroup.name }
+        : null;
+  const teamDisabledReason =
+    multipleModelSelections !== null ? "Pick one model to work as a team." : null;
+  const handleTeamSelect = useStableCallback((teamId: string | null) => {
+    if (routeKind !== "server") {
+      if (teamId === null) clearPickedGroup();
+      else handleRoutingGroupSelect(teamId);
+      return;
+    }
+    if (serverThreadId === undefined) return;
+    const team = teamChoices.find((choice) => choice.id === teamId);
+    void updateThreadMetadata({
+      environmentId,
+      input: {
+        threadId: serverThreadId,
+        agentTeam: team ? { id: team.id, name: team.name } : null,
+      },
+    });
+  });
+  const openTeamSettings = useStableCallback(() => {
+    void navigate({ to: "/settings/providers", search: { environmentId } });
+  });
+  const showTeamControl =
+    (routeKind === "server" ? serverThreadId !== undefined : Boolean(draftId)) &&
+    (teamChoices.length > 0 || activeTeam !== null);
+  const teamControl = showTeamControl ? (
+    <ComposerAgentTeamControl
+      teams={teamChoices}
+      active={activeTeam}
+      newThread={routeKind !== "server"}
+      size={controlSize}
+      hidden={composerControlsHidden}
+      disabledReason={teamDisabledReason}
+      onSelect={handleTeamSelect}
+      onManage={openTeamSettings}
+    />
+  ) : null;
   const restingBlockDefs = showModeBlock
     ? [
         {
@@ -192,9 +428,9 @@ export function ComposerControlsBar(props: {
       disabled={providerCatalogPending || isSendBusy}
       multipleModelsEnabled={multipleModelsEnabled}
       multipleModelSelections={multipleModelSelections}
-      onMultipleModelSelectionsChange={onMultipleModelSelectionsChange}
+      onMultipleModelSelectionsChange={handleMultipleModelSelectionsChange}
       selectedModelSelection={selectedModelSelection}
-      onProviderModelSelect={onProviderModelSelect}
+      onProviderModelSelect={handleProviderModelSelect}
       activeInstanceId={
         providerCatalogPending
           ? (activeThreadModelSelection?.instanceId ?? selectedInstanceId)
@@ -218,10 +454,28 @@ export function ComposerControlsBar(props: {
       )}
       triggerSuffix={effort.suffix}
       triggerDetail={effort.detail}
+      {...(pickedGroup ? { triggerLabel: pickedGroup.name } : {})}
+      routingGroups={routingGroups}
+      activeRoutingGroupId={draftRoutingGroupId}
+      onRoutingGroupSelect={handleRoutingGroupSelect}
       triggerShortcuts={
         pickerOwnsModeShortcut ? "composer.effort composer.mode" : "composer.effort"
       }
-      effortColumn={<ComposerEffortColumn traits={traitsInput} />}
+      effortColumn={
+        pickedGroup ? (
+          <ComposerRoutingGroupColumn
+            name={pickedGroup.name}
+            summary={pickedGroup.summary}
+            team={pickedGroup.team}
+          />
+        ) : (
+          <ComposerEffortColumn
+            traits={traitsInput}
+            routing={effortRouting}
+            routedGroup={routedGroup}
+          />
+        )
+      }
       footer={
         <ComposerPickerFooter
           traits={traitsInput}
@@ -263,6 +517,14 @@ export function ComposerControlsBar(props: {
   ) : (
     <>
       {composerModelPicker}
+      {teamControl}
+      <ComposerThreadAssists
+        environmentId={environmentId}
+        serverThreadId={serverThreadId}
+        draftId={routeKind === "draft" ? draftId : null}
+        thread={props.activeThreadAssists}
+        size={controlSize}
+      />
 
       <>
         {restingBlockDefs.map((def, index) => {

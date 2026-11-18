@@ -20,7 +20,9 @@ import {
   RunId,
   ThreadId,
   ProjectId,
+  type ModelSelection,
   type OrchestrationV2ThreadProjection,
+  type RouteDecision,
   OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -92,11 +94,14 @@ const normalize = (target: string) => {
   }
   return `/${parts.join("/")}`;
 };
-const layerWorktreeLocation = (worktreesDir = managedWorktreesDir) =>
+const layerWorktreeLocation = (
+  worktreesDir = managedWorktreesDir,
+  settings: Parameters<typeof ServerSettings.layerTest>[0] = {},
+) =>
   Layer.mergeAll(
     Path.layer,
     Layer.mock(ServerConfig.ServerConfig)({ worktreesDir } as ServerConfig.ServerConfig["Service"]),
-    ServerSettings.layerTest(),
+    ServerSettings.layerTest(settings),
   );
 
 function startWithMissingWorktree(
@@ -388,8 +393,19 @@ it.each([
   expect(makeDirectory).toHaveBeenCalledTimes(input.recreated ? 1 : 0);
 });
 
+const teamRouting = (member: ModelSelection): RouteDecision => ({
+  taskClass: "implement",
+  effort: null,
+  applied: false,
+  reasons: [],
+  group: { id: "crew", name: "Crew", via: "picker", team: true, chosen: 0, member, skipped: [] },
+});
+
 function makeLocalCommandHarness(input: {
   readonly text: string;
+  /** The thread launched on its run's model through an agent team that still exists. */
+  readonly agentTeam?: boolean;
+  readonly tokenSaver?: OrchestrationV2ThreadProjection["thread"]["tokenSaver"];
   readonly manualContinuation?: boolean;
   readonly nativeResumeUnsupported?: boolean;
   readonly steeringRestart?: boolean;
@@ -511,6 +527,8 @@ function makeLocalCommandHarness(input: {
       branch: input.worktreePath === undefined ? null : "feature/restore",
       worktreePath: input.worktreePath ?? null,
       lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+      ...(input.agentTeam ? { routing: teamRouting(run.modelSelection) } : {}),
+      ...(input.tokenSaver === undefined ? {} : { tokenSaver: input.tokenSaver }),
     } as OrchestrationV2ThreadProjection["thread"],
     runs: [
       ...(input.previousNativeSession
@@ -1256,7 +1274,26 @@ function makeLocalCommandHarness(input: {
         }),
         IdAllocator.layer,
         Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({}),
-        layerWorktreeLocation(input.worktreesDir),
+        layerWorktreeLocation(
+          input.worktreesDir,
+          input.agentTeam
+            ? {
+                agentTeamLeadGuidance: "Only lead.",
+                routingGroups: [
+                  {
+                    id: "crew",
+                    name: "Crew",
+                    strategy: "order",
+                    team: true,
+                    members: [
+                      run.modelSelection,
+                      { instanceId: ProviderInstanceId.make("claude"), model: "opus-fake" },
+                    ],
+                  },
+                ],
+              }
+            : {},
+        ),
         input.fileSystem === undefined
           ? FileSystem.layerNoop({ exists: () => Effect.succeed(true) })
           : Layer.succeed(FileSystem.FileSystem, input.fileSystem),
@@ -2097,6 +2134,42 @@ effectIt.effect(
     }),
 );
 
+effectIt.effect("gives a team lead its members and the user's guidance on each turn", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Ship the fix",
+      agentTeam: true,
+      sideChat: { contextRun: "delivered" },
+    });
+    yield* harness.start;
+    const text = harness.startTurn.mock.calls[0]?.[0].message.text ?? "";
+    expect(text).toMatch(/^<t3_code_agent_team name="Crew">/);
+    expect(text).toContain("model `opus-fake`");
+    expect(text).toContain("Lead guidance from the user:\nOnly lead.");
+    expect(text.endsWith("\n\nShip the fix")).toBe(true);
+  }),
+);
+
+effectIt.effect("restates the token saver after it changed, and keeps commands verbatim", () =>
+  Effect.gen(function* () {
+    // Changed after every earlier run of the thread, so this turn is the first to carry it.
+    const saver = { packs: ["caveman" as const], level: "lite" as const, changedAt: 8.64e15 };
+    const harness = makeLocalCommandHarness({
+      text: "Ship the fix",
+      agentTeam: true,
+      tokenSaver: saver,
+      sideChat: { contextRun: "delivered" },
+    });
+    yield* harness.start;
+    const text = harness.startTurn.mock.calls[0]?.[0].message.text ?? "";
+    // The team's rules come first, then the token saver, then the user's words.
+    expect(text).toMatch(/^<t3_code_agent_team name="Crew">/);
+    expect(text).toContain("<t3_code_token_saver>\nResponse style");
+    expect(text).toContain("Answer first.");
+    expect(text.endsWith("\n\nShip the fix")).toBe(true);
+  }),
+);
+
 effectIt.effect("sends new steering text when restarting a manual continuation", () =>
   Effect.gen(function* () {
     const harness = makeLocalCommandHarness({
@@ -2267,6 +2340,8 @@ effectIt.effect.each(
         manualContinuation: resuming,
         goalDriver,
         nativeGoals,
+        // A team lead's goal command still goes verbatim.
+        agentTeam: true,
         sideChat: { contextRun: "failed", switchedProvider: true, unsentResume: resuming },
       });
       if (resuming) {

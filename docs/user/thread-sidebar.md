@@ -135,8 +135,8 @@ open.
 
 Threads that are working or waiting on work they will resume from move into a collapsed
 **Working** section below the active list.
-That includes subagents, watched pull requests with checks still running, and background commands or monitors the agent
-says it is waiting on. A dev server or other process an agent leaves running does not keep a thread
+That includes subagents, watched pull requests with checks still running, Claude monitors,
+and background commands or other monitors the agent says it is waiting on. A dev server or other process an agent leaves running does not keep a thread
 there. A thread returns to the top of the active list when it finishes, fails, or needs an approval or
 answer. The Working section lists the thread you last sent work to first. Pinned threads stay in
 the pinned section.
@@ -278,7 +278,9 @@ Before archiving the parent, wait for its delegated tasks to finish or cancel th
 
 Subagent threads started by the agent can't take messages; message the parent
 thread instead. When such a subagent needs an approval or an answer, the parent
-thread asks for it.
+thread asks for it. The agent gets at most three review rounds, whether it sends
+them to one review subagent or delegates a new review each time; after that, it
+hands you the findings still open. Your next message starts the count again.
 
 Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it

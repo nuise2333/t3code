@@ -25,7 +25,7 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { threadEnvironment } from "../../state/threads";
 import { waitForThreadShell } from "../../state/entities";
-import { openRevertConfirm } from "./ChatOverlayHosts";
+import { openRevertConfirm, type RewindEffort } from "./ChatOverlayHosts";
 import { assetEnvironment } from "../../state/assets";
 import { readEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -94,6 +94,7 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     turnCount: number,
     messageId: MessageId,
     restoreFiles?: boolean,
+    effort?: RewindEffort,
   ) => {
     const localApi = readLocalApi();
     if (
@@ -125,7 +126,7 @@ export function useTimelineRewind(input: TimelineRewindInput) {
       return;
     }
     if (restoreFiles === undefined) {
-      openRevertConfirm(routeThreadKey, { turnCount, messageId });
+      openRevertConfirm(routeThreadKey, { turnCount, messageId, effort });
       return;
     }
 
@@ -156,6 +157,20 @@ export function useTimelineRewind(input: TimelineRewindInput) {
       setThreadError(activeThread.id, rewind.error);
       return;
     }
+    if (effort !== undefined) {
+      const raised = { id: effort.optionId, value: effort.value };
+      const options = effort.selection.options ?? [];
+      useComposerDraftStore
+        .getState()
+        .setProviderModelOptions(
+          composerDraftTarget,
+          effort.provider,
+          options.some((option) => option.id === effort.optionId)
+            ? options.map((option) => (option.id === effort.optionId ? raised : option))
+            : [...options, raised],
+          { instanceId: effort.selection.instanceId, model: effort.selection.model },
+        );
+    }
     if (currentRouteThreadKeyRef.current === routeThreadKey) {
       const nextPrompt = rewind.prompt;
       promptRef.current = nextPrompt;
@@ -166,8 +181,13 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     }
   };
   const onRevertToTurnCountStable = useStableCallback(onRevertToTurnCount);
-  const onConfirmRevert = (turnCount: number, messageId: MessageId, restoreFiles: boolean) => {
-    void onRevertToTurnCount(turnCount, messageId, restoreFiles);
+  const onConfirmRevert = (
+    turnCount: number,
+    messageId: MessageId,
+    restoreFiles: boolean,
+    effort: RewindEffort | undefined,
+  ) => {
+    void onRevertToTurnCount(turnCount, messageId, restoreFiles, effort);
   };
   const onConfirmRevertStable = useStableCallback(onConfirmRevert);
 
@@ -215,8 +235,14 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     void onRevertToTurnCountStable(targetTurnCount, messageId);
   };
   const onRevertTimelineTurnStable = useStableCallback(onRevertTimelineTurn);
+  const onRetryWithEffortStable = useStableCallback(
+    (turnCount: number, messageId: MessageId, effort: RewindEffort) => {
+      void onRevertToTurnCountStable(turnCount, messageId, undefined, effort);
+    },
+  );
   return {
     onConfirmRevertStable,
+    onRetryWithEffortStable,
     onForkFromRunStable,
     onRevertTimelineTurnStable,
   };

@@ -38,6 +38,12 @@ import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  CrossVendorModelInput,
+  CrossVendorModelResult,
+  RoutingSummaryInput,
+  RoutingSummaryResult,
+} from "./routing.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -554,6 +560,8 @@ export const WS_METHODS = {
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
   serverCheckOtlpEndpoint: "server.checkOtlpEndpoint",
   serverListTextGeneratorModels: "server.listTextGeneratorModels",
+  serverCrossVendorModel: "server.crossVendorModel",
+  serverRoutingSummary: "server.routingSummary",
   serverPrepareTriage: "server.prepareTriage",
   serverSignalProcess: "server.signalProcess",
   serverReportClientActivity: "server.reportClientActivity",
@@ -1022,6 +1030,18 @@ const WsServerListTextGeneratorModelsRpc = Rpc.make(WS_METHODS.serverListTextGen
   payload: ListTextGeneratorModelsInput,
   success: ListTextGeneratorModelsResult,
   error: Schema.Union([TextGeneratorError, EnvironmentAuthorizationError]),
+});
+
+const WsServerCrossVendorModelRpc = Rpc.make(WS_METHODS.serverCrossVendorModel, {
+  payload: CrossVendorModelInput,
+  success: CrossVendorModelResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerRoutingSummaryRpc = Rpc.make(WS_METHODS.serverRoutingSummary, {
+  payload: RoutingSummaryInput,
+  success: RoutingSummaryResult,
+  error: EnvironmentAuthorizationError,
 });
 
 const WsServerPrepareTriageRpc = Rpc.make(WS_METHODS.serverPrepareTriage, {
@@ -2188,6 +2208,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerCheckOtlpEndpointRpc,
   WsServerListTextGeneratorModelsRpc,
+  WsServerCrossVendorModelRpc,
+  WsServerRoutingSummaryRpc,
   WsServerPrepareTriageRpc,
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,

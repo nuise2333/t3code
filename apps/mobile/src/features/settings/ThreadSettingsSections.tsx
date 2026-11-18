@@ -57,6 +57,13 @@ export function SettingsLabsRouteScreen() {
           setting="fastWorktreeCheckout"
           description="On a Mac, clone new worktrees from a checkout cached in the T3 home folder instead of writing every file. Uses Git’s normal checkout when it can’t. Turning it off deletes the cache."
         />
+        <MachineBetaSection
+          title="Auto effort"
+          icon="brain"
+          capability="autoRouting"
+          setting="autoRouting"
+          description="Adds Auto to the effort picker for new threads. Auto picks Low, Medium or High from your first message, once, and keeps your model. Pick a level to set it yourself."
+        />
       </ScrollView>
     </SettingsScreen>
   );
@@ -238,7 +245,7 @@ export function NewThreadSettingsSection() {
   );
 }
 
-type MachineBetaSetting = "linkedEnvironmentsEnabled" | "fastWorktreeCheckout";
+type MachineBetaSetting = "linkedEnvironmentsEnabled" | "fastWorktreeCheckout" | "autoRouting";
 
 /** One switch per connected machine that offers the beta, since each machine's own setting decides. */
 function MachineBetaSection({
@@ -250,7 +257,7 @@ function MachineBetaSection({
 }: {
   readonly title: string;
   readonly icon: ComponentProps<typeof SettingsSwitchRow>["icon"];
-  readonly capability: "peerLinks" | "fastWorktreeCheckout";
+  readonly capability: "peerLinks" | "fastWorktreeCheckout" | "autoRouting";
   readonly setting: MachineBetaSetting;
   readonly description: string;
 }) {
@@ -271,14 +278,21 @@ function MachineBetaSection({
       <SettingsSection title={`Beta: ${title}`}>
         {supported.map((environment) => {
           const policy = environment.serverConfig?.managedPolicy;
-          const managed = isManagedSettingPath(policy, setting);
+          const managed = isManagedSettingPath(
+            policy,
+            setting === "autoRouting" ? "autoRouting.enabled" : setting,
+          );
           return (
             <SettingsSwitchRow
               key={environment.environmentId}
               icon={icon}
               label={environment.label}
               {...(managed ? { subtitle: `Managed by ${policy?.organization}.` } : {})}
-              value={environment.serverConfig?.settings[setting] === true}
+              value={
+                (setting === "autoRouting"
+                  ? environment.serverConfig?.settings.autoRouting?.enabled
+                  : environment.serverConfig?.settings[setting]) === true
+              }
               disabled={managed || !writable.has(environment.environmentId)}
               onValueChange={(value) =>
                 void updateSettings({
@@ -287,7 +301,9 @@ function MachineBetaSection({
                     patch:
                       setting === "linkedEnvironmentsEnabled"
                         ? { linkedEnvironmentsEnabled: value }
-                        : { fastWorktreeCheckout: value },
+                        : setting === "autoRouting"
+                          ? { autoRouting: { enabled: value } }
+                          : { fastWorktreeCheckout: value },
                   },
                 })
               }

@@ -37,6 +37,9 @@ import { withTurnStartReservation, withWorkspaceLease } from "../workspace/works
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
+import * as AgentTeam from "../routing/AgentTeam.ts";
+import * as ThreadAssists from "../assist/ThreadAssists.ts";
+import { councilApplies, councilStatus, councilUserMessageTimes } from "@t3tools/shared/council";
 import * as ServerSettings from "../serverSettings.ts";
 import { makeRestoreMissingWorktree } from "../workspace/restoreMissingWorktree.ts";
 import * as EventSink from "./EventSink.ts";
@@ -197,6 +200,14 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
+    // Looked up once per server: installing rtk takes a restart to show.
+    const rtkAvailable = yield* Effect.cached(
+      ThreadAssists.rtkInstalled.pipe(
+        Effect.provideService(FileSystem.FileSystem, yield* FileSystem.FileSystem),
+        Effect.orElseSucceed(() => false),
+      ),
+    );
     const restoreMissingWorktree = yield* makeRestoreMissingWorktree;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
 
@@ -831,7 +842,7 @@ export const layer: Layer.Layer<
       });
       let effectiveHandoffs = handoffs;
       let resumeFellBack = false;
-      const userText = projectComposerContextForProvider({
+      const requestText = projectComposerContextForProvider({
         text: providerMessage.text,
         records: providerMessage.context?.records ?? [],
       });
@@ -841,6 +852,58 @@ export const layer: Layer.Layer<
         session.driver === "claudeAgent" ||
         session.providerSession.capabilities.turns.supportsNativeGoals === true;
       const goalCommand = goalDriver && parseGoalCommand(providerMessage) !== null;
+      // A team lead gets its members and the user's guidance on every turn; commands stay verbatim.
+      const teamSettings =
+        goalCommand || requestText.trimStart().startsWith("/")
+          ? null
+          : yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null));
+      const agentTeam =
+        teamSettings === null
+          ? null
+          : AgentTeam.activeAgentTeam({
+              routing: projection.thread.routing,
+              agentTeam: projection.thread.agentTeam,
+              modelSelection: run.modelSelection,
+              groups: teamSettings.routingGroups,
+            });
+      // Council and the token saver ride on plain turns too; commands stay verbatim.
+      const plainTurn = !goalCommand && !requestText.trimStart().startsWith("/");
+      const thread = projection.thread;
+      const council = plainTurn && thread.council && councilApplies(thread) ? thread.council : null;
+      const councilBlock =
+        council === null
+          ? null
+          : yield* projectionStore.getThreadRecords(thread.id, ["messages", "subagents"]).pipe(
+              Effect.map((records) =>
+                ThreadAssists.councilLeadPrompt(
+                  council,
+                  councilStatus({
+                    threadId: thread.id,
+                    council,
+                    subagents: records.subagents,
+                    userMessageTimesMs: councilUserMessageTimes(records.messages),
+                  }),
+                ),
+              ),
+              Effect.orElseSucceed(() => null),
+            );
+      const saverBlock = plainTurn
+        ? ThreadAssists.tokenSaverBlock({
+            saver: thread.tokenSaver,
+            runs: projection.runs,
+            currentRunId: run.id,
+            rtk: yield* rtkAvailable,
+          })
+        : null;
+      const assistBlocks = [
+        agentTeam === null || teamSettings === null
+          ? null
+          : AgentTeam.agentTeamLeadPrompt(agentTeam, teamSettings.agentTeamLeadGuidance),
+        councilBlock,
+        saverBlock,
+      ].filter((block): block is string => block !== null);
+      const userText =
+        assistBlocks.length === 0 ? requestText : [...assistBlocks, requestText].join("\n\n");
       // The provider turn marks cancellation work delivered; restart continuations use their own text or resume natively.
       const noteContinuation = isRestartNoteContinuation(
         run,
@@ -1560,7 +1623,7 @@ export const layer: Layer.Layer<
       const runningRun: OrchestrationV2Run = {
         ...run,
         status: "running",
-        startedAt: now,
+        startedAt: run.startedAt ?? now,
       };
       const runningAttempt: OrchestrationV2RunAttempt = {
         ...attempt,

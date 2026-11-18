@@ -163,6 +163,43 @@ it("drops a hand-edited non-string hidden tag and keeps the rest of the settings
   expect(settings.hideTaggedThreads).toBe(true);
 });
 
+it("drops a malformed routing group alone and keeps the first of a repeated id", () => {
+  const member = { instanceId: "codex", model: "gpt-fake-1" };
+  const settings = decodeServerSettings({
+    routingGroups: [
+      { id: "fast", name: "Fast", members: [member], strategy: "order" },
+      { id: "Bad Id", name: "Bad", members: [member], strategy: "order" },
+      { id: "empty", name: "Empty", members: [], strategy: "order" },
+      { id: "quota", name: "Quota", members: [member], strategy: "quota" },
+      "not a group",
+      { id: "fast", name: "Fast again", members: [member], strategy: "order" },
+      { id: "deep", name: "Deep", members: [member], strategy: "order" },
+      { id: "spread", name: "Spread", members: [member], strategy: "order", rank: "quota" },
+    ],
+    routingGroupRules: { hard: "deep", readonly: "fast" },
+    autoRouting: { enabled: true },
+  });
+  expect(settings.routingGroups.map((group) => [group.id, group.name])).toEqual([
+    ["fast", "Fast"],
+    ["deep", "Deep"],
+    ["spread", "Spread"],
+  ]);
+  expect(settings.routingGroups.at(-1)?.rank).toBe("quota");
+  expect(settings.routingGroupRules).toEqual({ hard: "deep", readonly: "fast" });
+  expect(settings.autoRouting).toEqual({
+    enabled: true,
+    allowModelSwitch: false,
+    allowProviderSwitch: false,
+  });
+  expect(DEFAULT_SERVER_SETTINGS.autoRouting).toEqual({
+    enabled: false,
+    allowModelSwitch: false,
+    allowProviderSwitch: false,
+  });
+  expect(decodeServerSettings({ routingGroupRules: { hard: 42 } }).routingGroupRules).toEqual({});
+  expect(DEFAULT_SERVER_SETTINGS.routingGroups).toEqual([]);
+});
+
 describe("ServerSettings secret providers", () => {
   const onePassword = (account: string) => ({
     kind: "one_password",
@@ -469,17 +506,17 @@ describe("ServerSettings environment icon", () => {
 
 const decodeDeviceHostSettings = Schema.decodeSync(ServerSettings);
 
-// `deviceHosts` as it was decoded before EAS hosts existed: an SSH host needs a target.
+// `deviceHosts` as it was decoded before Expo hosts existed: an SSH host needs a target.
 const decodeOlderDeviceHostSettings = Schema.decodeUnknownSync(
   Schema.Struct({
     deviceHosts: Schema.Array(Schema.Struct({ id: Schema.String, target: Schema.String })),
   }),
 );
 
-it("keeps EAS hosts out of the SSH host list servers and clients before EAS hosts decode", () => {
+it("keeps Expo hosts out of the SSH host list servers and clients before Expo hosts decode", () => {
   const settings = decodeDeviceHostSettings({
     deviceHosts: [{ id: "mini", label: "Mac mini", target: "user@mini" }],
-    easDeviceHosts: [{ kind: "eas", id: "eas", label: "EAS Simulator" }],
+    easDeviceHosts: [{ kind: "eas", id: "eas", label: "Expo Simulators" }],
   });
   const wire = encodeServerSettings(settings);
   expect(decodeOlderDeviceHostSettings(wire).deviceHosts).toEqual([
@@ -490,7 +527,7 @@ it("keeps EAS hosts out of the SSH host list servers and clients before EAS host
 
 it("validates remote device hosts and rejects ambiguous host ids", () => {
   const host = { id: "mini", label: "Mac mini", target: "user@mini", port: 2222 };
-  // Hosts saved before EAS hosts existed have no `kind`; they are SSH hosts.
+  // Hosts saved before Expo hosts existed have no `kind`; they are SSH hosts.
   expect(decodeDeviceHostSettings({ deviceHosts: [host] }).deviceHosts).toEqual([
     { kind: "ssh", ...host },
   ]);

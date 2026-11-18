@@ -573,6 +573,30 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["beta tab autocomplete predict next message claude codex ghost text"],
   },
   {
+    id: "auto-effort-beta",
+    title: "Auto effort",
+    to: "/settings/labs",
+    scope: "environment",
+    searchTerms: ["beta auto effort reasoning routing thinking level cheaper"],
+  },
+  {
+    id: "auto-model-switch-beta",
+    title: "Auto can switch model",
+    to: "/settings/labs",
+    scope: "environment",
+    // Shown inside the Auto effort row only while it is on, so search lands on the parent.
+    targetId: "auto-effort-beta",
+    searchTerms: ["beta auto model switch cheaper stronger tier routing"],
+  },
+  {
+    id: "auto-provider-switch-beta",
+    title: "Auto can switch provider",
+    to: "/settings/labs",
+    scope: "environment",
+    targetId: "auto-effort-beta",
+    searchTerms: ["beta auto provider switch quota usage limit reset routing"],
+  },
+  {
     id: "simlock-hosts",
     title: "Simlock device hosts (alpha)",
     to: "/settings/labs",
@@ -1041,6 +1065,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/providers",
     searchTerms: [
       "usage sources CLIProxyAPI CLI proxy hub quota subscription limits management key add remove",
+    ],
+    providerSettingsOnly: true,
+  },
+  {
+    id: "routing-groups",
+    title: "Routing groups",
+    to: "/settings/providers",
+    searchTerms: [
+      "routing group model group fallback failover order first available usage limit quota auto rules preset",
+    ],
+    providerSettingsOnly: true,
+  },
+  {
+    id: "agent-teams",
+    title: "Agent teams",
+    to: "/settings/providers",
+    searchTerms: [
+      "agent team lead leader workers delegate subagents orchestrate architect multi agent crew lead guidance",
     ],
     providerSettingsOnly: true,
   },

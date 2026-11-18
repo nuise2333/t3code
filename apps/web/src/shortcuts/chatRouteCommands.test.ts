@@ -3,6 +3,8 @@ import type { AnyRouter } from "@tanstack/react-router";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import * as commandPalette from "../commandPaletteBus";
+import { DraftId, useComposerDraftStore } from "../composerDraftStore";
+import * as previewActions from "../components/preview/previewActionBus";
 import * as settings from "../hooks/useSettings";
 import * as storage from "../hooks/useLocalStorage";
 import * as threadActions from "../lib/chatThreadActions";
@@ -12,7 +14,6 @@ import * as session from "../state/session";
 import { Atom } from "effect/reactivity";
 import type { Project } from "../types";
 import { installChatRouteCommands } from "./chatRouteCommands";
-import * as previewActions from "../components/preview/previewActionBus";
 import * as dispatcher from "./dispatcher";
 import * as readerFocus from "./readerFocus";
 
@@ -143,5 +144,35 @@ describe("preview commands without the preview-operate scope", () => {
 
     if (scenario.dispatched) expect(previewAction).toHaveBeenCalledWith(scenario.action);
     else expect(previewAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("preview commands", () => {
+  it.each([
+    { command: "preview.find", action: "find" },
+    { command: "preview.refresh", action: "refresh" },
+    { command: "preview.focusUrl", action: "focus-url" },
+  ] as const)("$command reaches the right panel on a draft thread", ({ command, action }) => {
+    const draftId = DraftId.make("draft-1");
+    useComposerDraftStore
+      .getState()
+      .setProjectDraftThreadId(
+        { environmentId: EnvironmentId.make("local"), projectId: ProjectId.make("active") },
+        draftId,
+      );
+    using stack = new DisposableStack();
+    stack.defer(() => useComposerDraftStore.getState().clearDraftThread(draftId));
+    using _scope = vi.spyOn(session, "readEnvironmentScope").mockReturnValue(true);
+    using dispatch = vi.spyOn(previewActions, "dispatchPreviewAction").mockImplementation(() => {});
+    using register = vi.spyOn(dispatcher, "registerCommands").mockReturnValue(() => {});
+    const router = {
+      state: { matches: [{ routeId: "/_chat/draft/$draftId", params: { draftId } }] },
+    } as unknown as AnyRouter;
+    stack.defer(installChatRouteCommands(router));
+    const event = { preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as KeyboardEvent;
+
+    register.mock.calls[0]![0][command]!(event);
+
+    expect(dispatch).toHaveBeenCalledWith(action);
   });
 });

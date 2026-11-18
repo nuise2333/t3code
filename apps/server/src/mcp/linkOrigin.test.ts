@@ -43,6 +43,7 @@ import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 import * as SourceControlRepositoryService from "../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
 import * as ThreadSearch from "../orchestration-v2/ThreadSearch.ts";
@@ -121,7 +122,7 @@ const layerTools = Layer.mergeAll(
 ).pipe(
   Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
   Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
-  Layer.provide(layerLaunches),
+  Layer.provide(Layer.mergeAll(layerLaunches, ModelManifest.layerTest)),
   Layer.provide(NodeCrypto.layer),
   Layer.provide(
     Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),

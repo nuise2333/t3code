@@ -57,6 +57,14 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { LaunchRoutingRequest, RouteDecision, ThreadAgentTeam } from "./routing.ts";
+import {
+  CouncilLens,
+  CouncilSettings,
+  ThreadCouncil,
+  ThreadTokenSaver,
+  TokenSaverSettings,
+} from "./council.ts";
 import {
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -457,6 +465,24 @@ const LenientThreadOpens = Schema.NullOr(OrchestrationV2ThreadOpens).pipe(
   Schema.catchDecoding(() => Effect.succeedSome(null)),
 );
 
+// A team this build cannot read leaves the thread without one, not unreadable.
+const LenientThreadAgentTeam = Schema.NullOr(ThreadAgentTeam).pipe(
+  Schema.catchDecoding(() => Effect.succeedSome(null)),
+);
+
+// A token saver or Council this build cannot read turns off, not the thread.
+const LenientThreadTokenSaver = Schema.NullOr(ThreadTokenSaver).pipe(
+  Schema.catchDecoding(() => Effect.succeedSome(null)),
+);
+const LenientThreadCouncil = Schema.NullOr(ThreadCouncil).pipe(
+  Schema.catchDecoding(() => Effect.succeedSome(null)),
+);
+
+// A decision this build cannot read only loses its label, not the thread.
+const LenientRouteDecision = Schema.NullOr(RouteDecision).pipe(
+  Schema.catchDecoding(() => Effect.succeedSome(null)),
+);
+
 const OrchestrationV2LastTitleRegeneration = Schema.Struct({
   ...ThreadTitleRegenerationOutcome.fields,
   requestId: CommandId,
@@ -508,6 +534,16 @@ export const OrchestrationV2AppThread = Schema.Struct({
   lastSnoozeWakeAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
+  /** The launch's effort routing decision, applied or shadow-only. Detail payloads only. */
+  routing: Schema.optional(LenientRouteDecision),
+  /** Set when the user turned an agent team on (or off, null) after launch; wins over `routing`. */
+  agentTeam: Schema.optional(LenientThreadAgentTeam),
+  /** Guidance that makes the agent spend fewer tokens; null or absent when off. */
+  tokenSaver: Schema.optional(LenientThreadTokenSaver),
+  /** Reviewers score the work until all reach the target; null or absent when off. */
+  council: Schema.optional(LenientThreadCouncil),
+  /** A task delegated as a review; agents get a capped number of rounds with it. */
+  delegatedRole: Schema.optional(Schema.Literal("review")),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -936,6 +972,10 @@ export const OrchestrationV2Subagent = Schema.Struct({
   model: Schema.NullOr(Schema.String),
   modelSelection: Schema.optional(ModelSelection),
   completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+  /** Review delegations count toward a cap that resets when the user replies. */
+  delegatedRole: Schema.optional(Schema.Literal("review")),
+  /** A Council reviewer: what it checks. Its report ends with a score the server reads. */
+  councilLens: Schema.optional(CouncilLens),
   completionDelivery: Schema.optional(OrchestrationV2DelegatedCompletionTaskDelivery),
   // The run whose unfinished task was cancelled, committed with its Stop.
   cancelledRunId: Schema.optional(RunId),
@@ -3099,6 +3139,13 @@ export const OrchestrationV2Command = Schema.Union([
     linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
     /** Only the server sets this, with `linkOrigin`, for a linked environment's delegated task. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+    /** Kept only with `delegatedFrom`: that environment's agent delegated a review. */
+    delegatedRole: Schema.optional(Schema.Literal("review")),
+    /** Only the server sets this, from its launch routing decision. */
+    routing: Schema.optional(RouteDecision),
+    /** Only the server sets these, from the launch or the user's defaults. */
+    tokenSaver: Schema.optional(ThreadTokenSaver),
+    council: Schema.optional(ThreadCouncil),
     importedNativeThread: Schema.optional(
       Schema.Struct({
         ref: Schema.Struct({
@@ -3257,6 +3304,14 @@ export const OrchestrationV2Command = Schema.Union([
     limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
     /** Link (object) or unlink (null) a pull request; absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+    /** Turn an agent team on (object) or teams off (null); absent leaves it unchanged. */
+    agentTeam: Schema.optional(Schema.NullOr(ThreadAgentTeam)),
+    /** Set the token saver (object) or turn it off (null); absent leaves it unchanged. */
+    tokenSaver: Schema.optional(Schema.NullOr(TokenSaverSettings)),
+    /** Turn Council on or change it (object), or turn it off (null); absent leaves it unchanged. */
+    council: Schema.optional(Schema.NullOr(CouncilSettings)),
+    /** Accept the current Council cycle's scores, so the lead may finish below the target. */
+    councilAccept: Schema.optional(Schema.Literal(true)),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request.link"),
@@ -3537,6 +3592,11 @@ export const OrchestrationV2Command = Schema.Union([
     workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
     // Defaults to settled_only; fire-and-forget wakes require always.
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+    /** Only the server sets this, from the routing group the task asked for. */
+    routing: Schema.optional(RouteDecision),
+    delegatedRole: Schema.optional(Schema.Literal("review")),
+    /** Only the server sets this, for a Council reviewer the lead convened. */
+    councilLens: Schema.optional(CouncilLens),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({
@@ -3678,6 +3738,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     modelSelection: ModelSelection,
     remoteChild: OrchestrationV2RemoteTaskChild,
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+    delegatedRole: Schema.optional(Schema.Literal("review")),
   }),
   /**
    * Completes a delegated task that ran in a linked environment, with what its
@@ -3897,6 +3958,15 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
+  /**
+   * Auto effort (applied only when the server's auto routing setting is on) or a routing group.
+   * With a group, `modelSelection` is a placeholder the server replaces with the member it picks.
+   */
+  routing: Schema.optional(LaunchRoutingRequest),
+  /** The new thread's token saver; absent uses the user's default, null starts it off. */
+  tokenSaver: Schema.optional(Schema.NullOr(TokenSaverSettings)),
+  /** The new thread's Council; absent uses the user's default, null starts it off. */
+  council: Schema.optional(Schema.NullOr(CouncilSettings)),
   initialMessage: Schema.optional(
     Schema.Struct({
       messageId: Schema.optional(MessageId),

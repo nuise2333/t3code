@@ -1,6 +1,7 @@
 import {
   composerFileAttachmentMimeType,
   composerImageDedupKey,
+  rememberComposerImageBytes,
 } from "./components/chat/composerAttachmentFiles";
 import { elementContextToPreviewAnnotation } from "./lib/elementContext";
 import {
@@ -299,6 +300,17 @@ function clearStaleFileUploadMetadata(
   return changed ? { ...draft, files } : draft;
 }
 
+/** Group ids are per environment, so another machine's same id may list other models. */
+function moveDraftToEnvironment(
+  draft: ComposerThreadDraftState,
+  environmentId: EnvironmentId,
+): ComposerThreadDraftState {
+  const moved = clearStaleFileUploadMetadata(draft, environmentId);
+  if (moved.routingGroupId === undefined) return moved;
+  const { routingGroupId: _routingGroupId, ...rest } = moved;
+  return rest;
+}
+
 export const PersistedComposerFileAttachment = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -348,6 +360,8 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   modelSelectionByProvider: Schema.optionalKey(Schema.Record(ProviderInstanceId, ModelSelection)),
   activeProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
   modelSelectionExplicit: Schema.optionalKey(Schema.Boolean),
+  effortManual: Schema.optionalKey(Schema.Boolean),
+  routingGroupId: Schema.optionalKey(Schema.String),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
 });
@@ -477,6 +491,10 @@ export interface ComposerThreadDraftState {
   modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   activeProvider: ProviderInstanceId | null;
   modelSelectionExplicit?: boolean;
+  /** The user picked an effort level, so a new thread keeps it instead of Auto effort. */
+  effortManual?: boolean;
+  /** A new thread launches through this routing group; the model selection holds its first member. */
+  routingGroupId?: string;
   runtimeMode: RuntimeMode | null;
   interactionMode: ProviderInteractionMode | null;
 }
@@ -665,6 +683,12 @@ interface ComposerDraftStoreState {
   setInteractionMode: (
     threadRef: ComposerThreadTarget,
     interactionMode: ProviderInteractionMode | null | undefined,
+  ) => void;
+  setEffortManual: (threadRef: ComposerThreadTarget, manual: boolean) => void;
+  /** Picks a routing group for a new thread; any explicit model pick clears it. */
+  setRoutingGroup: (
+    threadRef: ComposerThreadTarget,
+    group: { readonly id: string; readonly placeholder: ModelSelection } | null,
   ) => void;
   addImage: (threadRef: ComposerThreadTarget, image: ComposerImageAttachment) => boolean;
   addImages: (
@@ -918,6 +942,8 @@ function composerDraftContent({
   modelSelectionByProvider: _modelSelectionByProvider,
   activeProvider: _activeProvider,
   modelSelectionExplicit: _modelSelectionExplicit,
+  effortManual: _effortManual,
+  routingGroupId: _routingGroupId,
   runtimeMode: _runtimeMode,
   interactionMode: _interactionMode,
   ...content
@@ -1338,23 +1364,32 @@ export function deriveEffectiveComposerModelState(input: {
         baseSelection?.instanceId ?? activeSelectionInstanceId,
         baseSelection?.model,
       );
-  // Draft options win; otherwise an existing thread's options, even none, outrank the project's.
-  // Selections stay with them, so a fallback instance can check which model the options belong to.
-  const optionSelections =
-    [
-      draft?.modelSelectionByProvider,
-      draftPicksOtherModel ? null : selectionsByInstance(baseSelection),
-    ].find((selections) => modelSelectionByProviderToOptions(selections) !== null) ?? null;
-  const modelOptions = modelSelectionByProviderToOptions(optionSelections);
+  // An existing thread's options, even none, outrank the project's. Next to draft options, they
+  // fill in only for the model they were stored with. Each source keeps its selections so a
+  // fallback instance can check which model its options belong to.
+  const optionsFrom = (optionSelections: Partial<Record<string, ModelSelection>> | null) =>
+    withFallbackInstanceOptions({
+      ...input,
+      modelOptions: modelSelectionByProviderToOptions(optionSelections),
+      optionSelections,
+      selectedModel,
+    });
+  const draftOptions = optionsFrom(draft?.modelSelectionByProvider ?? null);
+  const storedIsShownModel =
+    baseSelection != null &&
+    isSameModel(input, baseSelection, {
+      instanceId: input.selectedInstanceId ?? baseSelection.instanceId,
+      model: selectedModel,
+    });
+  const storedOptions = optionsFrom(
+    !draftPicksOtherModel && (draftOptions === null || storedIsShownModel)
+      ? selectionsByInstance(baseSelection)
+      : null,
+  );
 
   return {
     selectedModel,
-    modelOptions: withFallbackInstanceOptions({
-      ...input,
-      modelOptions,
-      optionSelections,
-      selectedModel,
-    }),
+    modelOptions: draftOptions || storedOptions ? { ...storedOptions, ...draftOptions } : null,
   };
 }
 
@@ -1387,15 +1422,39 @@ function withFallbackInstanceOptions(input: {
   const requestedProvider = input.providers.find(
     (provider) => provider.instanceId === requestedInstanceId,
   );
-  const requestedModel = input.optionSelections?.[requestedInstanceId]?.model;
-  const sameModel =
-    requestedModel === input.selectedModel ||
-    composerModelIdentity(input, requestedInstanceId, requestedModel) ===
-      composerModelIdentity(input, selectedInstanceId, input.selectedModel);
+  const sameModel = isSameModel(
+    input,
+    {
+      instanceId: requestedInstanceId,
+      model: input.optionSelections?.[requestedInstanceId]?.model,
+    },
+    { instanceId: selectedInstanceId, model: input.selectedModel },
+  );
   if (!requestedOptions || requestedProvider?.driver !== input.selectedProvider || !sameModel) {
     return modelOptions;
   }
   return { ...modelOptions, [selectedInstanceId]: requestedOptions };
+}
+
+interface InstanceModel {
+  readonly instanceId: ProviderInstanceId;
+  readonly model: string | undefined;
+}
+
+export function isSameModel(
+  input: {
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly selectedProvider: ProviderDriverKind;
+    readonly settings: UnifiedSettings;
+  },
+  a: InstanceModel,
+  b: InstanceModel,
+): boolean {
+  return (
+    a.model === b.model ||
+    composerModelIdentity(input, a.instanceId, a.model) ===
+      composerModelIdentity(input, b.instanceId, b.model)
+  );
 }
 
 function revokeObjectPreviewUrl(previewUrl: string): void {
@@ -2151,6 +2210,11 @@ function normalizePersistedDraftsByThreadId(
     let modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>> = {};
     let activeProvider: ProviderInstanceId | null = null;
     let modelSelectionExplicit: true | undefined = undefined;
+    const effortManual = draftCandidate.effortManual === true;
+    const routingGroupId =
+      typeof draftCandidate.routingGroupId === "string" && draftCandidate.routingGroupId.length > 0
+        ? draftCandidate.routingGroupId
+        : undefined;
 
     if (
       draftCandidate.modelSelectionByProvider &&
@@ -2237,6 +2301,8 @@ function normalizePersistedDraftsByThreadId(
             modelSelectionByProvider: compactModelSelectionByProvider(modelSelectionByProvider),
             activeProvider,
             ...(modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
+            ...(effortManual ? { effortManual: true } : {}),
+            ...(routingGroupId ? { routingGroupId } : {}),
           }
         : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
@@ -2270,6 +2336,8 @@ function stripLegacyModelSeedsFromEmptyDraftSessions(
       if (
         draftThreadsByThreadKey[threadKey] === undefined ||
         draft.modelSelectionExplicit === true ||
+        draft.effortManual === true ||
+        draft.routingGroupId !== undefined ||
         persistedComposerDraftHasUserContent(draft)
       ) {
         return [[threadKey, draft]];
@@ -2406,6 +2474,8 @@ export function partializeComposerDraftStoreState(
             ),
             activeProvider: draft.activeProvider,
             ...(draft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
+            ...(draft.effortManual ? { effortManual: true } : {}),
+            ...(draft.routingGroupId ? { routingGroupId: draft.routingGroupId } : {}),
           }
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
@@ -2595,16 +2665,21 @@ function hydratePersistedComposerImageAttachment(
         header.startsWith("data:") && header.includes(";")
           ? header.slice("data:".length, header.indexOf(";"))
           : attachment.mimeType;
-      return new File([decodedText], attachment.name, {
+      const textBytes = new TextEncoder().encode(decodedText);
+      const textFile = new File([textBytes], attachment.name, {
         type: inferredMimeType || attachment.mimeType,
       });
+      rememberComposerImageBytes(textFile, textBytes);
+      return textFile;
     }
     const binary = atob(payload);
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
       bytes[index] = binary.charCodeAt(index);
     }
-    return new File([bytes], attachment.name, { type: attachment.mimeType });
+    const file = new File([bytes], attachment.name, { type: attachment.mimeType });
+    rememberComposerImageBytes(file, bytes);
+    return file;
   } catch {
     return null;
   }
@@ -2678,6 +2753,8 @@ function toHydratedThreadDraft(
     modelSelectionByProvider,
     activeProvider,
     ...(persistedDraft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
+    ...(persistedDraft.effortManual ? { effortManual: true } : {}),
+    ...(persistedDraft.routingGroupId ? { routingGroupId: persistedDraft.routingGroupId } : {}),
     runtimeMode: persistedDraft.runtimeMode ?? null,
     interactionMode: persistedDraft.interactionMode ?? null,
   };
@@ -2881,10 +2958,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               existingThread.environmentId !== projectRef.environmentId &&
               existingDraft !== undefined
             ) {
-              const nextDraft = clearStaleFileUploadMetadata(
-                existingDraft,
-                projectRef.environmentId,
-              );
+              const nextDraft = moveDraftToEnvironment(existingDraft, projectRef.environmentId);
               if (nextDraft !== existingDraft) {
                 nextDraftsByThreadKey = {
                   ...state.draftsByThreadKey,
@@ -3028,11 +3102,19 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             if (isUnchanged) {
               return state;
             }
+            const draft = state.draftsByThreadKey[threadKey];
+            const movedDraft =
+              draft !== undefined && nextDraftThread.environmentId !== existing.environmentId
+                ? moveDraftToEnvironment(draft, nextDraftThread.environmentId)
+                : undefined;
             return {
               draftThreadsByThreadKey: {
                 ...state.draftThreadsByThreadKey,
                 [threadKey]: nextDraftThread,
               },
+              ...(movedDraft === undefined || movedDraft === draft
+                ? {}
+                : { draftsByThreadKey: { ...state.draftsByThreadKey, [threadKey]: movedDraft } }),
             };
           });
         },
@@ -3288,9 +3370,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             ) {
               return state;
             }
-            const { modelSelectionExplicit: _previousExplicit, ...restBase } = base;
+            const { modelSelectionExplicit: _previousExplicit, routingGroupId, ...restBase } = base;
             const nextDraft: ComposerThreadDraftState = {
               ...restBase,
+              ...(routingGroupId && opts?.explicit !== true ? { routingGroupId } : {}),
               modelSelectionByProvider: nextMap,
               activeProvider: nextActiveProvider,
               ...(opts?.explicit === true ? { modelSelectionExplicit: true as const } : {}),
@@ -3476,6 +3559,58 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...base,
               interactionMode: nextInteractionMode,
             };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) {
+              delete nextDraftsByThreadKey[threadKey];
+            } else {
+              nextDraftsByThreadKey[threadKey] = nextDraft;
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        setEffortManual: (threadRef, manual) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey];
+            if ((existing?.effortManual === true) === manual) {
+              return state;
+            }
+            const { effortManual: _effortManual, ...base } = existing ?? createEmptyThreadDraft();
+            const nextDraft: ComposerThreadDraftState = manual
+              ? { ...base, effortManual: true }
+              : base;
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) {
+              delete nextDraftsByThreadKey[threadKey];
+            } else {
+              nextDraftsByThreadKey[threadKey] = nextDraft;
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        setRoutingGroup: (threadRef, group) => {
+          if (group) {
+            get().setModelSelection(threadRef, group.placeholder, {
+              explicit: true,
+              replaceOptions: true,
+            });
+          }
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey];
+            if ((existing?.routingGroupId ?? null) === (group?.id ?? null)) {
+              return state;
+            }
+            const { routingGroupId: _previous, ...base } = existing ?? createEmptyThreadDraft();
+            const nextDraft: ComposerThreadDraftState = group
+              ? { ...base, routingGroupId: group.id }
+              : base;
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
               delete nextDraftsByThreadKey[threadKey];

@@ -12,6 +12,7 @@ import type {
 import {
   type ChatAttachment,
   CommandId,
+  isDelegatedAppThread,
   isListedThreadLineage,
   MessageId,
   OrchestrationV2StopWorkflowError,
@@ -84,19 +85,23 @@ export function withCreationProvenance(
 ): OrchestrationV2Command {
   switch (command.type) {
     case "thread.create": {
-      // Only the server stamps a link's origin or folds in a first message, so a client cannot.
+      // Only the server stamps a link's origin, a routing decision or a first message.
       const {
         linkOrigin: _linkOrigin,
         delegatedFrom: _delegatedFrom,
         initialMessage: _initialMessage,
+        routing: _routing,
         ...rest
       } = command;
+      return { ...rest, ...provenance };
+    }
+    case "delegated_task.request": {
+      const { routing: _routing, ...rest } = command;
       return { ...rest, ...provenance };
     }
     case "message.dispatch":
     case "thread.fork":
     case "thread.merge_back":
-    case "delegated_task.request":
       return { ...command, ...provenance };
     default:
       return command;
@@ -853,7 +858,7 @@ const make = Effect.gen(function* () {
           .filter((thread) =>
             input.includeSubagents
               ? thread.lineage.sideChat !== true
-              : isListedThreadLineage(thread.lineage),
+              : isListedThreadLineage(thread.lineage) && !isDelegatedAppThread(thread),
           )
           .toSorted(
             (left, right) =>

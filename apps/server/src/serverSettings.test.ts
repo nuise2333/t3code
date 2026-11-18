@@ -294,6 +294,29 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect.each([
+    { file: `{ "autoRoutingEnabled": true }`, enabled: true, allowModelSwitch: false },
+    {
+      file: `{ "autoRoutingEnabled": true, "autoRouting": { "allowModelSwitch": true } }`,
+      enabled: false,
+      allowModelSwitch: true,
+    },
+  ] as const)(
+    "reads the flat Auto effort switch of an older settings file: $file",
+    ({ file, enabled, allowModelSwitch }) =>
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        yield* fs.writeFileString(config.settingsPath, file);
+        assert.deepEqual((yield* service.getSettings).autoRouting, {
+          enabled,
+          allowModelSwitch,
+          allowProviderSwitch: false,
+        });
+      }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("tells clients it reads idle compaction modes before any settings are saved", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;
@@ -1469,7 +1492,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
             {
               kind: "eas",
               id: "eas",
-              label: "EAS Simulator",
+              label: "Expo Simulators",
               accessToken: "expo-secret",
               maxSessionMinutes: 30,
               idleMinutes: 10,
@@ -1786,7 +1809,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
             {
               kind: "eas",
               id: "eas",
-              label: "EAS Simulator",
+              label: "Expo Simulators",
               accessToken: easReference,
               maxSessionMinutes: 30,
               idleMinutes: 10,
@@ -1906,7 +1929,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           {
             kind: "eas",
             id: "eas",
-            label: "EAS Simulator",
+            label: "Expo Simulators",
             accessToken: personal("Expo/token"),
             maxSessionMinutes: 30,
             idleMinutes: 10,

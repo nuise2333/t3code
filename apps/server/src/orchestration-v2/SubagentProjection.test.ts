@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  EnvironmentId,
   type ModelSelection,
   NodeId,
   RunId,
@@ -82,10 +83,15 @@ function makeParentThread(): OrchestrationV2AppThread {
   };
 }
 
-it("keeps a subagent child awake when its parent thread is snoozed", () => {
+it("resets a subagent child's snooze, title job and remote delegation but keeps its workspace", () => {
   const parentThread: OrchestrationV2AppThread = {
     ...makeParentThread(),
     titleRegeneration: { requestId: CommandId.make("command:parent-title"), startedAt: snoozedAt },
+    delegatedFrom: {
+      environmentId: EnvironmentId.make("linked-environment"),
+      threadId: ThreadId.make("linked-parent"),
+      title: "Linked parent",
+    },
   };
   const childProviderThreadId = ProviderThreadId.make("provider-thread:subagent-awake-child");
   const parentNodeId = NodeId.make("node:subagent-parent");
@@ -105,6 +111,7 @@ it("keeps a subagent child awake when its parent thread is snoozed", () => {
   assert.isNull(childThread.snoozedUntil);
   assert.isNull(childThread.snoozedAt);
   assert.isNull(childThread.titleRegeneration);
+  assert.isUndefined(childThread.delegatedFrom);
   assert.equal(childThread.projectId, parentThread.projectId);
   assert.equal(childThread.runtimeMode, parentThread.runtimeMode);
   assert.equal(childThread.interactionMode, parentThread.interactionMode);
@@ -123,6 +130,46 @@ it("keeps a subagent child awake when its parent thread is snoozed", () => {
     type: "node",
     nodeId: parentNodeId,
   });
+});
+
+it("a team member's thread leads nothing, whichever way its parent leads the team", () => {
+  const routing = {
+    taskClass: "implement" as const,
+    effort: null,
+    applied: false,
+    reasons: [],
+    group: {
+      id: "reviewers",
+      name: "Reviewers",
+      via: "picker" as const,
+      team: true as const,
+      chosen: 0,
+      member: parentModelSelection,
+      skipped: [],
+    },
+  };
+  const child = (parentThread: OrchestrationV2AppThread) =>
+    makeSubagentChildThread({
+      parentThread,
+      childThreadId,
+      parentNodeId: NodeId.make("node:team-parent"),
+      activeProviderThreadId: null,
+      providerInstanceId: parentProviderInstanceId,
+      // The lead may hand work to a member running its own model.
+      modelSelection: parentModelSelection,
+      title: "Member task",
+      now: childCreatedAt,
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+  const launched = child({ ...makeParentThread(), routing });
+  assert.isUndefined(launched.routing?.group);
+  assert.equal(launched.routing?.taskClass, "implement");
+  const turnedOn = child({
+    ...makeParentThread(),
+    agentTeam: { id: "reviewers", name: "Reviewers" },
+  });
+  assert.isUndefined(turnedOn.agentTeam);
 });
 
 it.effect.each(["provider", "mcp"] as const)(

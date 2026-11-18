@@ -1,7 +1,9 @@
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
 import * as NodeCrypto from "node:crypto";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
+import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
@@ -219,6 +221,8 @@ import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import { refreshPushedPullRequests } from "./git/refreshPushedPullRequests.ts";
 import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
+import * as RoutingPolicy from "./routing/RoutingPolicy.ts";
+import * as RoutingSummary from "./routing/RoutingSummary.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
@@ -1573,6 +1577,8 @@ export const layerWsRpc = (
       const secretCheck = yield* SecretCheck.SecretCheck;
       const otlpEndpointCheck = yield* OtlpEndpointCheck.OtlpEndpointCheck;
       const textGenerators = yield* TextGenerators.TextGenerators;
+      const routingPolicy = yield* RoutingPolicy.RoutingPolicy;
+      const routingSummary = yield* RoutingSummary.RoutingSummary;
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const sourceControlSignIn = yield* SourceControlSignIn.SourceControlSignIn;
@@ -1841,6 +1847,7 @@ export const layerWsRpc = (
           environment,
           auth,
           cwd: config.cwd,
+          hostname: yield* HostProcess.Hostname,
           keybindingsConfigPath: config.keybindingsConfigPath,
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
@@ -2177,6 +2184,11 @@ export const layerWsRpc = (
                           runtimeMode: input.runtimeMode,
                           interactionMode: input.interactionMode,
                           workspaceStrategy: input.workspaceStrategy,
+                          ...(input.routing === undefined ? {} : { routing: input.routing }),
+                          ...(input.tokenSaver === undefined
+                            ? {}
+                            : { tokenSaver: input.tokenSaver }),
+                          ...(input.council === undefined ? {} : { council: input.council }),
                           ...(input.initialMessage === undefined
                             ? {}
                             : {
@@ -2244,6 +2256,13 @@ export const layerWsRpc = (
                         cause,
                       }),
                     ThreadManagementProviderInstanceDisabledError: (cause) =>
+                      new OrchestrationV2ThreadLaunchError({
+                        commandId: input.commandId,
+                        projectId: input.projectId,
+                        message: cause.message,
+                        cause,
+                      }),
+                    RoutingGroupUnavailableError: (cause) =>
                       new OrchestrationV2ThreadLaunchError({
                         commandId: input.commandId,
                         projectId: input.projectId,
@@ -2702,6 +2721,8 @@ export const layerWsRpc = (
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
         [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),
         [WS_METHODS.serverListTextGeneratorModels]: (input) => textGenerators.listModels(input),
+        [WS_METHODS.serverCrossVendorModel]: (input) => routingPolicy.crossVendorModel(input),
+        [WS_METHODS.serverRoutingSummary]: (input) => routingSummary.read(input),
         [WS_METHODS.serverPrepareTriage]: (input) => triage.prepare(input),
         [WS_METHODS.serverSignalProcess]: (input) => processDiagnostics.signal(input),
         [WS_METHODS.serverReportClientActivity]: (input, metadata) =>
@@ -3601,6 +3622,12 @@ export const layer = Layer.unwrap(
             failEnvironmentInternal("internal_error", error),
           ),
         );
+        // Desktop bootstrap sessions connect to their own backend, including same-machine WSL.
+        if (session.subject === "desktop-bootstrap") {
+          delete NodeHttpServerRequest.toIncomingMessage(request).headers[
+            "sec-websocket-extensions"
+          ];
+        }
         const clientAnalyticsProps = readClientAnalyticsProps(request);
         yield* analytics.recordOwners(readClientOwners(request), "client");
         const reportProfiles = yield* serverBrowser.profileReporter;

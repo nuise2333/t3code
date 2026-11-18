@@ -1,7 +1,17 @@
 import {
   getPromptControlledTraits,
   getTraitSelectChange,
+  isReasoningSelect,
 } from "@t3tools/client-runtime/model-traits";
+import {
+  type PickerRoutingGroup,
+  type RoutedEffortDisplay,
+  type RoutedGroupDisplay,
+  routedEffortDisplay,
+  routedGroupDisplay,
+  routedModelDisplay,
+  subscriptionLabel,
+} from "@t3tools/client-runtime/routing";
 import * as Dialog from "../../components/ui/Dialog";
 import { createV5StackNavigator as createNativeStackNavigator } from "../../native/createV5StackNavigator";
 import { useSheetStackOptions } from "../layout/nested-stacks";
@@ -69,6 +79,7 @@ import {
   serverConfigForCwd,
   type ModelOption,
   type ProviderGroup,
+  withStoredThreadModelOptions,
 } from "../../lib/modelOptions";
 import { applyProviderOptionSelection } from "../../lib/providerOptions";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
@@ -260,7 +271,27 @@ type ThreadSettingsSubmenuPage =
   | { readonly kind: "descriptor"; readonly id: string }
   | { readonly kind: "runtime" };
 
+/** Auto effort: a new thread's draft can leave its level to Auto; a launched one names Auto's pick. */
+type ThreadSettingsEffortRouting =
+  | {
+      readonly kind: "draft";
+      readonly auto: boolean;
+      readonly setManual: (manual: boolean) => void;
+    }
+  | { readonly kind: "routed"; readonly display: RoutedEffortDisplay };
+
+const AUTO_EFFORT_NOTE = "Picks a level up to High from your first message.";
+
 type ThreadSettingsSessionProps = {
+  readonly effortRouting?: ThreadSettingsEffortRouting | null;
+  /** A new thread's routing groups; picking one applies at once and replaces the model. */
+  readonly routingGroups?: ReadonlyArray<PickerRoutingGroup>;
+  readonly selectedRoutingGroupId?: string | null;
+  readonly onSelectRoutingGroup?: (groupId: string) => void;
+  /** The group a launched thread started through, with its skipped members. */
+  readonly routedGroup?: RoutedGroupDisplay | null;
+  /** The model and account Auto picked at launch, or would have with switching on. */
+  readonly routedModel?: string | null;
   readonly environmentId: EnvironmentId | null;
   readonly projectId: ProjectId | null;
   readonly cwd: string | null;
@@ -276,7 +307,8 @@ type ThreadSettingsSessionProps = {
   readonly optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
-  readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  /** Omitted where the selection has no runtime mode, which hides the Runtime row. */
+  readonly onUpdateRuntimeMode?: (mode: RuntimeMode) => void;
 };
 
 /** The composer draft the sheet edits: the thread's own, or a queued message being edited. */
@@ -287,6 +319,12 @@ export type ExistingThreadSettingsRouteParams = {
 };
 
 type ThreadSettingsSessionValue = {
+  readonly effortRouting: ThreadSettingsEffortRouting | null;
+  readonly routingGroups: ReadonlyArray<PickerRoutingGroup>;
+  readonly selectedRoutingGroupId: string | null;
+  readonly pressRoutingGroup: (groupId: string) => void;
+  readonly routedGroup: RoutedGroupDisplay | null;
+  readonly routedModel: string | null;
   readonly environmentId: EnvironmentId | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
@@ -299,7 +337,7 @@ type ThreadSettingsSessionValue = {
   readonly setManageHidden: (value: boolean) => void;
   readonly runtimeMode: RuntimeMode;
   readonly runtimeModeChoices: ReadonlyArray<RuntimeModeChoice>;
-  readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  readonly onUpdateRuntimeMode: ((mode: RuntimeMode) => void) | undefined;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly promptTraits: ReturnType<typeof getPromptControlledTraits>;
   readonly displayedModelSelection: ModelSelection | null;
@@ -488,7 +526,10 @@ function ThreadSettingsSessionProvider(
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const displayedPrompt = pendingModel ? (pendingPrompt ?? props.prompt) : props.prompt;
 
+  const selectedRoutingGroupId = props.selectedRoutingGroupId ?? null;
+  // A picked group holds its first member as the selection, but no model row is chosen.
   const isApplied = (option: ModelOption) =>
+    selectedRoutingGroupId === null &&
     option.selection.instanceId === props.selectedModel?.instanceId &&
     option.selection.model === props.selectedModel.model;
   const isDisplayed = (option: ModelOption) =>
@@ -607,7 +648,20 @@ function ThreadSettingsSessionProvider(
   const workspaceScan =
     props.cwd && scannedInstanceId ? { instanceId: scannedInstanceId, cwd: props.cwd } : null;
 
+  const pressRoutingGroup = (groupId: string) => {
+    void Haptics.selectionAsync();
+    setPendingModel(null);
+    setPendingPrompt(null);
+    props.onSelectRoutingGroup?.(groupId);
+  };
+
   const value = {
+    effortRouting: props.effortRouting ?? null,
+    routingGroups: props.onSelectRoutingGroup ? (props.routingGroups ?? []) : [],
+    selectedRoutingGroupId,
+    pressRoutingGroup,
+    routedGroup: props.routedGroup ?? null,
+    routedModel: props.routedModel ?? null,
     environmentId,
     providerInstanceId: props.providerInstanceId,
     providerGroups,
@@ -705,6 +759,14 @@ type ThreadSettingsCatalogItem =
       readonly key: string;
       readonly text: string;
     }
+  | { readonly kind: "groupHeader"; readonly key: "routing-groups" }
+  | {
+      readonly kind: "group";
+      readonly key: string;
+      readonly group: PickerRoutingGroup;
+      readonly isFirst: boolean;
+      readonly isLast: boolean;
+    }
   | {
       readonly kind: "empty";
       readonly key: "empty";
@@ -762,6 +824,30 @@ function ThreadSettingsProviderListHeader(props: {
 }
 
 function buildThreadSettingsCatalogItems(
+  session: ThreadSettingsSessionValue,
+): ReadonlyArray<ThreadSettingsCatalogItem> {
+  const query = session.searchQuery.trim().toLowerCase();
+  const routingGroups =
+    session.providerFilter === null
+      ? session.routingGroups.filter((group) => group.name.toLowerCase().includes(query))
+      : [];
+  const groupItems: ReadonlyArray<ThreadSettingsCatalogItem> =
+    routingGroups.length === 0
+      ? []
+      : [
+          { kind: "groupHeader", key: "routing-groups" },
+          ...routingGroups.map((group, index) => ({
+            kind: "group" as const,
+            key: `routing-group:${group.id}`,
+            group,
+            isFirst: index === 0,
+            isLast: index === routingGroups.length - 1,
+          })),
+        ];
+  return [...groupItems, ...buildProviderCatalogItems(session)];
+}
+
+function buildProviderCatalogItems(
   session: ThreadSettingsSessionValue,
 ): ReadonlyArray<ThreadSettingsCatalogItem> {
   return session.providerGroups.flatMap((group) => {
@@ -864,6 +950,26 @@ function ThreadSettingsOptionsItem(props: {
   return (
     <View style={{ paddingBottom: insets.bottom + props.bottomInset + 12 }}>
       <ChatGptSharingStatus provider={selectedProvider} />
+      {session.routedGroup ? (
+        <View className="px-5 pb-2 pt-2">
+          <Text className="text-sm text-foreground">
+            Routing group: {session.routedGroup.label}
+          </Text>
+          {session.routedGroup.skipped ? (
+            <Text className="text-sm text-foreground-muted">{session.routedGroup.skipped}</Text>
+          ) : null}
+        </View>
+      ) : null}
+      {session.routedModel ? (
+        <Text className="px-5 pb-2 pt-2 text-sm text-foreground">{session.routedModel}</Text>
+      ) : null}
+      {session.selectedRoutingGroupId !== null ? (
+        <Text className="px-5 pb-2 pt-2 text-sm text-foreground-muted">
+          {session.routingGroups.some((group) => group.id === session.selectedRoutingGroupId)
+            ? "The thread starts on a usable member of the group, ranked and with the options set for it in Settings. Pick a model to choose it yourself."
+            : "This routing group no longer exists. Pick a model or another group."}
+        </Text>
+      ) : null}
       <Text className="px-5 pb-2 pt-2 text-sm font-t3-medium text-foreground-muted">Options</Text>
       <Animated.View
         className="mx-4 overflow-hidden rounded-2xl bg-grouped-card"
@@ -886,11 +992,21 @@ function ThreadSettingsOptionsItem(props: {
                     session.promptTraits.ultrathinkPromptControlled &&
                     descriptor.id === session.promptTraits.primarySelectDescriptor?.id
                       ? "Ultrathink"
-                      : getProviderOptionCurrentLabel(
-                          descriptor,
-                          session.displayedModelSelection,
-                          session.reportedModelSelection,
-                        )
+                      : session.effortRouting && isReasoningSelect(descriptor)
+                        ? session.effortRouting.kind === "draft"
+                          ? session.effortRouting.auto
+                            ? "Auto"
+                            : getProviderOptionCurrentLabel(
+                                descriptor,
+                                session.displayedModelSelection,
+                                session.reportedModelSelection,
+                              )
+                          : `Auto · ${session.effortRouting.display.levelLabel}`
+                        : getProviderOptionCurrentLabel(
+                            descriptor,
+                            session.displayedModelSelection,
+                            session.reportedModelSelection,
+                          )
                   }
                   onPress={() => props.onOpenSubmenu({ kind: "descriptor", id: descriptor.id })}
                 />
@@ -912,17 +1028,19 @@ function ThreadSettingsOptionsItem(props: {
             </Animated.View>
           );
         })}
-        <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
-          <DisclosureRow
-            isLast
-            label="Runtime"
-            value={
-              session.runtimeModeChoices.find((choice) => choice.mode === session.runtimeMode)
-                ?.label
-            }
-            onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
-          />
-        </Animated.View>
+        {session.onUpdateRuntimeMode ? (
+          <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
+            <DisclosureRow
+              isLast
+              label="Runtime"
+              value={
+                session.runtimeModeChoices.find((choice) => choice.mode === session.runtimeMode)
+                  ?.label
+              }
+              onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
+            />
+          </Animated.View>
+        ) : null}
       </Animated.View>
 
       <Text className="px-5 pb-2 pt-7 text-sm font-t3-medium text-foreground-muted">Catalog</Text>
@@ -1010,6 +1128,30 @@ function ThreadSettingsMainContent(props: {
           option={item.option}
         />
       );
+    } else if (item.kind === "groupHeader") {
+      content = (
+        <Text className="px-5 pb-2 pt-2 text-sm font-t3-medium text-foreground-muted">
+          Routing groups
+        </Text>
+      );
+    } else if (item.kind === "group") {
+      content = (
+        <View
+          className={cn(
+            "mx-4 overflow-hidden bg-grouped-card",
+            item.isFirst && "rounded-t-2xl",
+            item.isLast && "mb-3 rounded-b-2xl",
+          )}
+        >
+          <ChoiceRow
+            label={item.group.name}
+            description={item.group.summary}
+            selected={session.selectedRoutingGroupId === item.group.id}
+            isLast={item.isLast}
+            onPress={() => session.pressRoutingGroup(item.group.id)}
+          />
+        </View>
+      );
     } else if (item.kind === "notice") {
       content = <Text className="mx-8 mt-2 text-xs text-foreground-muted">{item.text}</Text>;
     } else if (item.kind === "empty") {
@@ -1092,6 +1234,74 @@ function ThreadSettingsChoiceContent(props: {
         )
       : undefined;
 
+  const selectRows = (
+    descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
+    auto: boolean,
+    onPicked: () => void,
+  ) =>
+    selectableChoices(descriptor).map((choice) => ({
+      id: choice.id,
+      label: choice.label,
+      description: choice.description,
+      disabled: false,
+      selected:
+        !auto &&
+        choice.id ===
+          (session.promptTraits.ultrathinkPromptControlled &&
+          descriptor.id === session.promptTraits.primarySelectDescriptor?.id
+            ? "ultrathink"
+            : getProviderOptionCurrentValue(
+                descriptor,
+                session.displayedModelSelection,
+                session.reportedModelSelection,
+              )),
+      onPress: () => {
+        void Haptics.selectionAsync();
+        if (
+          session.promptTraits.ultrathinkInBodyText &&
+          descriptor.id === session.promptTraits.primarySelectDescriptor?.id
+        ) {
+          Dialog.alert(
+            "Reasoning controlled by prompt",
+            'Your prompt contains "ultrathink" in the text. Remove it to change this option.',
+          );
+          return;
+        }
+        session.applyOptionChange(descriptor.id, choice.id);
+        onPicked();
+        props.onSelected();
+      },
+    }));
+
+  const selectContent = (descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>) => {
+    const routing = isReasoningSelect(descriptor) ? session.effortRouting : null;
+    const draft = routing?.kind === "draft" ? routing : null;
+    const levels = selectRows(descriptor, draft?.auto === true, () => draft?.setManual(true));
+    return {
+      rows: draft
+        ? [
+            {
+              id: "auto-effort",
+              label: "Auto",
+              description: AUTO_EFFORT_NOTE,
+              disabled: false,
+              selected: draft.auto,
+              onPress: () => {
+                void Haptics.selectionAsync();
+                draft.setManual(false);
+                props.onSelected();
+              },
+            },
+            ...levels,
+          ]
+        : levels,
+      note:
+        routing?.kind === "routed"
+          ? `${routing.display.summary}. Pick a level to set it yourself.`
+          : null,
+    };
+  };
+
   const submenuContent =
     props.submenu.kind === "runtime"
       ? {
@@ -1103,45 +1313,14 @@ function ThreadSettingsChoiceContent(props: {
             selected: choice.mode === session.runtimeMode,
             onPress: () => {
               void Haptics.selectionAsync();
-              session.onUpdateRuntimeMode(choice.mode);
+              session.onUpdateRuntimeMode?.(choice.mode);
               props.onSelected();
             },
           })),
+          note: null,
         }
       : activeDescriptor?.type === "select"
-        ? {
-            rows: selectableChoices(activeDescriptor).map((choice) => ({
-              id: choice.id,
-              label: choice.label,
-              description: choice.description,
-              disabled: false,
-              selected:
-                choice.id ===
-                (session.promptTraits.ultrathinkPromptControlled &&
-                activeDescriptor.id === session.promptTraits.primarySelectDescriptor?.id
-                  ? "ultrathink"
-                  : getProviderOptionCurrentValue(
-                      activeDescriptor,
-                      session.displayedModelSelection,
-                      session.reportedModelSelection,
-                    )),
-              onPress: () => {
-                void Haptics.selectionAsync();
-                if (
-                  session.promptTraits.ultrathinkInBodyText &&
-                  activeDescriptor.id === session.promptTraits.primarySelectDescriptor?.id
-                ) {
-                  Dialog.alert(
-                    "Reasoning controlled by prompt",
-                    'Your prompt contains "ultrathink" in the text. Remove it to change this option.',
-                  );
-                  return;
-                }
-                session.applyOptionChange(activeDescriptor.id, choice.id);
-                props.onSelected();
-              },
-            })),
-          }
+        ? selectContent(activeDescriptor)
         : null;
 
   if (!submenuContent) {
@@ -1173,6 +1352,9 @@ function ThreadSettingsChoiceContent(props: {
           />
         ))}
       </View>
+      {submenuContent.note ? (
+        <Text className="px-2 pt-2 text-sm text-foreground-muted">{submenuContent.note}</Text>
+      ) : null}
     </ScrollView>
   );
 }
@@ -1396,6 +1578,24 @@ export function ExistingThreadSettingsRouteScreen({
     ) ?? null;
   const updateModelSelection = (selection: ModelSelection) =>
     selectThreadModel(route.params, selection);
+  const routedEffort = routedEffortDisplay({
+    routing: structure?.projection.thread.routing,
+    selection: modelSelection,
+    descriptors: currentModelOption?.capabilities?.optionDescriptors,
+  });
+  const routedGroup = routedGroupDisplay({
+    routing: structure?.projection.thread.routing,
+    selection: modelSelection,
+    providers: serverConfig?.providers ?? [],
+  });
+  const routedModel = routedModelDisplay({
+    routing: structure?.projection.thread.routing,
+    selection: modelSelection,
+    providers: (serverConfig?.providers ?? []).map((provider) => ({
+      ...provider,
+      subscription: subscriptionLabel(provider),
+    })),
+  });
 
   return (
     <ThreadSettingsPickerScreen
@@ -1409,7 +1609,14 @@ export function ExistingThreadSettingsRouteScreen({
       prompt={prompt}
       onPromptChange={(text) => setComposerDraftText(draftKey, text)}
       reportedModelSelection={reportedModelSelection}
-      onSelectModel={(option) => updateModelSelection(withRememberedModelOptions(option.selection))}
+      onSelectModel={(option) =>
+        updateModelSelection(
+          withStoredThreadModelOptions(
+            withRememberedModelOptions(option.selection),
+            selectedThread.modelSelection,
+          ),
+        )
+      }
       restoreSelection={withRememberedModelOptions}
       optionDescriptors={resolveProviderOptionDescriptors({
         capabilities: currentModelOption?.capabilities,
@@ -1419,6 +1626,9 @@ export function ExistingThreadSettingsRouteScreen({
         rememberModelOptions(modelSelection.instanceId, modelSelection.model, options ?? []);
         updateModelSelection({ ...modelSelection, options });
       }}
+      effortRouting={routedEffort ? { kind: "routed", display: routedEffort } : null}
+      routedGroup={routedGroup}
+      routedModel={routedModel}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
       onClose={() => navigation.goBack()}
@@ -1430,10 +1640,14 @@ export function ExistingThreadSettingsRouteScreen({
 export function NewTaskThreadSettingsRouteScreen() {
   const flow = useNewTaskFlow();
   const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
-  const optionDescriptors = resolveProviderOptionDescriptors({
-    capabilities: flow.selectedModelOption?.capabilities,
-    selections: flow.selectedModel?.options,
-  });
+  const groupPicked = flow.selectedRoutingGroup !== null;
+  // A group sets each member's options itself, so the placeholder's options are not shown.
+  const optionDescriptors = groupPicked
+    ? []
+    : resolveProviderOptionDescriptors({
+        capabilities: flow.selectedModelOption?.capabilities,
+        selections: flow.selectedModel?.options,
+      });
 
   return (
     <ThreadSettingsPickerScreen
@@ -1449,6 +1663,14 @@ export function NewTaskThreadSettingsRouteScreen() {
       restoreSelection={withRememberedModelOptions}
       optionDescriptors={optionDescriptors}
       onUpdateOptionSelections={flow.setSelectedModelOptions}
+      effortRouting={
+        flow.autoEffortOffered && !groupPicked
+          ? { kind: "draft", auto: !flow.effortManual, setManual: flow.setEffortManual }
+          : null
+      }
+      routingGroups={flow.routingGroups}
+      selectedRoutingGroupId={flow.selectedRoutingGroup?.id ?? null}
+      onSelectRoutingGroup={flow.setRoutingGroup}
       runtimeMode={flow.runtimeMode}
       onUpdateRuntimeMode={flow.setRuntimeMode}
       onClose={() => navigation.goBack()}

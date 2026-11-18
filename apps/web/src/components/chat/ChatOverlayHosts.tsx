@@ -2,10 +2,13 @@ import type {
   DeviceServiceState,
   EnvironmentId,
   MessageId,
+  ModelSelection,
   OrchestrationV2ThreadProjection,
+  ProviderDriverKind,
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
+import type { HigherEffort } from "@t3tools/shared/routing";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 
@@ -182,9 +185,16 @@ export function BranchRestoreConfirmHost(props: {
   );
 }
 
+/** A reasoning level the rewound message is sent with, replacing only that option. */
+export interface RewindEffort extends HigherEffort {
+  readonly provider: ProviderDriverKind;
+  readonly selection: ModelSelection;
+}
+
 interface PendingRevert {
   readonly turnCount: number;
   readonly messageId: MessageId;
+  readonly effort?: RewindEffort | undefined;
 }
 
 const revertConfirmAtom = makeThreadOverlayAtom<PendingRevert>("revert-confirm");
@@ -197,7 +207,12 @@ export function RevertConfirmHost(props: {
   readonly threadKey: string;
   readonly checkpoints: OrchestrationV2ThreadProjection["checkpoints"] | undefined;
   readonly worktreePath: string | null;
-  readonly onConfirm: (turnCount: number, messageId: MessageId, restoreFiles: boolean) => void;
+  readonly onConfirm: (
+    turnCount: number,
+    messageId: MessageId,
+    restoreFiles: boolean,
+    effort: RewindEffort | undefined,
+  ) => void;
 }) {
   const pending = useThreadOverlay(revertConfirmAtom, props.threadKey);
   // The server refuses file restore outside an isolated worktree.
@@ -208,7 +223,7 @@ export function RevertConfirmHost(props: {
   const confirm = (restoreFiles: boolean) => {
     if (pending === null || (restoreFiles && !canRestoreFiles)) return;
     closeThreadOverlay(revertConfirmAtom);
-    props.onConfirm(pending.turnCount, pending.messageId, restoreFiles);
+    props.onConfirm(pending.turnCount, pending.messageId, restoreFiles, pending.effort);
   };
   return (
     <AlertDialog
@@ -219,7 +234,9 @@ export function RevertConfirmHost(props: {
     >
       <AlertDialogPopup>
         <AlertDialogHeader>
-          <AlertDialogTitle>Edit from here?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {pending?.effort ? `Retry with ${pending.effort.label}?` : "Edit from here?"}
+          </AlertDialogTitle>
           <AlertDialogDescription>
             Rewind chat to before this message. Your prompt and attachments return to the composer.
             “Revert files too” also undoes your own edits.

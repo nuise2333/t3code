@@ -92,6 +92,15 @@ const SETTINGS_SEARCH_TERMS = {
     "login",
     "auth",
   ],
+  SettingsRoutingGroups: [
+    "routing group",
+    "model group",
+    "fallback",
+    "failover",
+    "order",
+    "quota",
+    "auto rules",
+  ],
   SettingsEnvironmentSourceControl: [
     "git",
     "pull requests",
@@ -115,6 +124,8 @@ const SETTINGS_SEARCH_TERMS = {
     "link machine",
     "fast worktree checkout",
     "clone cache",
+    "auto effort",
+    "reasoning routing",
   ],
   SettingsEnvironmentMaintenance: ["updates", "provider updates", "restart", "manage environments"],
   SettingsAbout: [

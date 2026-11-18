@@ -322,6 +322,8 @@ const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
                 projectId: project.id,
                 operation: error.operation,
               }).pipe(Effect.as(undefined)),
+            // Unreachable: the bootstrap launch asks for no routing group.
+            RoutingGroupUnavailableError: () => Effect.undefined,
           }),
         );
       bootstrapProjectId = project.id;

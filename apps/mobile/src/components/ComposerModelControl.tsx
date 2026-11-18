@@ -14,6 +14,10 @@ export function ComposerModelControl(props: {
   readonly selection: ModelSelection | null;
   readonly provider: ProviderDriverKind | undefined;
   readonly reportedSelection?: ModelSelection | null | undefined;
+  /** Shown in place of the reasoning level, such as "Auto" for Auto effort. */
+  readonly reasoningLabel?: string | undefined;
+  /** A draft's routing group stands in for its model; a launched thread names the group it ran through. */
+  readonly routingGroup?: { readonly name: string; readonly draft: boolean };
   readonly prompt: string;
   readonly surfaceColor: string;
   readonly disabled?: boolean;
@@ -26,26 +30,36 @@ export function ComposerModelControl(props: {
     selections: props.selection?.options,
   });
   const promptTraits = getPromptControlledTraits(descriptors, props.prompt);
-  const summary = props.provider
-    ? buildTraitsTriggerDisplay({
-        descriptors,
-        primarySelectDescriptorId: promptTraits.primarySelectDescriptor?.id ?? null,
-        ultrathinkPromptControlled: promptTraits.ultrathinkPromptControlled,
-        modelSelection: props.selection,
-        reportedModelSelection: props.reportedSelection,
-      }).label
-    : "";
+  const draftGroup = props.routingGroup?.draft === true ? props.routingGroup : null;
+  const traitsSummary =
+    props.provider && !draftGroup
+      ? buildTraitsTriggerDisplay({
+          descriptors,
+          primarySelectDescriptorId: promptTraits.primarySelectDescriptor?.id ?? null,
+          ultrathinkPromptControlled: promptTraits.ultrathinkPromptControlled,
+          modelSelection: props.selection,
+          reportedModelSelection: props.reportedSelection,
+          reasoningLabel: props.reasoningLabel,
+        }).label
+      : "";
+  const summary = draftGroup
+    ? "Routing group"
+    : props.routingGroup
+      ? [traitsSummary, `via ${props.routingGroup.name}`].filter(Boolean).join(" · ")
+      : traitsSummary;
   const badge = props.modelOption?.providerBadge;
-  const label = props.modelOption?.label ?? props.selection?.model ?? "Choose model";
-  const providerNameLabel = badge
-    ? providerInstanceNameLabel({
-        provider: props.modelOption?.providerDriver,
-        iconUrl: props.modelOption?.providerIconUrl,
-        displayName: badge.displayName,
-        showBadge: badge.showBadge,
-      })
-    : null;
-  const shortLabel = props.modelOption?.shortName ?? label;
+  const label =
+    draftGroup?.name ?? props.modelOption?.label ?? props.selection?.model ?? "Choose model";
+  const providerNameLabel =
+    badge && !draftGroup
+      ? providerInstanceNameLabel({
+          provider: props.modelOption?.providerDriver,
+          iconUrl: props.modelOption?.providerIconUrl,
+          displayName: badge.displayName,
+          showBadge: badge.showBadge,
+        })
+      : null;
+  const shortLabel = draftGroup?.name ?? props.modelOption?.shortName ?? label;
   return (
     <ComposerInlineControl
       accessibilityLabel={[

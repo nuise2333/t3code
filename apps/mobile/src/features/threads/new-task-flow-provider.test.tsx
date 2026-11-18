@@ -377,6 +377,7 @@ async function renderTriageDraft(screen: ReturnType<typeof setup>) {
     scratchWorkspaceRoot: "/a",
     providers: [],
     settings: DEFAULT_SERVER_SETTINGS,
+    environment: { capabilities: {} },
   });
   mocks.openScratch.mockResolvedValue({ _tag: "Success", value: screen.projects[2] });
   await screen.render(true);

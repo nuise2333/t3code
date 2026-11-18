@@ -1120,6 +1120,26 @@ describe("mobile composer drafts", () => {
 
     appendComposerDraftAttachments(draftKey, [makeVideo("restored")], { restore: true });
     expect(appAtomRegistry.get(composerDraftsAtom)[draftKey]?.attachments).toHaveLength(2);
+
+    // Every native paste is named pasted-image.png, so only the bytes tell two pastes apart.
+    const makePaste = (id: string, base64: string) => ({
+      id,
+      type: "image" as const,
+      name: "pasted-image.png",
+      mimeType: "image/png",
+      sizeBytes: 3,
+      dataUrl: `data:image/png;base64,${base64}`,
+      previewUri: `data:image/png;base64,${base64}`,
+    });
+    const pasteKey = "new-task:environment-1:project-pastes";
+    appendComposerDraftAttachments(pasteKey, [makePaste("red", "AQID")]);
+    appendComposerDraftAttachments(pasteKey, [
+      makePaste("blue", "BAUG"),
+      makePaste("red-2", "AQID"),
+    ]);
+    expect(
+      appAtomRegistry.get(composerDraftsAtom)[pasteKey]?.attachments.map(({ id }) => id),
+    ).toEqual(["red", "blue"]);
   });
 
   it("keeps shared attachment files until every draft releases them", async () => {
@@ -1979,6 +1999,7 @@ describe("mobile composer drafts", () => {
       [key]: {
         ...getComposerDraftSnapshot(key),
         runtimeMode: "approval-required",
+        routingGroupId: "fast",
         workspaceSelection: { mode: "worktree", branch: "feature/a", worktreePath: null },
       },
     });
@@ -1989,6 +2010,7 @@ describe("mobile composer drafts", () => {
     const moved = getComposerDraftSnapshot(key);
     expect(moved.text).toBe("moving house");
     expect(moved.runtimeMode).toBe("approval-required");
+    expect(moved.routingGroupId).toBeUndefined();
 
     expect(moved.workspaceSelection).toBeUndefined();
     expect(moved.project).toEqual({ ...to, createdAt });
@@ -2195,6 +2217,9 @@ describe("mobile composer drafts", () => {
         model: "gpt-5.4",
         options: [{ id: "reasoningEffort", value: "xhigh" }],
       },
+      effortManual: true,
+      routingGroupId: "fast",
+      runtimeMode: "full-access",
       workspaceSelection: {
         mode: "worktree",
         branch: "main",
@@ -2205,11 +2230,25 @@ describe("mobile composer drafts", () => {
     expect(clearComposerDraftContentState({ [draftKey]: draft }, draftKey)).toEqual({
       [draftKey]: {
         modelSelection: draft.modelSelection,
+        effortManual: true,
+        routingGroupId: "fast",
+        runtimeMode: "full-access",
         workspaceSelection: draft.workspaceSelection,
         text: "",
         attachments: [],
       },
     });
+    // The manual effort mark belongs to the selection it describes.
+    expect(
+      clearComposerDraftContentState({ [draftKey]: draft }, draftKey, {
+        clearModelSelection: true,
+      })[draftKey]?.effortManual,
+    ).toBeUndefined();
+    expect(
+      clearComposerDraftContentState({ [draftKey]: draft }, draftKey, {
+        clearModelSelection: true,
+      })[draftKey]?.routingGroupId,
+    ).toBeUndefined();
   });
 
   it("drops another environment's upload stamp when a draft moves across machines", () => {

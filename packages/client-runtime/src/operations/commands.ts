@@ -9,6 +9,7 @@ import {
   WS_METHODS,
   type ChatAttachment,
   MessageId,
+  type LaunchRoutingRequest,
   type ModelSelection,
   type NodeId,
   type OrchestrationV2Command,
@@ -147,6 +148,14 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly regenerateTitle?: boolean;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly expectedEmpty?: boolean;
+  /** Turn an agent team on for the thread, or teams off with null. */
+  readonly agentTeam?: import("@t3tools/contracts").ThreadAgentTeam | null;
+  /** Set the thread's token saver, or turn it off with null. */
+  readonly tokenSaver?: import("@t3tools/contracts").TokenSaverSettings | null;
+  /** Turn Council on or change it, or off with null. */
+  readonly council?: import("@t3tools/contracts").CouncilSettings | null;
+  /** Accept the current Council cycle's scores. */
+  readonly councilAccept?: true;
 }
 
 export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
@@ -193,6 +202,11 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly bootstrap?: StartThreadBootstrap;
+  /** Asks the server to pick the effort for a new thread; ignored when the turn joins an existing one. */
+  readonly routing?: LaunchRoutingRequest;
+  /** A new thread's token saver and Council; absent uses the user's defaults. */
+  readonly tokenSaver?: import("@t3tools/contracts").TokenSaverSettings | null;
+  readonly council?: import("@t3tools/contracts").CouncilSettings | null;
   readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly dispatchMode?: "auto" | "queue" | "steer" | "restart" | "start";
   /** Start a new provider session; needs the server's `freshContext` capability. */
@@ -691,7 +705,11 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
-      input.limitRecovery !== undefined
+      input.limitRecovery !== undefined ||
+      input.agentTeam !== undefined ||
+      input.tokenSaver !== undefined ||
+      input.council !== undefined ||
+      input.councilAccept !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
@@ -706,6 +724,10 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.linkedPullRequest === undefined
           ? {}
           : { linkedPullRequest: input.linkedPullRequest }),
+        ...(input.agentTeam === undefined ? {} : { agentTeam: input.agentTeam }),
+        ...(input.tokenSaver === undefined ? {} : { tokenSaver: input.tokenSaver }),
+        ...(input.council === undefined ? {} : { council: input.council }),
+        ...(input.councilAccept === undefined ? {} : { councilAccept: input.councilAccept }),
       });
     }
     if (input.modelSelection !== undefined) {
@@ -796,6 +818,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(input.routing === undefined ? {} : { routing: input.routing }),
+      ...(input.tokenSaver === undefined ? {} : { tokenSaver: input.tokenSaver }),
+      ...(input.council === undefined ? {} : { council: input.council }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

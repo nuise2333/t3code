@@ -383,11 +383,39 @@ function patchedIdleCompaction(
   return globalIdleCompaction(current) === "off" ? "off" : "onReturn";
 }
 
+/** Clients that predate the `autoRouting` object send its `enabled` switch flat. */
+function translateLegacyAutoRoutingPatch(patch: ServerSettingsPatch): ServerSettingsPatch {
+  const { autoRoutingEnabled, ...rest } = patch;
+  if (autoRoutingEnabled === undefined) return patch;
+  return { ...rest, autoRouting: { enabled: autoRoutingEnabled, ...rest.autoRouting } };
+}
+
+/**
+ * Clients that predate `rank` or `team` save a group without them; an edited group keeps its
+ * stored keys. A team never becomes a plain group: Settings deletes it instead.
+ */
+function keepRoutingGroupKeys(
+  current: ServerSettings["routingGroups"],
+  patched: NonNullable<ServerSettingsPatch["routingGroups"]>,
+): ServerSettings["routingGroups"] {
+  return patched.map((group) => {
+    const saved = current.find((entry) => entry.id === group.id);
+    if (saved === undefined) return group;
+    return {
+      ...group,
+      ...(group.rank === undefined && saved.rank !== undefined ? { rank: saved.rank } : {}),
+      ...(saved.team === true ? { team: true as const } : {}),
+    };
+  });
+}
+
 export function applyServerSettingsPatch(
   current: ServerSettings,
   rawPatch: ServerSettingsPatch,
 ): ServerSettings {
-  const patch = translateLegacyProjectOverridePatch(current, rawPatch);
+  const patch = translateLegacyAutoRoutingPatch(
+    translateLegacyProjectOverridePatch(current, rawPatch),
+  );
   const selectionPatch = patch.textGenerationModelSelection;
   const {
     migrateModelPreferences,
@@ -543,6 +571,12 @@ export function applyServerSettingsPatch(
       : {}),
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
+      : {}),
+    ...(patch.routingGroups !== undefined
+      ? { routingGroups: keepRoutingGroupKeys(current.routingGroups, patch.routingGroups) }
+      : {}),
+    ...(patch.routingGroupRules !== undefined
+      ? { routingGroupRules: patch.routingGroupRules }
       : {}),
     ...(patch.worktreesDirectory !== undefined &&
     patch.worktreesDirectory !== current.worktreesDirectory

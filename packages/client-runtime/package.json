@@ -555,6 +555,14 @@
       "types": "./src/modelTraits.ts",
       "default": "./src/modelTraits.ts"
     },
+    "./routing": {
+      "types": "./src/routing.ts",
+      "default": "./src/routing.ts"
+    },
+    "./routing-presets": {
+      "types": "./src/routingPresets.ts",
+      "default": "./src/routingPresets.ts"
+    },
     "./pull-request-reviewers": {
       "types": "./src/pullRequestReviewers.ts",
       "default": "./src/pullRequestReviewers.ts"

@@ -14,6 +14,57 @@ import { copySorted } from "./Array.ts";
 
 const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
 
+export const REASONING_EFFORT_OPTION_IDS: ReadonlyArray<string> = [
+  "reasoningEffort",
+  "effort",
+  "reasoning",
+  "variant",
+  "reasoning_effort",
+  "thinking_level",
+];
+
+const REASONING_DESCRIPTOR_IDS: ReadonlySet<string> = new Set([
+  ...REASONING_EFFORT_OPTION_IDS,
+  "thinking",
+]);
+
+/** The model's reasoning control: a known effort id, or a select its agent marked as reasoning. */
+export function isReasoningControl(descriptor: ProviderOptionDescriptor): boolean {
+  return (
+    (descriptor.type === "select" && descriptor.role === "reasoning") ||
+    REASONING_DESCRIPTOR_IDS.has(descriptor.id)
+  );
+}
+
+export function isReasoningSelect(
+  descriptor: ProviderOptionDescriptor,
+): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> {
+  return descriptor.type === "select" && isReasoningControl(descriptor);
+}
+
+/** Why a model's descriptors reject one option selection, or null when they accept it. */
+export function optionSelectionProblem(
+  selection: ProviderOptionSelection,
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+): string | null {
+  const descriptor = descriptors.find((candidate) => candidate.id === selection.id);
+  if (descriptor === undefined) {
+    const known = descriptors.map((candidate) => candidate.id).join(", ");
+    return `Unknown option ${selection.id}; supported options: ${known || "none"}.`;
+  }
+  if (descriptor.type === "boolean" && typeof selection.value !== "boolean") {
+    return `Option ${selection.id} expects a boolean value.`;
+  }
+  if (
+    descriptor.type === "select" &&
+    !descriptor.options.some((choice) => choice.id === selection.value)
+  ) {
+    const choices = descriptor.options.map((choice) => choice.id).join(", ");
+    return `Option ${selection.id} must be one of: ${choices}.`;
+  }
+  return null;
+}
+
 export function modelSelectionCommandType(
   currentInstanceId: ProviderInstanceId,
   selection: ModelSelection,
