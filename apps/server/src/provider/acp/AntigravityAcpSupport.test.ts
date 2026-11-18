@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
@@ -8,8 +9,10 @@ import {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
+import { ChildProcessSpawner } from "effect/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
@@ -20,6 +23,7 @@ import {
   antigravitySessionMeta,
   buildAntigravityPrompt,
   isQualifiedAntigravityRelease,
+  makeAntigravityAcpRuntime,
 } from "./AntigravityAcpSupport.ts";
 
 const modelConfig = {
@@ -719,5 +723,39 @@ it.layer(NodeServices.layer)("buildAntigravityPrompt", (it) => {
         errorMessage: "Could not read attachment 'screen.png'.",
       });
     }),
+  );
+});
+
+describe("makeAntigravityAcpRuntime", () => {
+  it.effect("starts a gateway session without the authenticate call the agent rejects", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const logs = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-antigravity-gateway-" });
+      const requestLog = path.join(logs, "requests.ndjson");
+      const runtime = yield* makeAntigravityAcpRuntime({
+        authMethod: "gateway",
+        childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+        cwd: logs,
+        spawn: {
+          command: process.execPath,
+          args: [mockAgentPath],
+          cwd: logs,
+          env: { T3_ACP_ANTIGRAVITY: "1", T3_ACP_REQUEST_LOG_PATH: requestLog },
+        },
+      });
+
+      yield* runtime.start();
+
+      const methods = (yield* fileSystem.readFileString(requestLog))
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => (JSON.parse(line) as { readonly method?: string }).method);
+      expect(methods).toContain("session/new");
+      expect(methods).not.toContain("authenticate");
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)), Effect.scoped),
   );
 });

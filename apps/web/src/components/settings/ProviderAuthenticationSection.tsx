@@ -75,7 +75,9 @@ export function ProviderAuthenticationSection({
       (provider.driver === "acpRegistry" && auth?.methods?.length === 0));
   const usesCredentials =
     provider.driver === "antigravity" &&
-    (provider.auth.type === "gemini-api-key" || provider.auth.type === "agent-platform");
+    (provider.auth.type === "gemini-api-key" ||
+      provider.auth.type === "agent-platform" ||
+      provider.auth.type === "gateway");
   const accountDescription = active
     ? auth?.phase === "starting"
       ? (auth.message ?? (usesCredentials ? "Connecting…" : "Starting sign-in…"))

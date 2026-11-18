@@ -851,6 +851,7 @@ export const ANTIGRAVITY_AUTH_METHODS = [
   { value: "oauth-business", label: "Gemini Enterprise" },
   { value: "gemini-api-key", label: "Gemini API key" },
   { value: "agent-platform", label: "Agent Platform (Vertex AI)" },
+  { value: "gateway", label: "AI API gateway" },
 ] as const satisfies ReadonlyArray<ProviderSettingsFormOption>;
 export const AntigravityAuthMethod = Schema.Literals(
   ANTIGRAVITY_AUTH_METHODS.map((method) => method.value),
@@ -868,7 +869,7 @@ export const AntigravitySettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Sign-in method",
         description:
-          "Google accounts use your subscription; API keys and Agent Platform bill usage.",
+          "Google accounts use your subscription; API keys and Agent Platform bill usage; a gateway uses its own routing.",
         providerSettingsForm: {
           control: "select",
           options: ANTIGRAVITY_AUTH_METHODS,
@@ -881,12 +882,20 @@ export const AntigravitySettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "API key",
-        description: "Gemini or Vertex AI express key. Stored separately on the host.",
+        description: "Gemini, Vertex AI express, or gateway key. Stored separately on the host.",
         providerSettingsForm: {
           control: "password",
           placeholder: "Optional",
           clearWhenEmpty: "omit",
         },
+      }),
+    ),
+    gatewayUrl: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Gateway URL",
+        description: "Gemini API-compatible gateway for the AI API gateway sign-in method.",
+        providerSettingsForm: { placeholder: "http://127.0.0.1:3425", clearWhenEmpty: "omit" },
       }),
     ),
     gcpProject: TrimmedString.pipe(
@@ -919,7 +928,7 @@ export const AntigravitySettings = makeProviderSettingsSchema(
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
-  { order: ["authMethod", "apiKey", "gcpProject", "gcpLocation", "binaryPath"] },
+  { order: ["authMethod", "apiKey", "gatewayUrl", "gcpProject", "gcpLocation", "binaryPath"] },
 );
 export type AntigravitySettings = typeof AntigravitySettings.Type;
 
