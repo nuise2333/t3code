@@ -93,6 +93,7 @@ export interface AntigravityProfile {
 export interface AntigravityAuthConfig {
   readonly authMethod: AntigravityAuthMethod;
   readonly apiKey: string;
+  readonly gatewayUrl: string;
   readonly gcpProject: string;
   readonly gcpLocation: string;
 }
@@ -100,6 +101,7 @@ export interface AntigravityAuthConfig {
 const ANTIGRAVITY_PERSONAL_AUTH: AntigravityAuthConfig = {
   authMethod: "oauth-personal",
   apiKey: "",
+  gatewayUrl: "",
   gcpProject: "",
   gcpLocation: "",
 };
@@ -118,6 +120,8 @@ export function antigravityAuthLabel(authMethod: AntigravityAuthMethod): string 
       return "Gemini API key";
     case "agent-platform":
       return "Agent Platform";
+    case "gateway":
+      return "AI API gateway";
   }
 }
 
@@ -135,6 +139,8 @@ export function antigravityAuthConfigIssue(auth: AntigravityAuthConfig): string 
       return auth.apiKey || (auth.gcpProject && auth.gcpLocation)
         ? null
         : "Agent Platform needs an API key, or a GCP project and location, in the Antigravity provider settings.";
+    case "gateway":
+      return auth.gatewayUrl ? null : "Enter a gateway URL in the Antigravity provider settings.";
   }
 }
 
@@ -210,7 +216,12 @@ function antigravityEnvironment(
       ? { GEMINI_API_KEY: auth.apiKey }
       : auth.authMethod === "agent-platform" && auth.apiKey
         ? { GOOGLE_API_KEY: auth.apiKey }
-        : {};
+        : auth.authMethod === "gateway"
+          ? {
+              AGY_LLM_GATEWAY_URL: auth.gatewayUrl,
+              ...(auth.apiKey ? { AGY_LLM_GATEWAY_API_KEY: auth.apiKey } : {}),
+            }
+          : {};
   // Each launch unpacks about 1 GB; use T3-owned temp so the driver can reclaim files after force-kill.
   const tempDirectory = runtimeTempDirectory ?? profile.tempDirectory;
   return {

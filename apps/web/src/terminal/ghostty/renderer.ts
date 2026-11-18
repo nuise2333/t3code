@@ -1,3 +1,5 @@
+import { drawBoxGlyph, isBoxGlyph } from "./boxGlyphs";
+import { isNerdFontIcon, nerdFontIconBox, nerdFontIconSpan } from "./nerdFontIcons";
 import {
   GHOSTTY_CELL_WIDE,
   ghosttyColorsEqual,
@@ -10,6 +12,8 @@ export interface GhosttyCellMetrics {
   readonly width: number;
   readonly height: number;
   readonly baseline: number;
+  /** Height of a capital letter, which sizes one-cell Nerd Font icons. */
+  readonly capHeight?: number;
 }
 
 export interface GhosttyCellRange {
@@ -81,6 +85,65 @@ function fillSolidPowerlineSeparator(
   context.fill();
 }
 
+function isCellDrawnGlyph(text: string): boolean {
+  return isSolidPowerlineSeparator(text) || isBoxGlyph(text);
+}
+
+function fillCellDrawnGlyph(
+  context: CanvasRenderingContext2D,
+  text: string,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+  seamOverlap: number,
+): void {
+  if (isBoxGlyph(text)) drawBoxGlyph(context, text, left, top, width, height, width);
+  else fillSolidPowerlineSeparator(context, text, left, top, width, height, seamOverlap);
+}
+
+// Icons are drawn from their ink box rather than their advance, which Nerd Fonts often
+// set narrower than the glyph, so they are not cropped to their own cell.
+function fillNerdFontIcon(
+  context: CanvasRenderingContext2D,
+  cells: readonly GhosttyCell[],
+  column: number,
+  left: number,
+  top: number,
+  height: number,
+  metrics: GhosttyCellMetrics,
+  font: string,
+): void {
+  const text = cells[column]?.text ?? "";
+  const span = nerdFontIconSpan(cells, column);
+  context.save();
+  context.beginPath();
+  context.rect(left, top, span * metrics.width, height);
+  context.clip();
+  context.font = font;
+  const ink = context.measureText(text);
+  const glyphWidth = ink.actualBoundingBoxLeft + ink.actualBoundingBoxRight;
+  const glyphHeight = ink.actualBoundingBoxAscent + ink.actualBoundingBoxDescent;
+  if (glyphWidth > 0 && glyphHeight > 0) {
+    const box = nerdFontIconBox({
+      glyphWidth,
+      glyphHeight,
+      span,
+      cellWidth: metrics.width,
+      cellHeight: height,
+      capHeight: metrics.capHeight ?? height * 0.55,
+    });
+    context.translate(
+      left + box.x + ink.actualBoundingBoxLeft * box.scale,
+      top + box.y + ink.actualBoundingBoxAscent * box.scale,
+    );
+    context.scale(box.scale, box.scale);
+    context.textAlign = "start";
+    context.fillText(text, 0, 0);
+  }
+  context.restore();
+}
+
 function ghosttyTextRunEnd(
   cells: readonly GhosttyCell[],
   start: number,
@@ -94,7 +157,14 @@ function ghosttyTextRunEnd(
       end += 1;
       continue;
     }
-    if (next.text.length === 0 || isSolidPowerlineSeparator(next.text) || !sameStyle(next)) break;
+    if (
+      next.text.length === 0 ||
+      isCellDrawnGlyph(next.text) ||
+      isNerdFontIcon(next.text) ||
+      !sameStyle(next)
+    ) {
+      break;
+    }
     end += 1;
   }
   return end;
@@ -162,13 +232,26 @@ export function measureGhosttyCell(
 ): GhosttyCellMetrics {
   context.font = `normal 400 ${fontSize}px ${fontFamily}`;
   const widthMeasurement = context.measureText("M");
+  const width = Math.max(1, widthMeasurement.width);
   const verticalMeasurement = context.measureText("Mg");
   const ascent = verticalMeasurement.actualBoundingBoxAscent || fontSize;
   const descent = verticalMeasurement.actualBoundingBoxDescent;
   const glyphHeight = ascent + descent;
+  const fontAscent = widthMeasurement.fontBoundingBoxAscent;
+  const fontDescent = widthMeasurement.fontBoundingBoxDescent;
+  if (fontAscent > 0 && fontDescent >= 0) {
+    // Native Ghostty sizes rows from the face's ascent and descent, not a fixed multiple.
+    const height = Math.max(1, Math.round(fontAscent + fontDescent), Math.ceil(glyphHeight));
+    return {
+      width,
+      height,
+      baseline: height - Math.round(fontDescent),
+      capHeight: context.measureText("H").actualBoundingBoxAscent,
+    };
+  }
   const height = Math.max(1, Math.round(fontSize * 1.35), Math.ceil(glyphHeight));
   return {
-    width: Math.max(1, widthMeasurement.width),
+    width,
     height,
     baseline: Math.round((height - glyphHeight) / 2 + ascent),
   };
@@ -294,10 +377,10 @@ export function renderGhosttySnapshot(options: {
         runStart += 1;
         continue;
       }
-      if (isSolidPowerlineSeparator(first.text)) {
+      if (isCellDrawnGlyph(first.text)) {
         if (!first.invisible) {
           context.fillStyle = cssColor(first.foreground);
-          fillSolidPowerlineSeparator(
+          fillCellDrawnGlyph(
             context,
             first.text,
             padding + runStart * metrics.width,
@@ -305,6 +388,23 @@ export function renderGhosttySnapshot(options: {
             metrics.width,
             height,
             1,
+          );
+        }
+        runStart += 1;
+        continue;
+      }
+      if (isNerdFontIcon(first.text)) {
+        if (!first.invisible) {
+          context.fillStyle = cssColor(first.foreground);
+          fillNerdFontIcon(
+            context,
+            row.cells,
+            runStart,
+            padding + runStart * metrics.width,
+            top,
+            height,
+            metrics,
+            fontForCell(first, fontSize, fontFamily),
           );
         }
         runStart += 1;
@@ -385,8 +485,24 @@ export function renderGhosttySnapshot(options: {
       context.fillRect(left, top, width, height);
       if (cell?.text) {
         context.fillStyle = cssColor(snapshot.background);
-        if (isSolidPowerlineSeparator(cell.text)) {
-          fillSolidPowerlineSeparator(context, cell.text, left, top, metrics.width, height, 0);
+        if (isCellDrawnGlyph(cell.text)) {
+          fillCellDrawnGlyph(context, cell.text, left, top, metrics.width, height, 0);
+        } else if (isNerdFontIcon(cell.text)) {
+          context.save();
+          context.beginPath();
+          context.rect(left, top, width, height);
+          context.clip();
+          fillNerdFontIcon(
+            context,
+            cells,
+            snapshot.cursorX,
+            left,
+            top,
+            height,
+            metrics,
+            fontForCell(cell, fontSize, fontFamily),
+          );
+          context.restore();
         } else {
           context.font = fontForCell(cell, fontSize, fontFamily);
           context.textAlign = wide ? "center" : "start";

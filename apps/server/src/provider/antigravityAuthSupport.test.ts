@@ -143,6 +143,7 @@ describe("Antigravity process environment", () => {
     const geminiKey = spawnFor({
       authMethod: "gemini-api-key",
       apiKey: "gemini-secret",
+      gatewayUrl: "",
       gcpProject: "proj",
       gcpLocation: "us-central1",
     });
@@ -153,6 +154,7 @@ describe("Antigravity process environment", () => {
     const vertexKey = spawnFor({
       authMethod: "agent-platform",
       apiKey: "vertex-secret",
+      gatewayUrl: "",
       gcpProject: "",
       gcpLocation: "",
     });
@@ -162,11 +164,25 @@ describe("Antigravity process environment", () => {
     const business = spawnFor({
       authMethod: "oauth-business",
       apiKey: "ignored",
+      gatewayUrl: "http://ignored.invalid",
       gcpProject: "proj",
       gcpLocation: "us-central1",
     });
     expect(business.GEMINI_API_KEY).toBeUndefined();
     expect(business.GOOGLE_API_KEY).toBeUndefined();
+    expect(business.AGY_LLM_GATEWAY_URL).toBeUndefined();
+
+    const gateway = spawnFor({
+      authMethod: "gateway",
+      apiKey: "gateway-secret",
+      gatewayUrl: "http://127.0.0.1:3425",
+      gcpProject: "",
+      gcpLocation: "",
+    });
+    expect(gateway.AGY_LLM_GATEWAY_URL).toBe("http://127.0.0.1:3425");
+    expect(gateway.AGY_LLM_GATEWAY_API_KEY).toBe("gateway-secret");
+    expect(gateway.GEMINI_API_KEY).toBeUndefined();
+    expect(gateway.GOOGLE_API_KEY).toBeUndefined();
   });
 
   it("isolates TEMP and TMP to the profile directory on Windows", () => {
@@ -665,6 +681,7 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
         auth: {
           authMethod: "agent-platform",
           apiKey: "vertex-secret",
+          gatewayUrl: "",
           gcpProject: "proj",
           gcpLocation: "us-central1",
         },

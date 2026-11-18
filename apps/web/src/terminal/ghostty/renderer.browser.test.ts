@@ -168,4 +168,48 @@ describe.each([1.25, 2.2])("renderGhosttySnapshot at a %sx device pixel ratio", 
     expect(isDarkAt(context, x.outside, 12.5)).toBe(true);
     expect(isDarkAt(context, x.flat, 12.5)).toBe(false);
   });
+
+  // The 3 by 3 grid spans x 4 to 27.4 and y 4 to 55 in CSS pixels; cell 1 centres on 15.7, 29.5.
+  it.each([
+    ["box drawing lines", "\u253c", 2],
+    ["full blocks", "\u2588", 0],
+  ])("joins %s across cells and rows without seams", (_name, text, reach) => {
+    const context = scaledContext(scale);
+    const glyph = { ...blank, text };
+    const snapshot: GhosttySnapshot = {
+      cols: 3,
+      rows: 3,
+      foreground: { r: 0, g: 0, b: 0 },
+      background,
+      cursor: { r: 0, g: 0, b: 0 },
+      cursorX: -1,
+      cursorY: -1,
+      cursorVisible: false,
+      cursorBlinking: false,
+      cursorStyle: 1,
+      dirtyRows: new Set(),
+      rowData: [0, 1, 2].map(() => ({
+        cells: [glyph, glyph, glyph],
+        text: "",
+        isWrapContinuation: false,
+        wrapsToNext: false,
+      })),
+    };
+    renderGhosttySnapshot({ ...layout, context, snapshot, forceFull: true, cursorOn: false });
+
+    const { data, width } = context.getImageData(0, 0, context.canvas.width, context.canvas.height);
+    const dark = (x: number, y: number) => data[(y * width + x) * 4]! < 128;
+    const inkNear = (x: number, y: number, alongX: boolean) =>
+      Array.from({ length: reach * 2 + 1 }, (_, index) => index - reach).some((delta) =>
+        alongX ? dark(x, y + delta) : dark(x + delta, y),
+      );
+    const centreX = Math.round(15.7 * scale);
+    const centreY = Math.round(29.5 * scale);
+    for (let y = Math.ceil(4 * scale); y < Math.floor(55 * scale); y += 1) {
+      expect(inkNear(centreX, y, false), `row ${y}`).toBe(true);
+    }
+    for (let x = Math.ceil(4 * scale); x < Math.floor(27.4 * scale); x += 1) {
+      expect(inkNear(x, centreY, true), `column ${x}`).toBe(true);
+    }
+  });
 });

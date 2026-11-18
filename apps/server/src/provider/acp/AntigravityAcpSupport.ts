@@ -139,7 +139,10 @@ export const makeAntigravityAcpRuntime = Effect.fn("makeAntigravityAcpRuntime")(
     AcpSessionRuntime.layer({
       ...input,
       authMethodId: input.authMethod ?? "oauth-personal",
-      authenticateEagerly: true,
+      // The agent selects the gateway from settings.json and rejects `authenticate` for it, so
+      // its own auth-required message is the useful one.
+      authenticateEagerly: input.authMethod !== "gateway",
+      ...(input.authMethod === "gateway" ? { authenticateOnAuthRequired: false } : {}),
       resumeMethod: "resume",
       cancelBehavior: "wait-for-prompt",
       clientInfo: antigravityClientInfo(input.runtimeVersion),

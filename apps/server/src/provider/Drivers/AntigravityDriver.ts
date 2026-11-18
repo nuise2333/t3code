@@ -144,6 +144,7 @@ export const AntigravityDriver: ProviderDriver<
       authMethod: settings.authMethod,
       // The instance registry has already read a referenced key from its secret provider.
       apiKey: settingsSecretLiteral(settings.apiKey),
+      gatewayUrl: settings.gatewayUrl,
       gcpProject: settings.gcpProject,
       gcpLocation: settings.gcpLocation,
     };
