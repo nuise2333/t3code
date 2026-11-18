@@ -4,7 +4,8 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
 import { CircleAlertIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
-import { ComposerAgentTeamControl } from "./ComposerAgentTeamControl";
+import { ComposerTeamSetup } from "./ComposerTeamSetup";
+import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { ComposerThreadAssists, type ThreadAssistsState } from "./ComposerThreadAssists";
 import { ComposerControl } from "./ComposerControl";
 import {
@@ -21,14 +22,13 @@ import {
   routingProviderSource,
   routedGroupDisplay,
   routedModelDisplay,
-  threadTeamChoices,
 } from "@t3tools/client-runtime/routing";
 import { threadAgentTeamRef } from "@t3tools/shared/agentTeam";
-import { useNavigate } from "@tanstack/react-router";
 import {
   type EnvironmentId,
   type ModelSelection,
   type RouteDecision,
+  type RoutingGroup,
   type ThreadAgentTeam,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -330,26 +330,17 @@ export function ComposerControlsBar(props: {
             detail: [routedModel, traitsEffort.detail].filter(Boolean).join(" · "),
           }
         : traitsEffort;
-  const navigate = useNavigate();
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
     "agent team change",
   );
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const teamsCapability =
     serverConfig?.environment.capabilities.agentTeams === true &&
     serverConfig.environment.capabilities.routingGroups === true;
   const serverThreadId = routeKind === "server" ? routeThreadRef?.threadId : undefined;
-  const teamChoices =
-    routeKind === "server"
-      ? threadTeamChoices({
-          capability: teamsCapability,
-          groups: serverConfig?.settings.routingGroups,
-          lead: selectedModelSelection,
-          providers: providerModels,
-        })
-      : routingGroups
-          .filter((group) => group.team)
-          .map((group) => ({ id: group.id, name: group.name, summary: group.summary }));
+  const savedGroups = serverConfig?.settings.routingGroups ?? [];
+  const savedTeams = savedGroups.filter((group) => group.team === true);
   const activeTeam =
     routeKind === "server"
       ? teamsCapability
@@ -364,38 +355,58 @@ export function ComposerControlsBar(props: {
         : null;
   const teamDisabledReason =
     multipleModelSelections !== null ? "Pick one model to work as a team." : null;
-  const handleTeamSelect = useStableCallback((teamId: string | null) => {
+  // The setup saves teams in place, keeping every plain routing group as it was.
+  const saveTeams = useStableCallback((teams: ReadonlyArray<RoutingGroup>) => {
+    updateSettings({
+      routingGroups: [...savedGroups.filter((group) => group.team !== true), ...teams],
+    });
+  });
+  const applyTeam = useStableCallback((team: RoutingGroup) => {
+    const architect = team.members[0];
+    if (!architect) return;
     if (routeKind !== "server") {
-      if (teamId === null) clearPickedGroup();
-      else handleRoutingGroupSelect(teamId);
+      if (draftId) setRoutingGroup(draftId, { id: team.id, placeholder: architect });
       return;
     }
     if (serverThreadId === undefined) return;
-    const team = teamChoices.find((choice) => choice.id === teamId);
+    // The architect leads: the thread switches to it, then leads the team from its next message.
+    if (
+      architect.instanceId !== selectedModelSelection.instanceId ||
+      architect.model !== selectedModelSelection.model
+    ) {
+      onProviderModelSelect(architect.instanceId, architect.model);
+    }
     void updateThreadMetadata({
       environmentId,
-      input: {
-        threadId: serverThreadId,
-        agentTeam: team ? { id: team.id, name: team.name } : null,
-      },
+      input: { threadId: serverThreadId, agentTeam: { id: team.id, name: team.name } },
     });
   });
-  const openTeamSettings = useStableCallback(() => {
-    void navigate({ to: "/settings/providers", search: { environmentId } });
+  const disableTeam = useStableCallback(() => {
+    if (routeKind !== "server") {
+      clearPickedGroup();
+      return;
+    }
+    if (serverThreadId === undefined) return;
+    void updateThreadMetadata({
+      environmentId,
+      input: { threadId: serverThreadId, agentTeam: null },
+    });
   });
   const showTeamControl =
-    (routeKind === "server" ? serverThreadId !== undefined : Boolean(draftId)) &&
-    (teamChoices.length > 0 || activeTeam !== null);
+    teamsCapability && (routeKind === "server" ? serverThreadId !== undefined : Boolean(draftId));
   const teamControl = showTeamControl ? (
-    <ComposerAgentTeamControl
-      teams={teamChoices}
+    <ComposerTeamSetup
+      teams={savedTeams}
       active={activeTeam}
       newThread={routeKind !== "server"}
+      entries={providerInstanceEntries}
+      currentSelection={selectedModelSelection}
+      sharedGuidance={serverConfig?.settings.agentTeamLeadGuidance ?? ""}
       size={controlSize}
-      hidden={composerControlsHidden}
       disabledReason={teamDisabledReason}
-      onSelect={handleTeamSelect}
-      onManage={openTeamSettings}
+      onSaveTeams={saveTeams}
+      onApply={applyTeam}
+      onDisable={disableTeam}
     />
   ) : null;
   const restingBlockDefs = showModeBlock

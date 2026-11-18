@@ -405,6 +405,12 @@ function keepRoutingGroupKeys(
       ...group,
       ...(group.rank === undefined && saved.rank !== undefined ? { rank: saved.rank } : {}),
       ...(saved.team === true ? { team: true as const } : {}),
+      ...(group.maxParallel === undefined && saved.maxParallel !== undefined
+        ? { maxParallel: saved.maxParallel }
+        : {}),
+      ...(group.leadGuidance === undefined && saved.leadGuidance !== undefined
+        ? { leadGuidance: saved.leadGuidance }
+        : {}),
     };
   });
 }

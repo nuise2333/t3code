@@ -1394,6 +1394,25 @@ const make = Effect.gen(function* () {
     }
     const fitted = AgentTeam.agentTeamTarget(team, input.target);
     if (!fitted.ok) return yield* failure("invalid_request", fitted.message);
+    const limit = team.maxParallel ?? 0;
+    if (limit > 0 && input.councilLens === undefined) {
+      const { subagents } = yield* threadManagement
+        .getThreadRecords(parent.thread.id, ["subagents"])
+        .pipe(Effect.mapError(threadManagementFailure));
+      const out = subagents.filter(
+        (task) =>
+          task.threadId === parent.thread.id &&
+          task.origin === "app_owned" &&
+          task.councilLens === undefined &&
+          (task.status === "pending" || task.status === "running" || task.status === "waiting"),
+      ).length;
+      if (out >= limit) {
+        return yield* failure(
+          "invalid_request",
+          `The agent team "${team.name}" runs at most ${limit} ${limit === 1 ? "task" : "tasks"} at once, and ${out} ${out === 1 ? "is" : "are"} still running. End your turn; a finished task's result wakes you to delegate the next.`,
+        );
+      }
+    }
     return { ...input, target: fitted.target };
   });
 
