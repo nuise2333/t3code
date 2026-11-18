@@ -3,27 +3,21 @@ import type {
   OrchestratorMcpTarget,
   RouteDecision,
   RoutingGroup,
+  ThreadAgentTeam,
 } from "@t3tools/contracts";
+import { threadAgentTeam } from "@t3tools/shared/agentTeam";
 
 /**
- * The team a thread leads: it launched through a team, still runs the member it launched on, and
- * the team still exists. Picking another model, or deleting the team, makes it an ordinary thread.
+ * The team a thread leads, and only while that team still exists. One the user turned on after
+ * launch is led by the thread's model; one it launched through, only while it keeps that member.
  */
 export function activeAgentTeam(input: {
   readonly routing: RouteDecision | null | undefined;
+  readonly agentTeam: ThreadAgentTeam | null | undefined;
   readonly modelSelection: Pick<ModelSelection, "instanceId" | "model">;
   readonly groups: ReadonlyArray<RoutingGroup>;
 }): RoutingGroup | null {
-  const decision = input.routing?.group;
-  if (decision?.team !== true) return null;
-  if (
-    decision.member.instanceId !== input.modelSelection.instanceId ||
-    decision.member.model !== input.modelSelection.model
-  ) {
-    return null;
-  }
-  const team = input.groups.find((group) => group.id === decision.id);
-  return team?.team === true ? team : null;
+  return threadAgentTeam(input);
 }
 
 function memberLabel(member: ModelSelection): string {

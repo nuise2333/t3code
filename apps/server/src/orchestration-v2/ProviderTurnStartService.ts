@@ -853,6 +853,7 @@ export const layer: Layer.Layer<
           ? null
           : AgentTeam.activeAgentTeam({
               routing: projection.thread.routing,
+              agentTeam: projection.thread.agentTeam,
               modelSelection: run.modelSelection,
               groups: teamSettings.routingGroups,
             });

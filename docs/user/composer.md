@@ -209,15 +209,24 @@ that kind's group instead of only picking an effort.
 An agent team is a lead model and the models it may hand work to, each with its
 own options such as effort. Create one in **Settings → Providers → Agent teams**
 on web and desktop; the first model leads, and the next one leads if the first
-can't run. Pick the team from a new thread's model picker. The lead plans the
+can't run. Turn a team on with the **Team** button (the people icon) beside the
+model picker, or pick it from a new thread's model picker. The lead plans the
 work, delegates each task to a team model as a delegated task, checks the
 results, and answers you. It can delegate only to the team's models.
+
+On a new thread the team's first available model leads. In a thread that is
+already running, the thread's own model leads from your next message; choose
+**No team** in the same menu to turn it off. While a thread leads a team, a strip
+above the composer shows the team, its lead and a tally of delegated tasks;
+expand it to see each task's member, status and time, and open a task's thread.
 
 **Lead guidance** under the teams is added to every lead's instructions from its
 next turn, for example "you only lead; never edit files yourself".
 
-Picking another model in the thread leaves the team, and deleting a team stops
-its threads from leading it. Mobile starts threads with a team and shows it, but
+In a thread that launched through a team, picking another model leaves the
+team; one turned on with the Team button stays on until you turn it off. Deleting
+a team stops its threads from leading it. Forks, side chats and the team's own
+task threads never lead a team. Mobile starts threads with a team and shows it, but
 teams are edited on web and desktop.
 
 ## Quote an assistant response

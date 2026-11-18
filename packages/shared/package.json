@@ -167,6 +167,10 @@
       "types": "./src/Struct.ts",
       "import": "./src/Struct.ts"
     },
+    "./agentTeam": {
+      "types": "./src/agentTeam.ts",
+      "import": "./src/agentTeam.ts"
+    },
     "./serverSettings": {
       "types": "./src/serverSettings.ts",
       "import": "./src/serverSettings.ts"

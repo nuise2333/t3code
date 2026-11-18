@@ -820,7 +820,25 @@ it.effect(
         threadId,
         worktreePath: "/new-repo",
       });
+      // An agent team turned on after launch, then off, rides on the thread itself.
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("team-on-control"),
+        threadId,
+        agentTeam: { id: "reviewers", name: "Reviewers" },
+      });
+      assert.deepEqual((yield* projections.getThread(threadId)).agentTeam, {
+        id: "reviewers",
+        name: "Reviewers",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("team-off-control"),
+        threadId,
+        agentTeam: null,
+      });
       const thread = yield* projections.getThread(threadId);
+      assert.isNull(thread.agentTeam);
       assert.equal(thread.title, "After");
       assert.equal(thread.modelSelection.model, "gpt-6");
       assert.equal(thread.runtimeMode, "approval-required");

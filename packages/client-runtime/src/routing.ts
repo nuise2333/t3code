@@ -8,10 +8,13 @@ import {
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2Run,
+  type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
   type ProviderInstanceId,
   type ProviderOptionDescriptor,
   type RouteDecision,
+  type ThreadAgentTeam,
+  type ThreadId,
   type RoutingGroup,
   type RoutingGroupRules,
   type RoutingReason,
@@ -19,6 +22,7 @@ import {
   type RoutingTaskClass,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { isClaudeUltrathinkPrompt, isReasoningSelect } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
@@ -398,15 +402,28 @@ export interface RoutedGroupDisplay {
 
 /**
  * The group a thread launched through, as recorded at launch, so later edits to the group do not
- * relabel it. Once its user picks another model the thread is an ordinary manual one.
+ * relabel it. Once its user picks another model the thread is an ordinary manual one. A team the
+ * user turned on or off later decides the team instead.
  */
 export function routedGroupDisplay(input: {
   readonly routing: RouteDecision | null | undefined;
+  readonly agentTeam?: ThreadAgentTeam | null | undefined;
   readonly selection: Pick<ModelSelection, "instanceId" | "model"> | null | undefined;
   readonly providers: ReadonlyArray<ModelNameSource>;
 }): RoutedGroupDisplay | null {
+  if (!input.selection) return null;
+  const lead = routingMemberLabel(input.selection, input.providers);
+  if (input.agentTeam) {
+    return {
+      groupName: input.agentTeam.name,
+      team: true,
+      label: `Team ${input.agentTeam.name}, led by ${lead}`,
+      skipped: null,
+    };
+  }
   const decision = input.routing?.group;
-  if (!decision || !input.selection) return null;
+  if (!decision) return null;
+  if (decision.team === true && input.agentTeam === null) return null;
   if (
     decision.member.instanceId !== input.selection.instanceId ||
     decision.member.model !== input.selection.model
@@ -417,7 +434,6 @@ export function routedGroupDisplay(input: {
     (skip) =>
       `${routingMemberLabel(skip, input.providers)} (${ROUTING_SKIP_REASON_LABELS[skip.reason]})`,
   );
-  const lead = routingMemberLabel(input.selection, input.providers);
   return {
     groupName: decision.name,
     team: decision.team === true,
@@ -427,6 +443,34 @@ export function routedGroupDisplay(input: {
         : `${decision.name}${decision.rank === "quota" ? " (by quota)" : ""} → ${lead}`,
     skipped: skipped.length > 0 ? `Skipped: ${skipped.join(", ")}` : null,
   };
+}
+
+/** A saved team the composer's Team menu offers. */
+export interface TeamChoice {
+  readonly id: string;
+  readonly name: string;
+  /** Such as "Opus 5.5 leads GPT-6.1, Gemini 4". */
+  readonly summary: string;
+}
+
+/**
+ * Saved teams for the Team menu of a thread that already runs: the thread's model leads, so the
+ * summary names it as the lead.
+ */
+export function threadTeamChoices(input: {
+  readonly capability: boolean | undefined;
+  readonly groups: ReadonlyArray<RoutingGroup> | undefined;
+  readonly lead: Pick<ModelSelection, "instanceId" | "model"> | null | undefined;
+  readonly providers: ReadonlyArray<ModelNameSource>;
+}): ReadonlyArray<TeamChoice> {
+  if (input.capability !== true) return [];
+  return (input.groups ?? [])
+    .filter((group) => group.team === true && group.members.length > 0)
+    .map((team) => ({
+      id: team.id,
+      name: team.name,
+      summary: agentTeamSummary(team, input.lead ?? undefined, input.providers),
+    }));
 }
 
 const EFFORT_ONLY_REASONS: ReadonlySet<ReasonCode> = new Set(["model_row", "nearest_level"]);
@@ -629,4 +673,84 @@ export function plainRoutingGroups(
   groups: ReadonlyArray<RoutingGroup>,
 ): ReadonlyArray<RoutingGroup> {
   return groups.filter((group) => group.team !== true);
+}
+
+/** One task the lead handed to a team member, for the composer's team strip. */
+export interface AgentTeamTaskRow {
+  readonly id: string;
+  readonly title: string;
+  /** The member that runs it, such as "GPT-6.1". */
+  readonly member: string;
+  readonly status: "working" | "done" | "failed" | "stopped";
+  readonly childThreadId: ThreadId | null;
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
+}
+
+export interface AgentTeamProgress {
+  readonly rows: ReadonlyArray<AgentTeamTaskRow>;
+  readonly working: number;
+  readonly done: number;
+  readonly failed: number;
+}
+
+const TEAM_TASK_STATUS: Record<OrchestrationV2Subagent["status"], AgentTeamTaskRow["status"]> = {
+  idle: "working",
+  pending: "working",
+  running: "working",
+  waiting: "working",
+  completed: "done",
+  failed: "failed",
+  cancelled: "stopped",
+  interrupted: "stopped",
+};
+
+function isoOrNull(value: DateTime.Utc | null): string | null {
+  return value === null ? null : DateTime.formatIso(value);
+}
+
+/**
+ * The tasks a thread delegated to its team's members, oldest first. Only tasks the thread itself
+ * delegated (not a provider's own subagents or workflows) to a member of the team count.
+ */
+export function agentTeamProgress(input: {
+  readonly threadId: string;
+  readonly team: Pick<RoutingGroup, "members">;
+  readonly subagents: ReadonlyArray<OrchestrationV2Subagent>;
+  readonly providers: ReadonlyArray<ModelNameSource>;
+}): AgentTeamProgress {
+  const rows = input.subagents.flatMap((task): AgentTeamTaskRow[] => {
+    if (task.threadId !== input.threadId || task.origin !== "app_owned") return [];
+    if (task.workflow !== undefined) return [];
+    const selection = task.modelSelection;
+    const member =
+      selection &&
+      input.team.members.find(
+        (candidate) =>
+          candidate.instanceId === selection.instanceId && candidate.model === selection.model,
+      );
+    if (!member) return [];
+    return [
+      {
+        id: task.id,
+        title: task.title?.trim() || promptTitle(task.prompt),
+        member: routingMemberLabel(member, input.providers),
+        status: TEAM_TASK_STATUS[task.status],
+        childThreadId: task.childThreadId,
+        startedAt: isoOrNull(task.startedAt),
+        completedAt: isoOrNull(task.completedAt),
+      },
+    ];
+  });
+  return {
+    rows,
+    working: rows.filter((row) => row.status === "working").length,
+    done: rows.filter((row) => row.status === "done").length,
+    failed: rows.filter((row) => row.status === "failed").length,
+  };
+}
+
+function promptTitle(prompt: string): string {
+  const line = prompt.trim().split("\n", 1)[0]?.trim() ?? "";
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line || "Task";
 }

@@ -148,6 +148,8 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly regenerateTitle?: boolean;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly expectedEmpty?: boolean;
+  /** Turn an agent team on for the thread, or teams off with null. */
+  readonly agentTeam?: import("@t3tools/contracts").ThreadAgentTeam | null;
 }
 
 export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
@@ -694,7 +696,8 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
-      input.limitRecovery !== undefined
+      input.limitRecovery !== undefined ||
+      input.agentTeam !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
@@ -709,6 +712,7 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.linkedPullRequest === undefined
           ? {}
           : { linkedPullRequest: input.linkedPullRequest }),
+        ...(input.agentTeam === undefined ? {} : { agentTeam: input.agentTeam }),
       });
     }
     if (input.modelSelection !== undefined) {

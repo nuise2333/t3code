@@ -57,7 +57,7 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { LaunchRoutingRequest, RouteDecision } from "./routing.ts";
+import { LaunchRoutingRequest, RouteDecision, ThreadAgentTeam } from "./routing.ts";
 import {
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -458,6 +458,11 @@ const LenientThreadOpens = Schema.NullOr(OrchestrationV2ThreadOpens).pipe(
   Schema.catchDecoding(() => Effect.succeedSome(null)),
 );
 
+// A team this build cannot read leaves the thread without one, not unreadable.
+const LenientThreadAgentTeam = Schema.NullOr(ThreadAgentTeam).pipe(
+  Schema.catchDecoding(() => Effect.succeedSome(null)),
+);
+
 // A decision this build cannot read only loses its label, not the thread.
 const LenientRouteDecision = Schema.NullOr(RouteDecision).pipe(
   Schema.catchDecoding(() => Effect.succeedSome(null)),
@@ -516,6 +521,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
   /** The launch's effort routing decision, applied or shadow-only. Detail payloads only. */
   routing: Schema.optional(LenientRouteDecision),
+  /** Set when the user turned an agent team on (or off, null) after launch; wins over `routing`. */
+  agentTeam: Schema.optional(LenientThreadAgentTeam),
   /** A task delegated as a review; agents get a capped number of rounds with it. */
   delegatedRole: Schema.optional(Schema.Literal("review")),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
@@ -3273,6 +3280,8 @@ export const OrchestrationV2Command = Schema.Union([
     limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
     /** Link (object) or unlink (null) a pull request; absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+    /** Turn an agent team on (object) or teams off (null); absent leaves it unchanged. */
+    agentTeam: Schema.optional(Schema.NullOr(ThreadAgentTeam)),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request.link"),

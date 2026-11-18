@@ -4,6 +4,7 @@ import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
 import { CircleAlertIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import { ComposerAgentTeamControl } from "./ComposerAgentTeamControl";
 import { ComposerControl } from "./ComposerControl";
 import {
   ComposerFooterModeControls,
@@ -19,11 +20,15 @@ import {
   routingProviderSource,
   routedGroupDisplay,
   routedModelDisplay,
+  threadTeamChoices,
 } from "@t3tools/client-runtime/routing";
+import { threadAgentTeamRef } from "@t3tools/shared/agentTeam";
+import { useNavigate } from "@tanstack/react-router";
 import {
   type EnvironmentId,
   type ModelSelection,
   type RouteDecision,
+  type ThreadAgentTeam,
   type ProviderDriverKind,
   type ProviderInstanceId,
   type RuntimeMode,
@@ -44,6 +49,8 @@ import {
 } from "./ComposerModelEffort";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useServerConfigs } from "../../state/entities";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import type { useComposerProviderModel } from "./useComposerProviderModel";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 
@@ -92,6 +99,8 @@ export function ComposerControlsBar(props: {
   onProviderModelSelect: ChatComposerProps["onProviderModelSelect"];
   activeThreadModelSelection: ChatComposerProps["activeThreadModelSelection"];
   activeThreadRouting: RouteDecision | null | undefined;
+  /** The team the user turned on (or off, null) after launch. */
+  activeThreadAgentTeam: ThreadAgentTeam | null | undefined;
   selectedModelForPickerWithCustomFallback: string;
   lockedProvider: ChatComposerProps["lockedProvider"];
   lockedContinuationGroupKey: string | null;
@@ -242,6 +251,7 @@ export function ComposerControlsBar(props: {
     routeKind === "server"
       ? routedGroupDisplay({
           routing: props.activeThreadRouting,
+          agentTeam: props.activeThreadAgentTeam,
           selection: selectedModelSelection,
           providers: providerModels,
         })
@@ -317,6 +327,74 @@ export function ComposerControlsBar(props: {
             detail: [routedModel, traitsEffort.detail].filter(Boolean).join(" · "),
           }
         : traitsEffort;
+  const navigate = useNavigate();
+  const updateThreadMetadata = useAtomCommand(
+    threadEnvironment.updateMetadata,
+    "agent team change",
+  );
+  const teamsCapability =
+    serverConfig?.environment.capabilities.agentTeams === true &&
+    serverConfig.environment.capabilities.routingGroups === true;
+  const serverThreadId = routeKind === "server" ? routeThreadRef?.threadId : undefined;
+  const teamChoices =
+    routeKind === "server"
+      ? threadTeamChoices({
+          capability: teamsCapability,
+          groups: serverConfig?.settings.routingGroups,
+          lead: selectedModelSelection,
+          providers: providerModels,
+        })
+      : routingGroups
+          .filter((group) => group.team)
+          .map((group) => ({ id: group.id, name: group.name, summary: group.summary }));
+  const activeTeam =
+    routeKind === "server"
+      ? teamsCapability
+        ? threadAgentTeamRef({
+            routing: props.activeThreadRouting,
+            agentTeam: props.activeThreadAgentTeam,
+            modelSelection: selectedModelSelection,
+          })
+        : null
+      : pickedGroup?.team
+        ? { id: pickedGroup.id, name: pickedGroup.name }
+        : null;
+  const teamDisabledReason =
+    multipleModelSelections !== null ? "Pick one model to work as a team." : null;
+  const handleTeamSelect = useStableCallback((teamId: string | null) => {
+    if (routeKind !== "server") {
+      if (teamId === null) clearPickedGroup();
+      else handleRoutingGroupSelect(teamId);
+      return;
+    }
+    if (serverThreadId === undefined) return;
+    const team = teamChoices.find((choice) => choice.id === teamId);
+    void updateThreadMetadata({
+      environmentId,
+      input: {
+        threadId: serverThreadId,
+        agentTeam: team ? { id: team.id, name: team.name } : null,
+      },
+    });
+  });
+  const openTeamSettings = useStableCallback(() => {
+    void navigate({ to: "/settings/providers", search: { environmentId } });
+  });
+  const showTeamControl =
+    (routeKind === "server" ? serverThreadId !== undefined : Boolean(draftId)) &&
+    (teamChoices.length > 0 || activeTeam !== null);
+  const teamControl = showTeamControl ? (
+    <ComposerAgentTeamControl
+      teams={teamChoices}
+      active={activeTeam}
+      newThread={routeKind !== "server"}
+      size={controlSize}
+      hidden={composerControlsHidden}
+      disabledReason={teamDisabledReason}
+      onSelect={handleTeamSelect}
+      onManage={openTeamSettings}
+    />
+  ) : null;
   const restingBlockDefs = showModeBlock
     ? [
         {
@@ -436,6 +514,7 @@ export function ComposerControlsBar(props: {
   ) : (
     <>
       {composerModelPicker}
+      {teamControl}
 
       <>
         {restingBlockDefs.map((def, index) => {

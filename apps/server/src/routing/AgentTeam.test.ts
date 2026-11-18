@@ -37,31 +37,49 @@ const launchedOn = (
 });
 
 describe("activeAgentTeam", () => {
+  const lead = { instanceId: claude, model: "opus-fake" };
+  const other = { instanceId: codex, model: "gpt-fake" };
+
   it("leads only while the thread keeps its launch member and the team exists", () => {
-    const routing = launchedOn({ instanceId: claude, model: "opus-fake" });
-    const lead = { instanceId: claude, model: "opus-fake" };
-    expect(activeAgentTeam({ routing, modelSelection: lead, groups: [team] })?.id).toBe(
-      "reviewers",
-    );
-    // Picking another model leaves the team.
-    expect(
+    const routing = launchedOn(lead);
+    const leads = (input: Partial<Parameters<typeof activeAgentTeam>[0]>) =>
       activeAgentTeam({
         routing,
-        modelSelection: { instanceId: codex, model: "gpt-fake" },
+        agentTeam: undefined,
+        modelSelection: lead,
         groups: [team],
-      }),
-    ).toBeNull();
+        ...input,
+      });
+    expect(leads({})?.id).toBe("reviewers");
+    // Picking another model leaves the team.
+    expect(leads({ modelSelection: other })).toBeNull();
     // A deleted team, or a group that was not a team at launch, leads nothing.
-    expect(activeAgentTeam({ routing, modelSelection: lead, groups: [] })).toBeNull();
+    expect(leads({ groups: [] })).toBeNull();
+    expect(leads({ routing: launchedOn(lead, false) })).toBeNull();
+    const { team: _team, ...plainGroup } = team;
+    expect(leads({ groups: [plainGroup] })).toBeNull();
+  });
+
+  it("follows a team the user turned on or off after launch", () => {
+    const turnedOn = { id: "reviewers", name: "Reviewers" };
+    // Turned on in a thread that launched on its own: whichever model the thread runs leads.
+    expect(
+      activeAgentTeam({ routing: null, agentTeam: turnedOn, modelSelection: other, groups: [team] })
+        ?.id,
+    ).toBe("reviewers");
+    // Turned off, even in a thread that launched through the team.
     expect(
       activeAgentTeam({
-        routing: launchedOn(lead, false),
+        routing: launchedOn(lead),
+        agentTeam: null,
         modelSelection: lead,
         groups: [team],
       }),
     ).toBeNull();
-    const { team: _team, ...plainGroup } = team;
-    expect(activeAgentTeam({ routing, modelSelection: lead, groups: [plainGroup] })).toBeNull();
+    // A team turned on and then deleted leads nothing.
+    expect(
+      activeAgentTeam({ routing: null, agentTeam: turnedOn, modelSelection: lead, groups: [] }),
+    ).toBeNull();
   });
 });
 

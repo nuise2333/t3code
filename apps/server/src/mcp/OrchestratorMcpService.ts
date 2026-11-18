@@ -1379,6 +1379,7 @@ const make = Effect.gen(function* () {
     const { parent } = yield* loadThreadCaller(scope, "delegate_task");
     const team = AgentTeam.activeAgentTeam({
       routing: parent.thread.routing,
+      agentTeam: parent.thread.agentTeam,
       modelSelection: parent.thread.modelSelection,
       groups: settings.routingGroups,
     });
@@ -2631,6 +2632,7 @@ const make = Effect.gen(function* () {
           ? null
           : AgentTeam.activeAgentTeam({
               routing: parent.thread.routing,
+              agentTeam: parent.thread.agentTeam,
               modelSelection: parent.thread.modelSelection,
               groups: settings.routingGroups,
             });

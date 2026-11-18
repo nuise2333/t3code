@@ -1,9 +1,12 @@
 import {
   MessageId,
   NodeId,
+  ProviderDriverKind,
   ProviderInstanceId,
   RunId,
+  ThreadId,
   type OrchestrationV2RunStatus,
+  type OrchestrationV2Subagent,
   type ProviderOptionDescriptor,
   type RouteDecision,
   type RoutingGroup,
@@ -13,6 +16,7 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  agentTeamProgress,
   autoEffortOffered,
   autoEffortSupported,
   autoRoutingNote,
@@ -27,6 +31,7 @@ import {
   routedModelDisplay,
   routingGroupProblems,
   routingProviderSource,
+  threadTeamChoices,
 } from "./routing.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
@@ -140,6 +145,106 @@ describe("routing groups", () => {
     expect(
       routedGroupDisplay({ routing: routed, selection: group.members[1], providers }),
     ).toBeNull();
+  });
+
+  it("follows a team the user turned on or off after launch", () => {
+    const asTeam: RouteDecision = { ...routed, group: { ...groupDecision, team: true } };
+    const turnedOn = { id: "fast", name: "Fast" };
+    // Turned on: the thread's model leads, whichever it is.
+    expect(
+      routedGroupDisplay({
+        routing: routed,
+        agentTeam: turnedOn,
+        selection: group.members[0],
+        providers,
+      }),
+    ).toStrictEqual({
+      groupName: "Fast",
+      team: true,
+      label: "Team Fast, led by Claude Opus",
+      skipped: null,
+    });
+    // Turned off: the launch's team no longer labels the thread, but a plain group still does.
+    expect(
+      routedGroupDisplay({
+        routing: asTeam,
+        agentTeam: null,
+        selection: group.members[1],
+        providers,
+      }),
+    ).toBeNull();
+    expect(
+      routedGroupDisplay({ routing, agentTeam: null, selection: group.members[1], providers })
+        ?.label,
+    ).toBe("Fast → GPT 6");
+  });
+
+  it("offers saved teams to a running thread, led by its own model", () => {
+    const team = { ...group, id: "crew", name: "Crew", team: true as const };
+    expect(
+      threadTeamChoices({
+        capability: true,
+        groups: [group, team],
+        lead: group.members[1],
+        providers,
+      }),
+    ).toStrictEqual([{ id: "crew", name: "Crew", summary: "GPT 6 leads Claude Opus" }]);
+    expect(
+      threadTeamChoices({ capability: false, groups: [team], lead: null, providers }),
+    ).toStrictEqual([]);
+  });
+
+  it("tallies the tasks a thread handed to its team's members", () => {
+    const threadId = ThreadId.make("thread:lead");
+    const at = DateTime.makeUnsafe("2026-11-17T09:00:00.000Z");
+    const task = (
+      id: string,
+      status: OrchestrationV2Subagent["status"],
+      extra: Partial<OrchestrationV2Subagent> = {},
+    ): OrchestrationV2Subagent => ({
+      id: NodeId.make(id),
+      threadId,
+      runId: null,
+      parentNodeId: NodeId.make("node:root"),
+      origin: "app_owned",
+      createdBy: "agent",
+      driver: ProviderDriverKind.make("codex"),
+      providerInstanceId: instanceId,
+      providerThreadId: null,
+      childThreadId: ThreadId.make(`thread:${id}`),
+      nativeTaskRef: null,
+      prompt: `Do ${id}\nwith details`,
+      title: null,
+      model: "gpt-6",
+      modelSelection: { instanceId, model: "gpt-6" },
+      status,
+      result: null,
+      startedAt: at,
+      completedAt: null,
+      updatedAt: at,
+      ...extra,
+    });
+    const progress = agentTeamProgress({
+      threadId,
+      team: group,
+      providers,
+      subagents: [
+        task("a", "running", { title: "Review the parser" }),
+        task("b", "completed"),
+        task("c", "failed"),
+        // Not the team's: a provider's own subagent, another thread's task, a non-member model.
+        task("d", "running", { origin: "provider_native" }),
+        task("e", "running", { threadId: ThreadId.make("thread:other") }),
+        task("f", "running", { modelSelection: { instanceId, model: "gpt-5" } }),
+      ],
+    });
+    expect(progress.rows.map((row) => [row.title, row.member, row.status])).toStrictEqual([
+      ["Review the parser", "GPT 6", "working"],
+      ["Do b", "GPT 6", "done"],
+      ["Do c", "GPT 6", "failed"],
+    ]);
+    expect([progress.working, progress.done, progress.failed]).toStrictEqual([1, 1, 1]);
+    expect(progress.rows[0]?.childThreadId).toBe("thread:a");
   });
 
   it("offers groups only to a new single-model thread on a server that resolves them", () => {

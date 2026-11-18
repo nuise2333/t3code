@@ -49,6 +49,13 @@ export function subagentThreadTitle(input: {
   return `${detail.slice(0, end)}...`;
 }
 
+function withoutGroup<Routing extends { readonly group?: unknown }>(
+  routing: Routing,
+): Omit<Routing, "group"> {
+  const { group: _group, ...rest } = routing;
+  return rest;
+}
+
 export function makeSubagentChildThread(input: {
   readonly parentThread: OrchestrationV2AppThread;
   readonly childThreadId: ThreadId;
@@ -61,10 +68,12 @@ export function makeSubagentChildThread(input: {
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
 }): OrchestrationV2AppThread {
-  // The remote parent delegated the parent thread, not its subagents.
-  const { delegatedFrom: _delegatedFrom, ...inherited } = input.parentThread;
+  // The remote parent delegated the parent thread, not its subagents; a team member leads nothing.
+  const { delegatedFrom: _delegatedFrom, agentTeam: _agentTeam, ...inherited } = input.parentThread;
+  const routing = inherited.routing;
   return {
     ...inherited,
+    ...(routing?.group?.team === true ? { routing: withoutGroup(routing) } : {}),
     createdBy: input.createdBy,
     creationSource: input.creationSource,
     id: input.childThreadId,

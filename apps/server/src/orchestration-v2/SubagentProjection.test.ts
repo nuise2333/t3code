@@ -132,6 +132,46 @@ it("resets a subagent child's snooze, title job and remote delegation but keeps 
   });
 });
 
+it("a team member's thread leads nothing, whichever way its parent leads the team", () => {
+  const routing = {
+    taskClass: "implement" as const,
+    effort: null,
+    applied: false,
+    reasons: [],
+    group: {
+      id: "reviewers",
+      name: "Reviewers",
+      via: "picker" as const,
+      team: true as const,
+      chosen: 0,
+      member: parentModelSelection,
+      skipped: [],
+    },
+  };
+  const child = (parentThread: OrchestrationV2AppThread) =>
+    makeSubagentChildThread({
+      parentThread,
+      childThreadId,
+      parentNodeId: NodeId.make("node:team-parent"),
+      activeProviderThreadId: null,
+      providerInstanceId: parentProviderInstanceId,
+      // The lead may hand work to a member running its own model.
+      modelSelection: parentModelSelection,
+      title: "Member task",
+      now: childCreatedAt,
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+  const launched = child({ ...makeParentThread(), routing });
+  assert.isUndefined(launched.routing?.group);
+  assert.equal(launched.routing?.taskClass, "implement");
+  const turnedOn = child({
+    ...makeParentThread(),
+    agentTeam: { id: "reviewers", name: "Reviewers" },
+  });
+  assert.isUndefined(turnedOn.agentTeam);
+});
+
 it.effect.each(["provider", "mcp"] as const)(
   "a %s child does not inherit parent settlement protections and settles once its parent settles",
   (creationSource) =>

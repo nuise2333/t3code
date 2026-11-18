@@ -50,7 +50,15 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { ScopedProjectRef, UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
-import { higherEffortRetry, rootCausePrompt } from "@t3tools/client-runtime/routing";
+import {
+  agentTeamProgress,
+  agentTeamSummary,
+  higherEffortRetry,
+  rootCausePrompt,
+  routingProviderSource,
+} from "@t3tools/client-runtime/routing";
+import { threadAgentTeam } from "@t3tools/shared/agentTeam";
+import { agentTeamBannerItem } from "./chat/AgentTeamStrip";
 import { effortRetryBannerItem } from "./chat/ComposerEffortRetry";
 import { useCrossVendorModel } from "./chat/crossVendorModel";
 import { freshSessionBannerItem } from "./chat/ComposerFreshSession";
@@ -806,6 +814,8 @@ export default function ChatView(props: ChatViewProps) {
     }
   }
   const nowMinute = useNowMinute();
+  // The team strip's task list stays as the user left it across threads.
+  const [agentTeamTasksExpanded, setAgentTeamTasksExpanded] = useState(false);
   const draftDefaultModelSelection = draftThread
     ? resolveProjectSettings(
         settings,
@@ -2712,6 +2722,37 @@ export default function ChatView(props: ChatViewProps) {
       }),
     ];
   })();
+  const leadTeam =
+    isServerThread &&
+    serverProjection !== null &&
+    serverConfig?.environment.capabilities.agentTeams === true
+      ? threadAgentTeam({
+          routing: serverProjection.thread.routing,
+          agentTeam: serverProjection.thread.agentTeam,
+          modelSelection: serverProjection.thread.modelSelection,
+          groups: serverConfig.settings.routingGroups ?? [],
+        })
+      : null;
+  const agentTeamItems: ComposerBannerStackItem[] = (() => {
+    if (leadTeam === null || serverProjection === null) return [];
+    const nowMs = Date.parse(nowMinute);
+    const providers = providerStatuses.map((provider) => routingProviderSource(provider, nowMs));
+    return [
+      agentTeamBannerItem({
+        name: leadTeam.name,
+        summary: agentTeamSummary(leadTeam, serverProjection.thread.modelSelection, providers),
+        progress: agentTeamProgress({
+          threadId: serverProjection.thread.id,
+          team: leadTeam,
+          subagents: serverProjection.subagents,
+          providers,
+        }),
+        expanded: agentTeamTasksExpanded,
+        onToggle: () => setAgentTeamTasksExpanded((expanded) => !expanded),
+        onOpenThread: onOpenRelatedThreadStable,
+      }),
+    ];
+  })();
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2781,6 +2822,7 @@ export default function ChatView(props: ChatViewProps) {
         ...freshSessionItems,
         ...effortRetryItems,
         ...systemComposerBannerItems,
+        ...agentTeamItems,
       ];
     }
     return [
@@ -2793,6 +2835,7 @@ export default function ChatView(props: ChatViewProps) {
       ...freshSessionItems,
       ...effortRetryItems,
       ...systemComposerBannerItems,
+      ...agentTeamItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,
         mismatch: localCheckoutBranchMismatch,
@@ -3830,6 +3873,7 @@ export default function ChatView(props: ChatViewProps) {
                                 }
                                 activeThreadModelSelection={activeThread?.modelSelection}
                                 activeThreadRouting={serverProjection?.thread.routing}
+                                activeThreadAgentTeam={serverProjection?.thread.agentTeam}
                                 activeProjectId={activeProject?.id ?? null}
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}

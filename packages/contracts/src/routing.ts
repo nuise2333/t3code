@@ -139,6 +139,17 @@ export type RoutingGroup = typeof RoutingGroup.Type;
 /** Added to every team lead's turn after the built-in team rules. */
 export const AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH = 2000;
 
+/**
+ * A team the user turned on for a thread after launch: the thread's model, whichever it is, leads.
+ * Null means the user turned teams off, which also ends a team the thread launched through.
+ */
+export const ThreadAgentTeam = Schema.Struct({
+  id: RoutingGroupId,
+  /** The name when it was turned on, so a rename or delete keeps the thread's label. */
+  name: TrimmedNonEmptyString,
+});
+export type ThreadAgentTeam = typeof ThreadAgentTeam.Type;
+
 /** Group ids by task class; consulted only for launches that ask for Auto. */
 export const RoutingGroupRules = Schema.Struct({
   readonly: Schema.optionalKey(RoutingGroupId),
