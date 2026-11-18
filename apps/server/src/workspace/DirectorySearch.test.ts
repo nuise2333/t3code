@@ -3,10 +3,13 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 
 import * as DirectorySearch from "./DirectorySearch.ts";
+import * as HostFileSearch from "./HostFileSearch.ts";
 
 async function createTree(paths: ReadonlyArray<string>) {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-directory-search-"));
@@ -124,4 +127,77 @@ describe("searchIndexedDirectories", () => {
       truncated: true,
     });
   });
+});
+
+describe("DirectorySearch.search", () => {
+  const searchWith = (
+    home: string,
+    hostSearch: HostFileSearch.HostFileSearch["Service"],
+    query: string,
+  ) =>
+    DirectorySearch.make().pipe(
+      Effect.flatMap((service) => service.search({ query, limit: 10 })),
+      Effect.provideService(HostFileSearch.HostFileSearch, hostSearch),
+      Effect.provideService(HostProcess.Platform, "darwin"),
+      Effect.provideService(HostProcess.HomeDirectory, home),
+      Effect.provideService(HostProcess.Environment, {}),
+      Effect.provide(NodeServices.layer),
+    );
+
+  it.effect("ranks the OS index's folders, marking repositories and dropping skipped paths", () =>
+    Effect.gen(function* () {
+      const root = yield* makeTree([
+        "home/Archive/t3-code-notes",
+        "home/Projects/deep/a/b/c/d/e/f/t3-code/.git",
+        "home/Projects/web/node_modules/t3-code",
+      ]);
+      const home = NodePath.join(root, "home");
+      const requested: Array<HostFileSearch.FilesystemSearchHostInput> = [];
+      const result = yield* searchWith(
+        home,
+        {
+          backend: "spotlight",
+          search: (input) => {
+            requested.push(input);
+            return Effect.succeed({
+              entries: [
+                "Archive/t3-code-notes",
+                "Projects/deep/a/b/c/d/e/f/t3-code",
+                "Projects/web/node_modules/t3-code",
+                "Applications/T3 Code.app",
+              ].map((path) => ({ path: NodePath.join(home, path), kind: "directory" as const })),
+              truncated: false,
+            });
+          },
+        },
+        "t3-code",
+      );
+
+      expect(requested).toMatchObject([{ query: "t3-code", kind: "directory" }]);
+      expect(result.entries.map((entry) => NodePath.relative(home, entry.fullPath))).toEqual([
+        "Projects/deep/a/b/c/d/e/f/t3-code",
+        "Archive/t3-code-notes",
+      ]);
+      expect(result.entries.map((entry) => entry.isGitRepository)).toEqual([true, false]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("falls back to scanning when the OS index is unavailable", () =>
+    Effect.gen(function* () {
+      const root = yield* makeTree(["home/Projects/t3-code/.git"]);
+      const home = NodePath.join(root, "home");
+      const result = yield* searchWith(
+        home,
+        {
+          backend: "spotlight",
+          search: () =>
+            Effect.fail(new HostFileSearch.FilesystemSearchHostError({ reason: "unavailable" })),
+        },
+        "t3-code",
+      );
+      expect(result.entries.map((entry) => entry.fullPath)).toEqual([
+        NodePath.join(home, "Projects/t3-code"),
+      ]);
+    }).pipe(Effect.scoped),
+  );
 });

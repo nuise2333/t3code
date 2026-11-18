@@ -794,6 +794,21 @@ function OpenCommandPaletteDialog(props: {
     isFolderSearch &&
     folderSearchAccessError === null &&
     (debouncedFolderSearchText !== folderSearchText || folderSearchQuery.isPending);
+  const settledFolderSearchEntries =
+    !isFolderSearchPending && folderSearchQuery.data ? folderSearchQuery.data.entries : null;
+  // Kept from earlier renders: the host index can take a second, and blanking per keystroke flickers.
+  const [previousFolderSearchEntries, setPreviousFolderSearchEntries] = useState<
+    FilesystemSearchDirectoriesResult["entries"]
+  >(EMPTY_FOLDER_SEARCH_ENTRIES);
+  if (
+    settledFolderSearchEntries !== null &&
+    settledFolderSearchEntries !== previousFolderSearchEntries
+  ) {
+    setPreviousFolderSearchEntries(settledFolderSearchEntries);
+  }
+  const shownFolderSearchEntries = !isFolderSearch
+    ? EMPTY_FOLDER_SEARCH_ENTRIES
+    : (settledFolderSearchEntries ?? previousFolderSearchEntries);
 
   const prefetchBrowsePath = async (
     partialPath: string,
@@ -2345,7 +2360,7 @@ function OpenCommandPaletteDialog(props: {
       .map((project) => project.workspaceRoot),
   );
   const folderSearchGroups = buildFolderSearchGroups({
-    entries: folderSearchQuery.data?.entries ?? EMPTY_FOLDER_SEARCH_ENTRIES,
+    entries: shownFolderSearchEntries,
     existingProjectPaths,
     repositoryIcon: <FolderGit2Icon className={ITEM_ICON_CLASS} />,
     directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,

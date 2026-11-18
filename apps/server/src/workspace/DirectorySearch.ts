@@ -2,14 +2,21 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
+import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import type {
   FilesystemDirectorySearchEntry,
+  FilesystemSearchDirectoriesInput,
   FilesystemSearchDirectoriesResult,
 } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+
+import * as HostFileSearch from "./HostFileSearch.ts";
 
 export interface IndexedDirectory extends FilesystemDirectorySearchEntry {
   readonly depth: number;
@@ -40,6 +47,18 @@ function isSkippedDirectory(name: string, parentIsHome: boolean, platform: NodeJ
   );
 }
 
+/** True when a folder on the path is one the scan would skip, such as `node_modules` or `.app`. */
+function isSkippedPath(fullPath: string, homeDirectory: string, platform: NodeJS.Platform) {
+  const home = NodePath.resolve(homeDirectory);
+  const insideHome = isSameOrInside(home, fullPath);
+  const segments = (insideHome ? NodePath.relative(home, fullPath) : fullPath)
+    .split(/[\\/]/u)
+    .filter((segment) => segment.length > 0);
+  return segments.some((segment, index) =>
+    isSkippedDirectory(segment, insideHome && index === 0, platform),
+  );
+}
+
 interface DirectoryListing {
   readonly children: ReadonlyArray<string>;
   readonly isGitRepository: boolean;
@@ -62,7 +81,7 @@ async function readDirectory(directory: string): Promise<DirectoryListing> {
 }
 
 /** Home plus mounted volumes: `/Volumes/*` on macOS, `/media`/`/mnt` on Linux, other drives on Windows. */
-export async function listDirectorySearchRoots(input: {
+async function listDirectorySearchRoots(input: {
   readonly platform: NodeJS.Platform;
   readonly homeDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
@@ -174,7 +193,8 @@ export const scanDirectories = Effect.fn("DirectorySearch.scanDirectories")(func
 const WORD_BOUNDARY = /[\s._-]/;
 
 function matchRank(entry: IndexedDirectory, query: string): number | null {
-  const name = entry.name.toLowerCase();
+  // macOS names come back decomposed (NFD) while typed queries are composed (NFC).
+  const name = entry.name.normalize("NFC").toLowerCase();
   if (name === query) return 0;
   if (name.startsWith(query)) return 1;
   const index = name.indexOf(query);
@@ -191,7 +211,7 @@ export function searchIndexedDirectories(
   query: string,
   limit: number,
 ): FilesystemSearchDirectoriesResult {
-  const normalizedQuery = query.trim().toLowerCase().replaceAll("\\", "/");
+  const normalizedQuery = query.trim().normalize("NFC").toLowerCase().replaceAll("\\", "/");
   if (normalizedQuery.length === 0) return { entries: [], truncated: false };
   const matches: Array<{ readonly entry: IndexedDirectory; readonly rank: number }> = [];
   for (const entry of directories) {
@@ -215,3 +235,91 @@ export function searchIndexedDirectories(
     truncated: matches.length > limit,
   };
 }
+
+export class DirectorySearch extends Context.Service<
+  DirectorySearch,
+  {
+    readonly search: (
+      input: FilesystemSearchDirectoriesInput,
+    ) => Effect.Effect<FilesystemSearchDirectoriesResult>;
+  }
+>()("t3/workspace/DirectorySearch") {}
+
+/** Folders asked of the OS index before ranking; repositories are pulled to the top from these. */
+const INDEX_CANDIDATE_LIMIT = 200;
+const GIT_PROBE_CONCURRENCY = 16;
+const HOST_INDEX_MIN_QUERY_LENGTH = 2;
+/** Bounds the fallback scan used when the host has no file index. */
+const SCAN_MAX_DEPTH = 6;
+const SCAN_MAX_DIRECTORIES = 60_000;
+const SCAN_BUDGET = "4 seconds";
+const SCAN_INDEX_TTL = "5 minutes";
+
+export const make = Effect.fn("DirectorySearch.make")(function* () {
+  const hostFileSearch = yield* HostFileSearch.HostFileSearch;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const platform = yield* HostProcess.Platform;
+  const homeDirectory = yield* HostProcess.HomeDirectory;
+  const environment = yield* HostProcess.Environment;
+
+  const scannedIndex = yield* Effect.cachedWithTTL(
+    Effect.promise(() => listDirectorySearchRoots({ platform, homeDirectory, environment })).pipe(
+      Effect.flatMap((roots) =>
+        scanDirectories({
+          roots,
+          homeDirectory,
+          platform,
+          maxDepth: SCAN_MAX_DEPTH,
+          maxDirectories: SCAN_MAX_DIRECTORIES,
+          timeout: SCAN_BUDGET,
+        }),
+      ),
+    ),
+    SCAN_INDEX_TTL,
+  );
+
+  const searchScanned = (input: FilesystemSearchDirectoriesInput) =>
+    scannedIndex.pipe(
+      Effect.map((index) => searchIndexedDirectories(index.directories, input.query, input.limit)),
+    );
+
+  const toIndexed = (fullPath: string) =>
+    fileSystem.exists(NodePath.join(fullPath, ".git")).pipe(
+      Effect.orElseSucceed(() => false),
+      Effect.map((isGitRepository): IndexedDirectory => ({
+        name: NodePath.basename(fullPath) || fullPath,
+        fullPath,
+        isGitRepository,
+        depth: fullPath.split(/[\\/]/u).length,
+      })),
+    );
+
+  const search = Effect.fn("DirectorySearch.search")(function* (
+    input: FilesystemSearchDirectoriesInput,
+  ) {
+    // The OS index matches names only, so a path fragment needs the scanned index; one letter
+    // would stream most of the index.
+    if (
+      hostFileSearch.backend === undefined ||
+      input.query.length < HOST_INDEX_MIN_QUERY_LENGTH ||
+      /[\\/]/u.test(input.query)
+    ) {
+      return yield* searchScanned(input);
+    }
+    const found = yield* hostFileSearch
+      .search({ query: input.query, kind: "directory", limit: INDEX_CANDIDATE_LIMIT })
+      .pipe(Effect.option);
+    if (Option.isNone(found)) return yield* searchScanned(input);
+    const candidates = yield* Effect.forEach(
+      found.value.entries.filter((entry) => !isSkippedPath(entry.path, homeDirectory, platform)),
+      (entry) => toIndexed(entry.path),
+      { concurrency: GIT_PROBE_CONCURRENCY },
+    );
+    const ranked = searchIndexedDirectories(candidates, input.query, input.limit);
+    return { entries: ranked.entries, truncated: ranked.truncated || found.value.truncated };
+  });
+
+  return DirectorySearch.of({ search });
+});
+
+export const layer = Layer.effect(DirectorySearch, make());

@@ -156,8 +156,10 @@ first commit.
 
 To add a folder that is already on disk, choose **Local folder** under **Add Project**. Type a
 path such as `~/Projects/` to browse, or type part of a folder's name, like `pinball`, to search
-your home folder and mounted drives for it. Search does not look inside Git repositories, so
-browse to a folder nested in one.
+the computer for it. Search uses the system's file index (Spotlight on macOS, `locate` on Linux,
+Everything on Windows), so folders the index skips will not appear; browse to them instead.
+Repositories are listed first. Without an index, only your home folder and mounted drives are
+searched, and not inside Git repositories.
 
 Use **Add Project** in the command palette (`Cmd/Ctrl+K`) to clone a repository. Choose a hosting
 provider or paste a Git URL, then choose where to save it. Only GitHub is listed at first. To list
