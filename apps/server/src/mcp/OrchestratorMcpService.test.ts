@@ -3643,6 +3643,91 @@ describe("OrchestratorMcpService provider resolution", () => {
     }),
   );
 
+  it.effect("seats a Council reviewer only while Council is on", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      const parent = parentProjection([]);
+      const councilOn = yield* Ref.make(false);
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          hasReceipt: () => Effect.succeed(false),
+          assertProviderInstanceEnabled: () => Effect.void,
+          isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+          getThreadRecords: (threadId) =>
+            Ref.get(councilOn).pipe(
+              Effect.map((on) =>
+                threadId !== parentThreadId
+                  ? childProjection
+                  : ({
+                      ...parent,
+                      thread: {
+                        ...parent.thread,
+                        lineage: {
+                          parentThreadId: null,
+                          relationshipToParent: null,
+                          rootThreadId: parentThreadId,
+                        },
+                        council: on
+                          ? { target: 9, maxRounds: 10, reviewers: "auto", since: 0 }
+                          : null,
+                      },
+                    } as unknown as OrchestrationV2ThreadProjection),
+              ),
+            ),
+          dispatch: (command) =>
+            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+              Effect.andThen(Effect.fail(new Error("stop after dispatch") as never)),
+            ),
+        }),
+        ServerSettings.layerTest({}),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+        ]),
+        adapterRegistryLayer([codexInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const layer = OrchestratorMcpService.layer.pipe(
+        Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
+        Layer.provide(layerDependencies),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const refused = yield* service
+          .delegateTask(scope, { task: "Review the parser.", councilLens: "correctness" })
+          .pipe(Effect.flip);
+        assert.equal(refused.code, "invalid_request");
+        assert.include(refused.message, "Council is off");
+        assert.lengthOf(yield* Ref.get(dispatched), 0);
+
+        yield* Ref.set(councilOn, true);
+        yield* service
+          .delegateTask(scope, { task: "Review the parser.", councilLens: "correctness" })
+          .pipe(Effect.flip);
+        const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+          readonly task: string;
+          readonly title?: string;
+          readonly councilLens?: string;
+        }>;
+        assert.equal(commands[0]?.councilLens, "correctness");
+        assert.equal(commands[0]?.title, "Council: correctness");
+        assert.include(commands[0]?.task, "Council score: 7.5/10");
+        assert.include(commands[0]?.task, "Review the parser.");
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   describe("a delegated role picks the child's model", () => {
     const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
     const effortModel = (slug: string, id: string, levels: ReadonlyArray<string>, def: string) => ({

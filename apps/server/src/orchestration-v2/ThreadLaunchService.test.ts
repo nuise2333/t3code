@@ -3279,6 +3279,33 @@ describe("effort routing", () => {
       return { thread: projection.thread, run: projection.runs[0] };
     });
 
+  it.effect("starts a user's thread with their token saver and Council defaults", () => {
+    const harness = makeHarness({
+      providers: [codexProvider(["low", "medium", "high"])],
+      serverSettings: {
+        tokenSaverDefault: { packs: ["caveman", "quiet-tools"], level: "lite" },
+        councilDefaults: { target: 8.5, maxRounds: 5, reviewers: 3, newThreads: true },
+      },
+    });
+    return Effect.gen(function* () {
+      const { thread } = yield* launchedThread(planLaunch("assist-defaults"));
+      assert.deepStrictEqual(thread.tokenSaver?.packs, ["caveman", "quiet-tools"]);
+      assert.include(thread.council, { target: 8.5, maxRounds: 5, reviewers: 3 });
+      // The launch's own choice wins, and null starts it off.
+      const { thread: chosen } = yield* launchedThread(
+        planLaunch("assist-chosen", { tokenSaver: null, council: null }),
+      );
+      assert.isUndefined(chosen.tokenSaver);
+      assert.isUndefined(chosen.council);
+      // An agent's thread starts without the user's defaults.
+      const { thread: agents } = yield* launchedThread(
+        planLaunch("assist-agent", { createdBy: "agent", creationSource: "mcp" }),
+      );
+      assert.isUndefined(agents.tokenSaver);
+      assert.isUndefined(agents.council);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
   it.effect("records a shadow decision and keeps the selection while the setting is off", () => {
     const harness = makeHarness({ providers: [codexProvider(["low", "medium", "high", "xhigh"])] });
     return Effect.gen(function* () {

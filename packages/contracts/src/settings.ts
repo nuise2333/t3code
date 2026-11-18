@@ -42,6 +42,7 @@ import {
   RoutingGroupRules,
 } from "./routing.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
+import { CouncilDefaults, DEFAULT_COUNCIL_DEFAULTS, TokenSaverSettings } from "./council.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
@@ -1532,6 +1533,16 @@ export const ServerSettings = Schema.Struct({
     Schema.catchDecoding(() => Effect.succeedSome("")),
     Schema.withDecodingDefault(Effect.succeed("")),
   ),
+  /** The token saver new threads start with; null starts them without one. */
+  tokenSaverDefault: Schema.NullOr(TokenSaverSettings).pipe(
+    Schema.catchDecoding(() => Effect.succeedSome(null)),
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** Council's last settings, and whether new threads start with it on. */
+  councilDefaults: CouncilDefaults.pipe(
+    Schema.catchDecoding(() => Effect.succeedSome(DEFAULT_COUNCIL_DEFAULTS)),
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_COUNCIL_DEFAULTS)),
+  ),
   sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1980,6 +1991,8 @@ export const ServerSettingsPatch = Schema.Struct({
   agentTeamLeadGuidance: Schema.optionalKey(
     Schema.String.check(Schema.isMaxLength(AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH)),
   ),
+  tokenSaverDefault: Schema.optionalKey(Schema.NullOr(TokenSaverSettings)),
+  councilDefaults: Schema.optionalKey(CouncilDefaults),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

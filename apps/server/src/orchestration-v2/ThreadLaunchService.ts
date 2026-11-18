@@ -15,6 +15,8 @@ import {
   type OrchestrationV2ThreadProjection,
   type ProviderDriverKind,
   type LaunchRoutingRequest,
+  type CouncilSettings,
+  type TokenSaverSettings,
   type ProviderInteractionMode,
   ProjectId,
   type RunId,
@@ -97,6 +99,10 @@ export interface ThreadLaunchInput {
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   /** Auto effort or a routing group; every other launch keeps its selection. */
   readonly routing?: LaunchRoutingRequest | undefined;
+  /** Absent uses the user's default for a thread the user starts; null starts it off. */
+  readonly tokenSaver?: TokenSaverSettings | null | undefined;
+  /** Absent uses the user's default for a thread the user starts; null starts it off. */
+  readonly council?: CouncilSettings | null | undefined;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -260,6 +266,41 @@ const make = Effect.gen(function* () {
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  /**
+   * The token saver and Council a new thread starts with: the launch's own, else the user's
+   * defaults for a thread the user starts here. Agents' and linked environments' threads start
+   * without them unless the launch asks.
+   */
+  const launchAssists = Effect.fn("ThreadLaunchService.launchAssists")(function* (
+    input: ThreadLaunchInput,
+  ) {
+    const defaults =
+      input.createdBy === "user" &&
+      input.delegatedFrom === undefined &&
+      (input.tokenSaver === undefined || input.council === undefined)
+        ? yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => null))
+        : null;
+    const tokenSaver =
+      input.tokenSaver !== undefined ? input.tokenSaver : (defaults?.tokenSaverDefault ?? null);
+    const councilDefaults = defaults?.councilDefaults;
+    const council =
+      input.council !== undefined
+        ? input.council
+        : councilDefaults?.newThreads === true
+          ? {
+              target: councilDefaults.target,
+              maxRounds: councilDefaults.maxRounds,
+              reviewers: councilDefaults.reviewers,
+            }
+          : null;
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
+    return {
+      ...(tokenSaver === null || tokenSaver.packs.length === 0
+        ? {}
+        : { tokenSaver: { ...tokenSaver, changedAt: now } }),
+      ...(council === null ? {} : { council: { ...council, since: now } }),
+    };
+  });
   const textGeneration = yield* TextGeneration.TextGeneration;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
@@ -1265,6 +1306,7 @@ const make = Effect.gen(function* () {
               })
             : null;
         const modelSelection = routed?.selection ?? input.modelSelection;
+        const assists = yield* launchAssists(input);
         if (
           routed?.decision.group !== undefined ||
           modelSelection.instanceId !== input.modelSelection.instanceId
@@ -1333,6 +1375,7 @@ const make = Effect.gen(function* () {
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
                 ...(routed === null ? {} : { routing: routed.decision }),
+                ...assists,
                 worktreePath: initialWorktreePath,
                 ...(input.importedNativeThread === undefined
                   ? {}

@@ -167,6 +167,14 @@
       "types": "./src/Struct.ts",
       "import": "./src/Struct.ts"
     },
+    "./council": {
+      "types": "./src/council.ts",
+      "import": "./src/council.ts"
+    },
+    "./tokenSaver": {
+      "types": "./src/tokenSaver.ts",
+      "import": "./src/tokenSaver.ts"
+    },
     "./agentTeam": {
       "types": "./src/agentTeam.ts",
       "import": "./src/agentTeam.ts"

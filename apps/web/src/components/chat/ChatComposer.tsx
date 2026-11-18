@@ -201,6 +201,7 @@ import type {
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { threadContextAttachment } from "~/lib/threadContextAttachment";
+import type { ThreadAssistsState } from "./ComposerThreadAssists";
 import {
   type ComposerCommandItem,
   ComposerCommandMenu,
@@ -414,6 +415,7 @@ export interface ChatComposerProps {
   activeThreadModelSelection: ModelSelection | null | undefined;
   activeThreadRouting?: RouteDecision | null | undefined;
   activeThreadAgentTeam?: ThreadAgentTeam | null | undefined;
+  activeThreadAssists?: ThreadAssistsState | undefined;
   reportedModelSelection?: ModelSelection | null;
   activeProjectId: ProjectId | null;
   projectName?: string | undefined;
@@ -2472,6 +2474,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activeThreadModelSelection={activeThreadModelSelection}
       activeThreadRouting={props.activeThreadRouting}
       activeThreadAgentTeam={props.activeThreadAgentTeam}
+      activeThreadAssists={props.activeThreadAssists}
       selectedModelForPickerWithCustomFallback={selectedModelForPickerWithCustomFallback}
       lockedProvider={lockedProvider}
       lockedContinuationGroupKey={lockedContinuationGroupKey}

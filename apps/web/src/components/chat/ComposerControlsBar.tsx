@@ -5,6 +5,7 @@ import { type AppModelOption } from "../../modelSelection";
 import { CircleAlertIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerAgentTeamControl } from "./ComposerAgentTeamControl";
+import { ComposerThreadAssists, type ThreadAssistsState } from "./ComposerThreadAssists";
 import { ComposerControl } from "./ComposerControl";
 import {
   ComposerFooterModeControls,
@@ -101,6 +102,8 @@ export function ComposerControlsBar(props: {
   activeThreadRouting: RouteDecision | null | undefined;
   /** The team the user turned on (or off, null) after launch. */
   activeThreadAgentTeam: ThreadAgentTeam | null | undefined;
+  /** The running thread's token saver and Council. */
+  activeThreadAssists: ThreadAssistsState | undefined;
   selectedModelForPickerWithCustomFallback: string;
   lockedProvider: ChatComposerProps["lockedProvider"];
   lockedContinuationGroupKey: string | null;
@@ -515,6 +518,13 @@ export function ComposerControlsBar(props: {
     <>
       {composerModelPicker}
       {teamControl}
+      <ComposerThreadAssists
+        environmentId={environmentId}
+        serverThreadId={serverThreadId}
+        draftId={routeKind === "draft" ? draftId : null}
+        thread={props.activeThreadAssists}
+        size={controlSize}
+      />
 
       <>
         {restingBlockDefs.map((def, index) => {

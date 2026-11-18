@@ -837,7 +837,41 @@ it.effect(
         threadId,
         agentTeam: null,
       });
+      // The token saver and Council are stamped when they change; Council keeps its cycle.
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("assists-on-control"),
+        threadId,
+        tokenSaver: { packs: ["caveman"], level: "lite" },
+        council: { target: 9, maxRounds: 5, reviewers: "auto" },
+      });
+      const assisted = yield* projections.getThread(threadId);
+      assert.deepEqual(assisted.tokenSaver?.packs, ["caveman"]);
+      assert.isNumber(assisted.tokenSaver?.changedAt);
+      const since = assisted.council?.since;
+      assert.isNumber(since);
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("council-raise-control"),
+        threadId,
+        council: { target: 9.5, maxRounds: 10, reviewers: 3 },
+        councilAccept: true,
+      });
+      const raised = yield* projections.getThread(threadId);
+      assert.equal(raised.council?.target, 9.5);
+      assert.equal(raised.council?.reviewers, 3);
+      assert.deepEqual(raised.council?.since, since);
+      assert.isNumber(raised.council?.acceptedAt);
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("assists-off-control"),
+        threadId,
+        tokenSaver: null,
+        council: null,
+      });
       const thread = yield* projections.getThread(threadId);
+      assert.isNull(thread.tokenSaver);
+      assert.isNull(thread.council);
       assert.isNull(thread.agentTeam);
       assert.equal(thread.title, "After");
       assert.equal(thread.modelSelection.model, "gpt-6");

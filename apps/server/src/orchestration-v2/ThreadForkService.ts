@@ -99,11 +99,12 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           cause: forkableSourceRunStatusError(sourceRun),
         });
       }
-      // The parent delegated the source thread, not its forks; a team leads only where it was turned on.
+      // The parent delegated the source thread, not its forks; a team or Council runs only where it was turned on.
       const {
         delegatedFrom: _delegatedFrom,
         delegatedRole: _delegatedRole,
         agentTeam: _agentTeam,
+        council: _council,
         ...inherited
       } = input.sourceProjection.thread;
       const targetThread: OrchestrationV2AppThread = {

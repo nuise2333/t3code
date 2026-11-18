@@ -68,8 +68,14 @@ export function makeSubagentChildThread(input: {
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
 }): OrchestrationV2AppThread {
-  // The remote parent delegated the parent thread, not its subagents; a team member leads nothing.
-  const { delegatedFrom: _delegatedFrom, agentTeam: _agentTeam, ...inherited } = input.parentThread;
+  // The remote parent delegated the parent thread, not its subagents; a member or reviewer leads
+  // no team and convenes no Council. It keeps the parent's token saver.
+  const {
+    delegatedFrom: _delegatedFrom,
+    agentTeam: _agentTeam,
+    council: _council,
+    ...inherited
+  } = input.parentThread;
   const routing = inherited.routing;
   return {
     ...inherited,

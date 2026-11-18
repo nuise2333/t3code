@@ -2176,6 +2176,10 @@ export const layerWsRpc = (
                           interactionMode: input.interactionMode,
                           workspaceStrategy: input.workspaceStrategy,
                           ...(input.routing === undefined ? {} : { routing: input.routing }),
+                          ...(input.tokenSaver === undefined
+                            ? {}
+                            : { tokenSaver: input.tokenSaver }),
+                          ...(input.council === undefined ? {} : { council: input.council }),
                           ...(input.initialMessage === undefined
                             ? {}
                             : {

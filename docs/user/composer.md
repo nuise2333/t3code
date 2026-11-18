@@ -229,6 +229,33 @@ a team stops its threads from leading it. Forks, side chats and the team's own
 task threads never lead a team. Mobile starts threads with a team and shows it, but
 teams are edited on web and desktop.
 
+## Token saver
+
+The leaf button beside the model picker turns on guidance that makes the agent
+spend fewer tokens in this thread: **Caveman** (terse replies, with Lite, Full
+and Ultra levels), **Lean code**, **Quiet tools** and **RTK compression** (needs
+the `rtk` command installed). The panel shows a rough estimate of the saving.
+The guidance goes with your next message and is restated every few messages.
+**Start new threads like this** makes the current choice the default for new
+threads; **Turn all off** clears it.
+
+## Council
+
+The balance button turns on Council: independent reviewers score the work out of
+10, and every one of them must reach your target (the lowest score counts, not
+the average). The agent convenes 2 to 5 reviewers with `delegate_task`, each
+checking one lens such as correctness or tests, fixes what they find and
+convenes fresh rounds, up to the round limit. Set the target, the round limit
+and the number of reviewers in the panel; they become your defaults, and
+**Start new threads with Council on** turns it on for every new thread.
+
+While a cycle runs, a strip above the composer shows the round, the lowest score
+against the target and, expanded, each reviewer's lens and score. If the agent
+stops below the target, T3 Code brings it back once per round; if it stops
+again, the strip says Council needs you: reply to keep fixing, lower the target,
+or choose **Accept and finish**. A new message after a pass, an accept or the
+round limit starts a new cycle that reviews only what comes next.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

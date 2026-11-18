@@ -132,6 +132,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   scheduledTaskRoutingGroups: Schema.optionalKey(Schema.Boolean),
   /** Keeps a routing group's `team` and leads team threads; clients show Agent teams only when set. */
   agentTeams: Schema.optionalKey(Schema.Boolean),
+  /** Threads take token saver packs and Council. */
+  threadAssists: Schema.optionalKey(Schema.Boolean),
+  /** The rtk command is installed, so the RTK compression pack can run. */
+  rtk: Schema.optionalKey(Schema.Boolean),
   /** Serves `server.crossVendorModel`; clients hide "Find the cause" where it is absent. */
   crossVendorModel: Schema.optionalKey(Schema.Boolean),
   /** Serves `server.routingSummary`; the Usage page shows its Routing section only when set. */

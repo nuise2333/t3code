@@ -3802,6 +3802,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : { delegatedRole: command.delegatedRole }),
           }),
       ...(command.routing === undefined ? {} : { routing: command.routing }),
+      ...(command.tokenSaver === undefined ? {} : { tokenSaver: command.tokenSaver }),
+      ...(command.council === undefined ? {} : { council: command.council }),
       lineage: {
         parentThreadId: null,
         relationshipToParent: null,
@@ -4876,6 +4878,35 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...(command.branch === undefined ? {} : { branch: command.branch }),
             ...(command.worktreePath === undefined ? {} : { worktreePath: command.worktreePath }),
             ...(command.agentTeam === undefined ? {} : { agentTeam: command.agentTeam }),
+            ...(command.tokenSaver === undefined
+              ? {}
+              : {
+                  tokenSaver:
+                    command.tokenSaver === null
+                      ? null
+                      : { ...command.tokenSaver, changedAt: DateTime.toEpochMillis(now) },
+                }),
+            ...(command.council === undefined
+              ? {}
+              : {
+                  // New settings keep the running cycle; turning Council on starts one.
+                  council:
+                    command.council === null
+                      ? null
+                      : thread.council
+                        ? { ...thread.council, ...command.council }
+                        : { ...command.council, since: DateTime.toEpochMillis(now) },
+                }),
+            // Accepting lets the lead finish this cycle below the target; Council stays on.
+            ...(command.councilAccept === true && thread.council && command.council !== null
+              ? {
+                  council: {
+                    ...thread.council,
+                    ...command.council,
+                    acceptedAt: DateTime.toEpochMillis(now),
+                  },
+                }
+              : {}),
             ...(command.linkedPullRequest === undefined
               ? {}
               : {
@@ -9473,6 +9504,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         modelSelection: command.modelSelection,
         ...(command.completionWake === undefined ? {} : { completionWake: command.completionWake }),
         ...(command.delegatedRole === undefined ? {} : { delegatedRole: command.delegatedRole }),
+        ...(command.councilLens === undefined ? {} : { councilLens: command.councilLens }),
         status: "running",
         result: null,
         startedAt: now,

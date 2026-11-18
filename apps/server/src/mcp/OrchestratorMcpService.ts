@@ -121,6 +121,8 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as AgentTeam from "../routing/AgentTeam.ts";
+import * as ThreadAssists from "../assist/ThreadAssists.ts";
+import { councilApplies } from "@t3tools/shared/council";
 import * as RoutingPolicy from "../routing/RoutingPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
@@ -2748,6 +2750,12 @@ const make = Effect.gen(function* () {
           input.target === undefined
             ? undefined
             : PeerForwarding.remoteTarget(callerScope, input.target.environmentId);
+        if (input.councilLens !== undefined && environmentId !== undefined) {
+          return yield* failure(
+            "invalid_request",
+            "A Council reviewer runs here, in this thread's project; omit target.environmentId.",
+          );
+        }
         if (input.target !== undefined && environmentId !== undefined) {
           yield* requireCapability(callerScope);
           const scope = yield* requireThreadScope(callerScope, "delegate_task");
@@ -2761,6 +2769,15 @@ const make = Effect.gen(function* () {
             : readTask(scope, taskId, false, true);
         }
         const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
+        if (
+          input.councilLens !== undefined &&
+          (!parent.thread.council || !councilApplies(parent.thread))
+        ) {
+          return yield* failure(
+            "invalid_request",
+            "councilLens seats a Council reviewer, and Council is off for this thread. Omit councilLens.",
+          );
+        }
         if (
           input.target?.projectId !== undefined &&
           input.target.projectId !== parent.thread.projectId
@@ -2883,8 +2900,16 @@ const make = Effect.gen(function* () {
             parentThreadId: scope.thread.threadId,
             parentRunId: parentRun.id,
             parentNodeId: parentRun.rootNodeId,
-            task: taskPrompt(input),
-            ...(input.title === undefined ? {} : { title: input.title }),
+            task:
+              input.councilLens === undefined
+                ? taskPrompt(input)
+                : ThreadAssists.councilReviewerTask(input.councilLens, taskPrompt(input)),
+            ...(input.title !== undefined
+              ? { title: input.title }
+              : input.councilLens !== undefined
+                ? { title: `Council: ${input.councilLens}` }
+                : {}),
+            ...(input.councilLens === undefined ? {} : { councilLens: input.councilLens }),
             modelSelection,
             runtimeMode,
             interactionMode,

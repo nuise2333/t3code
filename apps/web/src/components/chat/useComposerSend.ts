@@ -116,6 +116,7 @@ import {
   startAttachmentUpload,
 } from "../../lib/attachmentUploadQueue";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { draftThreadAssistsAtom } from "./threadAssistsDraft";
 import { fileAttachmentCapabilityBlockReason } from "./composerAttachmentFiles";
 import { useLinkedEnvironments } from "../../state/peerLinks";
 import { readEnvironmentScope } from "../../state/session";
@@ -1338,6 +1339,9 @@ export function useComposerSend(input: ComposerSendInput) {
                 : undefined,
           })
         : undefined;
+      // A new thread starts with the token saver and Council picked on its draft, if any.
+      const draftAssists =
+        isLocalDraftThread && draftId ? appAtomRegistry.get(draftThreadAssistsAtom(draftId)) : {};
       const startPromise = startThreadTurn({
         environmentId,
         input: {
@@ -1361,6 +1365,7 @@ export function useComposerSend(input: ComposerSendInput) {
           ...(freshArm === undefined ? {} : { freshContext: true }),
           ...(bootstrap ? { bootstrap } : {}),
           ...(routing ? { routing } : {}),
+          ...draftAssists,
           createdAt: messageCreatedAt,
         },
       });

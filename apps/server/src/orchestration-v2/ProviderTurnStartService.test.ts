@@ -405,6 +405,7 @@ function makeLocalCommandHarness(input: {
   readonly text: string;
   /** The thread launched on its run's model through an agent team that still exists. */
   readonly agentTeam?: boolean;
+  readonly tokenSaver?: OrchestrationV2ThreadProjection["thread"]["tokenSaver"];
   readonly manualContinuation?: boolean;
   readonly nativeResumeUnsupported?: boolean;
   readonly steeringRestart?: boolean;
@@ -527,6 +528,7 @@ function makeLocalCommandHarness(input: {
       worktreePath: input.worktreePath ?? null,
       lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
       ...(input.agentTeam ? { routing: teamRouting(run.modelSelection) } : {}),
+      ...(input.tokenSaver === undefined ? {} : { tokenSaver: input.tokenSaver }),
     } as OrchestrationV2ThreadProjection["thread"],
     runs: [
       ...(input.previousNativeSession
@@ -2144,6 +2146,26 @@ effectIt.effect("gives a team lead its members and the user's guidance on each t
     expect(text).toMatch(/^<t3_code_agent_team name="Crew">/);
     expect(text).toContain("model `opus-fake`");
     expect(text).toContain("Lead guidance from the user:\nOnly lead.");
+    expect(text.endsWith("\n\nShip the fix")).toBe(true);
+  }),
+);
+
+effectIt.effect("restates the token saver after it changed, and keeps commands verbatim", () =>
+  Effect.gen(function* () {
+    // Changed after every earlier run of the thread, so this turn is the first to carry it.
+    const saver = { packs: ["caveman" as const], level: "lite" as const, changedAt: 8.64e15 };
+    const harness = makeLocalCommandHarness({
+      text: "Ship the fix",
+      agentTeam: true,
+      tokenSaver: saver,
+      sideChat: { contextRun: "delivered" },
+    });
+    yield* harness.start;
+    const text = harness.startTurn.mock.calls[0]?.[0].message.text ?? "";
+    // The team's rules come first, then the token saver, then the user's words.
+    expect(text).toMatch(/^<t3_code_agent_team name="Crew">/);
+    expect(text).toContain("<t3_code_token_saver>\nResponse style");
+    expect(text).toContain("Answer first.");
     expect(text.endsWith("\n\nShip the fix")).toBe(true);
   }),
 );

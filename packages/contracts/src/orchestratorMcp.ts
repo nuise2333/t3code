@@ -33,6 +33,7 @@ import {
   ThreadPullRequestLinkSource,
 } from "./threadPullRequest.ts";
 import { RoutingGroupId } from "./routing.ts";
+import { CouncilLens } from "./council.ts";
 import { secretRequestPageUrl } from "./secretRequest.ts";
 import { hasOnlyPairedSurrogates } from "./threadMetadataMcp.ts";
 import { LastThreadTitleRegeneration, ThreadTitleRegeneration } from "./threadTitle.ts";
@@ -204,6 +205,9 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
     }),
   ),
   interactionMode: Schema.optional(OrchestratorMcpInteractionMode),
+  councilLens: Schema.optional(CouncilLens).annotate({
+    description: "Council on only: a reviewer for this lens, such as 'correctness'.",
+  }),
 });
 export type OrchestratorMcpDelegateTaskInput = typeof OrchestratorMcpDelegateTaskInput.Type;
 

@@ -58,6 +58,8 @@ import {
   routingProviderSource,
 } from "@t3tools/client-runtime/routing";
 import { threadAgentTeam } from "@t3tools/shared/agentTeam";
+import { councilApplies, councilStatus, councilUserMessageTimes } from "@t3tools/shared/council";
+import { councilBannerItem } from "./chat/CouncilStrip";
 import { agentTeamBannerItem } from "./chat/AgentTeamStrip";
 import { effortRetryBannerItem } from "./chat/ComposerEffortRetry";
 import { useCrossVendorModel } from "./chat/crossVendorModel";
@@ -816,6 +818,9 @@ export default function ChatView(props: ChatViewProps) {
   const nowMinute = useNowMinute();
   // The team strip's task list stays as the user left it across threads.
   const [agentTeamTasksExpanded, setAgentTeamTasksExpanded] = useState(false);
+  const [councilSeatsExpanded, setCouncilSeatsExpanded] = useState(false);
+  // A settled Council strip the user closed, by thread, cycle and state.
+  const [dismissedCouncilKey, setDismissedCouncilKey] = useState<string | null>(null);
   const draftDefaultModelSelection = draftThread
     ? resolveProjectSettings(
         settings,
@@ -2722,6 +2727,14 @@ export default function ChatView(props: ChatViewProps) {
       }),
     ];
   })();
+  const activeThreadAssists =
+    serverProjection === null
+      ? undefined
+      : {
+          tokenSaver: serverProjection.thread.tokenSaver,
+          council: serverProjection.thread.council,
+          councilApplies: councilApplies(serverProjection.thread),
+        };
   const leadTeam =
     isServerThread &&
     serverProjection !== null &&
@@ -2749,6 +2762,41 @@ export default function ChatView(props: ChatViewProps) {
         }),
         expanded: agentTeamTasksExpanded,
         onToggle: () => setAgentTeamTasksExpanded((expanded) => !expanded),
+        onOpenThread: onOpenRelatedThreadStable,
+      }),
+    ];
+  })();
+  const councilItems: ComposerBannerStackItem[] = (() => {
+    const thread = serverProjection?.thread;
+    const council = thread?.council;
+    if (!isServerThread || serverProjection === null || !thread || !council) return [];
+    if (!councilApplies(thread)) return [];
+    const status = councilStatus({
+      threadId: thread.id,
+      council,
+      subagents: serverProjection.subagents,
+      userMessageTimesMs: councilUserMessageTimes(serverProjection.messages),
+    });
+    const threadIdle = serverProjection.runs.every(
+      (run) => !["preparing", "queued", "starting", "running", "waiting"].includes(run.status),
+    );
+    if (status.rounds.length === 0 && status.state !== "accepted") return [];
+    const settled =
+      status.state === "passed" || status.state === "accepted" || status.state === "limit";
+    const dismissKey = `${thread.id}:${status.cycleStartMs}:${status.state}`;
+    if (settled && dismissedCouncilKey === dismissKey) return [];
+    return [
+      councilBannerItem({
+        status,
+        threadIdle,
+        expanded: councilSeatsExpanded,
+        onToggle: () => setCouncilSeatsExpanded((expanded) => !expanded),
+        onAccept: () =>
+          void updateThreadMetadata({
+            environmentId,
+            input: { threadId: thread.id, councilAccept: true },
+          }),
+        ...(settled ? { onDismiss: () => setDismissedCouncilKey(dismissKey) } : {}),
         onOpenThread: onOpenRelatedThreadStable,
       }),
     ];
@@ -2823,6 +2871,7 @@ export default function ChatView(props: ChatViewProps) {
         ...effortRetryItems,
         ...systemComposerBannerItems,
         ...agentTeamItems,
+        ...councilItems,
       ];
     }
     return [
@@ -2836,6 +2885,7 @@ export default function ChatView(props: ChatViewProps) {
       ...effortRetryItems,
       ...systemComposerBannerItems,
       ...agentTeamItems,
+      ...councilItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,
         mismatch: localCheckoutBranchMismatch,
@@ -3874,6 +3924,7 @@ export default function ChatView(props: ChatViewProps) {
                                 activeThreadModelSelection={activeThread?.modelSelection}
                                 activeThreadRouting={serverProjection?.thread.routing}
                                 activeThreadAgentTeam={serverProjection?.thread.agentTeam}
+                                activeThreadAssists={activeThreadAssists}
                                 activeProjectId={activeProject?.id ?? null}
                                 projectName={activeProject?.title}
                                 compactThreadUnavailable={compactThreadUnavailable}
