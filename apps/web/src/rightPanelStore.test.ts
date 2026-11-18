@@ -517,6 +517,40 @@ describe("rightPanelStore", () => {
     expect(selectThreadRightPanelState(migrated.byThreadKey, refA).maximized).toBe(true);
   });
 
+  it("keeps valid Files tabs and drops invalid Files fields during migration", () => {
+    const migrated = migratePersistedRightPanelState({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "files:a",
+          surfaces: [
+            { id: "files", kind: "files", folderTrail: 3 },
+            { id: "files:a", kind: "files", folderPath: "src", folderTrail: "src/a", view: "grid" },
+            { id: "files:b", kind: "files", folderPath: 7, view: "icons" },
+            { id: "files:", kind: "files" },
+            { id: "other", kind: "files" },
+            { id: "file:/tmp", kind: "file", relativePath: "/tmp", view: "grid" },
+            { id: "file:src", kind: "file", relativePath: "src", view: "icons" },
+          ],
+        },
+      },
+    });
+    expect(selectThreadRightPanelState(migrated.byThreadKey, refA).surfaces).toEqual([
+      { id: "files", kind: "files" },
+      { id: "files:a", kind: "files", folderPath: "src", folderTrail: "src/a", view: "grid" },
+      { id: "files:b", kind: "files" },
+      {
+        id: "file:/tmp",
+        kind: "file",
+        relativePath: "/tmp",
+        revealLine: null,
+        revealRequestId: 0,
+        view: "grid",
+      },
+      { id: "file:src", kind: "file", relativePath: "src", revealLine: null, revealRequestId: 0 },
+    ]);
+  });
+
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({
@@ -750,12 +784,144 @@ describe("rightPanelStore", () => {
     ).toBe("files");
   });
 
-  it("walks a folder browser up and back down in one tab", () => {
+  it("activates an open Files tab, preferring the root, for root links, open and toggle", () => {
+    const store = useRightPanelStore.getState();
+    const state = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    store.openFilesTab(refA, { id: "files:sub", folderPath: "src" });
+    store.openFile(refA, "README.md");
+    store.openFile(refA, ".");
+    expect(state().activeSurfaceId).toBe("files:sub");
+    store.openFilesTab(refA, { id: "files:root" });
+    store.activateSurface(refA, "file:README.md");
+    store.open(refA, "files");
+    expect(state().activeSurfaceId).toBe("files:root");
+    store.activateSurface(refA, "file:README.md");
+    store.toggle(refA, "files");
+    expect(state().activeSurfaceId).toBe("files:root");
+    store.openFile(refA, ".");
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "files:sub",
+      "files:root",
+      "file:README.md",
+    ]);
+  });
+
+  it("opens each new Files tab after the active tab with its own id", () => {
+    const store = useRightPanelStore.getState();
+    const state = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    store.open(refA, "diff");
+    store.open(refA, "device");
+    store.activateSurface(refA, "diff");
+    store.openFilesTab(refA);
+    store.openFilesTab(refA, { folderPath: "src", folderTrail: "src/lib" });
+    const [first, second] = state().surfaces.filter((surface) => surface.kind === "files");
+    expect(first!.id).toMatch(/^files:.+/);
+    expect(second!.id).toMatch(/^files:.+/);
+    expect(first!.id).not.toBe(second!.id);
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "diff",
+      first!.id,
+      second!.id,
+      "device",
+    ]);
+    expect(second).toEqual({
+      id: second!.id,
+      kind: "files",
+      folderPath: "src",
+      folderTrail: "src/lib",
+    });
+    expect(state().activeSurfaceId).toBe(second!.id);
+    store.openFilesTab(refA, { id: first!.id, folderPath: "ignored" });
+    expect(state().activeSurfaceId).toBe(first!.id);
+    expect(state().surfaces).toHaveLength(4);
+    // Duplicating a background tab places the copy beside it, not beside the active tab.
+    store.openFilesTab(refA, { id: "files:copy", folderPath: "src", anchorId: second!.id });
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "diff",
+      first!.id,
+      second!.id,
+      "files:copy",
+      "device",
+    ]);
+    expect(state().surfaces[3]).toEqual({ id: "files:copy", kind: "files", folderPath: "src" });
+  });
+
+  it("moves a Files tab in place through breadcrumbs and opens new tabs beside it", () => {
+    const store = useRightPanelStore.getState();
+    const state = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    store.openFile(refA, "README.md");
+    store.openFilesTab(refA, { id: "files:a", folderPath: "apps/web/src", view: "grid" });
+    store.open(refA, "diff");
+
+    store.navigateFolder(refA, "files:a", "apps", "apps/web/src");
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "file:README.md",
+      "files:a",
+      "diff",
+    ]);
+    expect(state().surfaces[1]).toEqual({
+      id: "files:a",
+      kind: "files",
+      folderPath: "apps",
+      folderTrail: "apps/web/src",
+      view: "grid",
+    });
+    expect(state().activeSurfaceId).toBe("files:a");
+
+    store.navigateFolder(refA, "files:a", "", "apps/web/src");
+    expect(state().surfaces[1]).toEqual({
+      id: "files:a",
+      kind: "files",
+      folderTrail: "apps/web/src",
+      view: "grid",
+    });
+
+    store.navigateFolder(refA, "files:a", "apps/web/src", "apps/web/src");
+    expect(state().surfaces[1]).toEqual({
+      id: "files:a",
+      kind: "files",
+      folderPath: "apps/web/src",
+      view: "grid",
+    });
+
+    store.navigateFolder(refA, "files:a", "apps", "apps/web/src", true);
+    const added = state().surfaces[2]!;
+    expect(added).toEqual({
+      id: expect.stringMatching(/^files:.+/),
+      kind: "files",
+      folderPath: "apps",
+      folderTrail: "apps/web/src",
+      view: "grid",
+    });
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "file:README.md",
+      "files:a",
+      added.id,
+      "diff",
+    ]);
+    expect(state().activeSurfaceId).toBe(added.id);
+
+    store.setFilesView(refA, "files:a", "list");
+    expect(state().surfaces[1]).toEqual({
+      id: "files:a",
+      kind: "files",
+      folderPath: "apps/web/src",
+    });
+    expect(state().surfaces[2]).toMatchObject({ view: "grid" });
+  });
+
+  it("walks a folder tab up in place and reaches the root in a Files tab beside it", () => {
     const store = useRightPanelStore.getState();
     const state = () =>
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
     store.openFile(refA, "README.md");
     store.openFile(refA, "apps/web/src");
+    store.setFilesView(refA, "file:apps/web/src", "grid");
+    store.openFile(refA, "apps/web/src");
+    expect(state().surfaces[1]).toMatchObject({ view: "grid" });
 
     store.navigateFolder(refA, "file:apps/web/src", "apps", "apps/web/src");
     expect(state().activeSurfaceId).toBe("file:apps");
@@ -765,26 +931,52 @@ describe("rightPanelStore", () => {
         id: "file:apps",
         relativePath: "apps",
         folderTrail: "apps/web/src",
+        view: "grid",
       }),
     ]);
 
     store.navigateFolder(refA, "file:apps", "", "apps/web/src");
-    expect(state().surfaces.map((surface) => surface.id)).toEqual(["file:README.md", "files"]);
-    expect(state().surfaces[1]).toEqual({
-      id: "files",
+    const root = state().surfaces[2]!;
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "file:README.md",
+      "file:apps",
+      root.id,
+    ]);
+    expect(root).toEqual({
+      id: expect.stringMatching(/^files:.+/),
       kind: "files",
       folderTrail: "apps/web/src",
+      view: "grid",
+    });
+    expect(state().activeSurfaceId).toBe(root.id);
+
+    store.setFilesView(refA, "file:apps", "list");
+    expect(state().surfaces[1]).not.toHaveProperty("view");
+    store.activateSurface(refA, "file:apps");
+    store.navigateFolder(refA, "file:apps", "", "apps");
+    expect(state().activeSurfaceId).toBe(root.id);
+    expect(state().surfaces).toHaveLength(3);
+    expect(state().surfaces[2]).toEqual({
+      id: root.id,
+      kind: "files",
+      folderTrail: "apps",
+      view: "grid",
     });
 
-    store.navigateFolder(refA, "files", "apps/web/src", "apps/web/src");
-    expect(state().activeSurfaceId).toBe("file:apps/web/src");
-    expect(state().surfaces[1]).toEqual({
-      id: "file:apps/web/src",
-      kind: "file",
-      relativePath: "apps/web/src",
-      revealLine: null,
-      revealRequestId: 1,
-    });
+    store.navigateFolder(refA, root.id, "docs", "docs");
+    store.openFile(refA, "docs/guide");
+    store.navigateFolder(refA, "file:docs/guide", "", "docs/guide");
+    const fresh = state().surfaces[4]!;
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "file:README.md",
+      "file:apps",
+      root.id,
+      "file:docs/guide",
+      fresh.id,
+    ]);
+    expect(fresh).toEqual(expect.objectContaining({ kind: "files", folderTrail: "docs/guide" }));
+    expect(fresh).not.toHaveProperty("folderPath");
+    expect(state().activeSurfaceId).toBe(fresh.id);
   });
 
   it("switches to a tab that already shows the folder instead of replacing it", () => {
@@ -843,32 +1035,31 @@ describe("rightPanelStore", () => {
     );
   });
 
-  it("replaces the standalone explorer with peer file surfaces", () => {
-    useRightPanelStore.getState().open(refA, "files");
-    useRightPanelStore.getState().openFile(refA, "src/index.ts");
-    useRightPanelStore.getState().openFile(refA, "src/index.ts");
-    useRightPanelStore.getState().openFile(refA, "README.md");
-
-    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
-      isOpen: true,
-      activeSurfaceId: "file:README.md",
-      surfaces: [
-        {
-          id: "file:src/index.ts",
-          kind: "file",
-          relativePath: "src/index.ts",
-          revealLine: null,
-          revealRequestId: 2,
-        },
-        {
-          id: "file:README.md",
-          kind: "file",
-          relativePath: "README.md",
-          revealLine: null,
-          revealRequestId: 1,
-        },
-      ],
+  it("keeps every Files tab when files, attachments and breadcrumb folders open", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "files");
+    store.openFilesTab(refA, { id: "files:b", folderPath: "src" });
+    store.openFile(refA, "src/index.ts");
+    store.openFile(refA, "src/index.ts");
+    store.navigateFolder(refA, "file:src/index.ts", "src", "src/index.ts", true);
+    store.openAttachment(refA, {
+      type: "file",
+      id: "report",
+      name: "report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 42,
     });
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.activeSurfaceId).toBe("attachment:report");
+    expect(state.surfaces.map((surface) => surface.id)).toEqual([
+      "files",
+      "files:b",
+      "file:src/index.ts",
+      "file:src",
+      "attachment:report",
+    ]);
+    expect(state.surfaces[2]).toMatchObject({ revealRequestId: 2 });
   });
 
   it.each([
@@ -958,6 +1149,39 @@ describe("rightPanelStore", () => {
       isOpen: false,
       activeSurfaceId: null,
       surfaces: [],
+    });
+  });
+
+  it("retargets file and Files tabs after a rename, folding a tab into one already open", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "src/old/a.ts");
+    store.setFilesView(refA, "file:src/old/a.ts", "grid");
+    store.openFile(refA, "src/new/b.ts");
+    store.openFile(refA, "src/old/b.ts");
+    store.openFile(refA, "src/older.ts");
+    store.openFilesTab(refA, {
+      id: "files:tab",
+      folderPath: "src/old/deep",
+      folderTrail: "src/old/deep/x",
+    });
+    store.activateSurface(refA, "file:src/old/b.ts");
+
+    store.retargetFileSurfaces(refA, [{ from: "src/old", to: "src/new" }]);
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.surfaces.map((surface) => surface.id)).toEqual([
+      "file:src/new/a.ts",
+      "file:src/new/b.ts",
+      "file:src/older.ts",
+      "files:tab",
+    ]);
+    expect(state.activeSurfaceId).toBe("file:src/new/b.ts");
+    expect(state.surfaces[0]).toMatchObject({ view: "grid" });
+    expect(state.surfaces.at(-1)).toEqual({
+      id: "files:tab",
+      kind: "files",
+      folderPath: "src/new/deep",
+      folderTrail: "src/new/deep/x",
     });
   });
 

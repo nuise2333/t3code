@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import { FilesystemSearchHostError, type FilesystemSearchHostInput } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 
@@ -152,7 +153,7 @@ describe("DirectorySearch.search", () => {
         "home/Projects/web/node_modules/t3-code",
       ]);
       const home = NodePath.join(root, "home");
-      const requested: Array<HostFileSearch.FilesystemSearchHostInput> = [];
+      const requested: Array<FilesystemSearchHostInput> = [];
       const result = yield* searchWith(
         home,
         {
@@ -190,8 +191,7 @@ describe("DirectorySearch.search", () => {
         home,
         {
           backend: "spotlight",
-          search: () =>
-            Effect.fail(new HostFileSearch.FilesystemSearchHostError({ reason: "unavailable" })),
+          search: () => Effect.fail(new FilesystemSearchHostError({ reason: "unavailable" })),
         },
         "t3-code",
       );

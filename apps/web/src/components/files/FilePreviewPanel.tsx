@@ -51,9 +51,11 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
@@ -71,12 +73,13 @@ import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { requestWorkspaceFocus } from "~/lib/workspaceFocus";
 import type { ChatFileAttachment } from "~/types";
-import { isHostPath } from "@t3tools/shared/path";
+import { isHostPath, workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { type FilesViewMode, useRightPanelStore } from "~/rightPanelStore";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
-import { buildFileReviewComment } from "~/reviewCommentContext";
+import { buildFileReviewComment, type ReviewCommentContext } from "~/reviewCommentContext";
 import { assetEnvironment } from "~/state/assets";
 import { usePreviewAvailable } from "~/browser/previewRuntime";
 import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "~/state/environments";
@@ -92,10 +95,20 @@ import { AudioPreview } from "./AudioPreview";
 import { BrowserDocumentFrame, isPdfPreviewFile } from "./BrowserDocumentFrame";
 import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import { PreviewImage } from "./PreviewImage";
-import FileBrowserPanel from "./FileBrowserPanel";
+import FileBrowserPanel, { type FileBrowserView } from "./FileBrowserPanel";
+import { MissingFolderRecovery } from "./MissingFolderRecovery";
 import { FileExplorerPane } from "./FileExplorerPane";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
-import { breadcrumbPathOf, retainedBreadcrumbTrail, trailChildOf } from "./filePath";
+import { gridReturnPath } from "./fileGrid.logic";
+import {
+  breadcrumbPathOf,
+  fileBreadcrumbs,
+  folderParentOf,
+  hostParentOf,
+  joinHostPath,
+  retainedBreadcrumbTrail,
+  trailChildOf,
+} from "./filePath";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import {
   type FileCommentAnnotationEntry,
@@ -105,6 +118,7 @@ import {
   nextFileCommentId,
   normalizeFileCommentRange,
   remapFileCommentAnnotations,
+  promptFileCommentEntries,
 } from "./fileCommentAnnotations";
 import { installFileEditorDismissal } from "./fileEditorDismissal";
 import {
@@ -128,6 +142,8 @@ import {
 } from "./filePreviewMode";
 import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskList";
 import { changeFileSaveSession, useFileSaveSession } from "./fileSaveSessions";
+import { type FilePathMove, isSameOrInside } from "./fileOperations.logic";
+import { type FileTreeChange, subscribeFileTreeChanges } from "./fileOperationsState";
 import { revisionedQuery } from "~/state/revisionedQuery";
 import {
   getOptimisticProjectFileQueryData,
@@ -157,6 +173,13 @@ interface FilePreviewPanelProps {
   onNavigateFolder: (relativePath: string, folderTrail: string, keepSource: boolean) => void;
   /** Retained descendant breadcrumb path after navigating up; see navigateFolder. */
   folderTrail: string | undefined;
+  /** A Files tab's path is always a folder, so it skips the file-read guess. */
+  knownFolder?: boolean;
+  /** Gives a Files tab its own saved tree expansion. */
+  expansionKeySuffix?: string | undefined;
+  onOpenFolderInNewTab?: (folderPath: string, folderTrail: string) => void;
+  /** A folder tab's list or icon view, offered once the path reads as a folder. */
+  filesView?: { mode: FilesViewMode; onModeChange: (mode: FilesViewMode) => void } | undefined;
   onPendingChange: (relativePath: string, pending: boolean) => void;
   selectedFilePending: boolean;
   workspaceMutationId: string | null;
@@ -249,13 +272,20 @@ export function WorkspaceBrowserPreview(props: {
     workspaceRoot: props.workspaceRoot,
     absolutePath: props.absolutePath,
   });
-  const assetUrl = useAssetUrlState(
-    props.environmentId,
-    resource,
-    pdf ? props.workspaceMutationId : undefined,
-  );
+  // Each workspace mutation re-mints the URL: a file outside the workspace is signed by its
+  // inode, which an atomic replace changes.
+  const assetUrl = useAssetUrlState(props.environmentId, resource, props.workspaceMutationId);
+  // The HTML frame keeps its first URL per key, so the key moves only once the re-minted URL arrives.
+  const [settledMutationId, setSettledMutationId] = useState(props.workspaceMutationId);
+  if (
+    assetUrl._tag === "Success" &&
+    !assetUrl.waiting &&
+    settledMutationId !== props.workspaceMutationId
+  ) {
+    setSettledMutationId(props.workspaceMutationId);
+  }
   const fileRevision = pdf && assetUrl._tag === "Success" ? assetUrl.fileRevision : undefined;
-  const revision = fileRevision ?? props.workspaceMutationId;
+  const revision = fileRevision ?? (pdf ? props.workspaceMutationId : settledMutationId);
   const revisionSuffix =
     revision === null
       ? ""
@@ -394,6 +424,64 @@ function WorkspaceAudioPreview(props: {
       name={props.name}
       revision={revision}
       onError={() => setFailedUrl(url)}
+    />
+  );
+}
+
+function WorkspaceDocumentPreview(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadRef: ScopedThreadRef;
+  readonly draft: boolean;
+  readonly document: boolean;
+  readonly absolutePath: string;
+  readonly workspaceRoot: string;
+  readonly name: string;
+  readonly workspaceMutationId: string | null;
+  readonly refreshRevision: number;
+}) {
+  const resource =
+    props.draft && props.document
+      ? {
+          _tag: "draft-workspace-file" as const,
+          cwd: props.workspaceRoot,
+          path: props.absolutePath,
+        }
+      : {
+          _tag: "media-file" as const,
+          threadId: props.threadRef.threadId,
+          path: props.absolutePath,
+          ...(props.document ? {} : { disposition: "attachment" as const }),
+        };
+  // Drafts keep reloading on every workspace mutation, as before.
+  const revisioned = resource._tag === "media-file";
+  const assetUrl = useAssetUrlState(
+    props.environmentId,
+    revisioned ? resource : null,
+    props.workspaceMutationId ?? undefined,
+  );
+  const resolved =
+    assetUrl._tag === "Success" ? (assetUrl.fileRevision ?? props.workspaceMutationId) : undefined;
+  // A reconnect reports Loading and keeps the last revision, so the open file stays loaded;
+  // a failure (say the file was deleted) remounts so the preview shows its error.
+  const [shown, setShown] = useState(resolved);
+  if (resolved !== undefined && resolved !== shown) setShown(resolved);
+  const revision = !revisioned
+    ? props.workspaceMutationId
+    : assetUrl._tag === "Failure"
+      ? `failure:${props.workspaceMutationId}`
+      : (resolved ?? shown);
+  // Waiting on the first revision keeps the preview from mounting twice when it opens.
+  if (revisioned && revision === undefined && assetUrl._tag === "Loading") {
+    return <FileSurfaceLoading />;
+  }
+  return (
+    <AttachmentFilePreview
+      key={`${revision}:${props.refreshRevision}`}
+      name={props.name}
+      mimeType="application/octet-stream"
+      sizeBytes={0}
+      asset={{ environmentId: props.environmentId, resource }}
+      origin="File"
     />
   );
 }
@@ -602,6 +690,8 @@ function useFileLineReveal(
   };
 }
 
+const EMPTY_REVIEW_COMMENTS: ReadonlyArray<ReviewCommentContext> = [];
+
 const createFileEditor: EditorFactory<FileCommentAnnotationGroup, undefined> = (
   editorType,
   options,
@@ -695,6 +785,12 @@ function EditableFileSurface({
 }: EditableFileSurfaceProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
+  const promptCommentIds = new Set(
+    useComposerDraftStore(
+      (store) =>
+        store.getComposerDraft(composerDraftTarget)?.reviewComments ?? EMPTY_REVIEW_COMMENTS,
+    ).map((comment) => comment.id),
+  );
   const [lineAnnotations, setLineAnnotations] = useState<FileCommentLineAnnotation[]>([]);
   const [selectionOverride, setSelectionOverride] = useState<FileSelectionOverride | null>(null);
   const selectedRange =
@@ -743,7 +839,7 @@ function EditableFileSurface({
     setLineAnnotations((current) => (current === nextLineAnnotations ? current : remapped));
     for (const annotation of remapped) {
       for (const entry of annotation.metadata.entries) {
-        if (entry.kind !== "comment") continue;
+        if (entry.kind !== "comment" || !promptCommentIds.has(entry.id)) continue;
         addReviewComment(
           composerDraftTarget,
           buildFileReviewComment({
@@ -909,29 +1005,37 @@ function EditableFileSurface({
             }}
             selectedLines={selectedRange}
             lineAnnotations={lineAnnotations}
-            renderAnnotation={(annotation) => (
-              <div className="py-1">
-                {annotation.metadata.entries.map((entry) => (
-                  <DiffCommentAnnotation
-                    key={entry.id}
-                    environmentId={environmentId}
-                    projectId={projectId}
-                    ownerKey={JSON.stringify([
-                      environmentId,
-                      composerDraftTarget,
-                      relativePath,
-                      entry.id,
-                    ])}
-                    kind={entry.kind}
-                    rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
-                    text={entry.text}
-                    onCancel={() => removeAnnotationEntry(entry.id)}
-                    onComment={(text) => submitAnnotationEntry(entry.id, text)}
-                    onDelete={() => removeAnnotationEntry(entry.id)}
-                  />
-                ))}
-              </div>
-            )}
+            renderAnnotation={(annotation) => {
+              // Sent comments stay annotated so a failed send can restore them at remapped lines.
+              const entries = promptFileCommentEntries(
+                annotation.metadata.entries,
+                promptCommentIds,
+              );
+              if (entries.length === 0) return null;
+              return (
+                <div className="py-1">
+                  {entries.map((entry) => (
+                    <DiffCommentAnnotation
+                      key={entry.id}
+                      environmentId={environmentId}
+                      projectId={projectId}
+                      ownerKey={JSON.stringify([
+                        environmentId,
+                        composerDraftTarget,
+                        relativePath,
+                        entry.id,
+                      ])}
+                      kind={entry.kind}
+                      rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
+                      text={entry.text}
+                      onCancel={() => removeAnnotationEntry(entry.id)}
+                      onComment={(text) => submitAnnotationEntry(entry.id, text)}
+                      onDelete={() => removeAnnotationEntry(entry.id)}
+                    />
+                  ))}
+                </div>
+              );
+            }}
             className="min-h-full"
           />
         </Virtualizer>
@@ -1047,6 +1151,10 @@ export default function FilePreviewPanel({
   onOpenFile,
   onNavigateFolder,
   folderTrail,
+  knownFolder = false,
+  expansionKeySuffix,
+  onOpenFolderInNewTab,
+  filesView,
   onPendingChange,
   selectedFilePending,
   workspaceMutationId,
@@ -1092,6 +1200,7 @@ export default function FilePreviewPanel({
     cwd,
     relativePath,
     attachment === undefined && relativePath !== null,
+    knownFolder,
   );
   const [fileRefreshRevision, setFileRefreshRevision] = useState(0);
   const attemptedPath = file.readError?.resolvedPath ?? file.readError?.operationPath;
@@ -1102,24 +1211,57 @@ export default function FilePreviewPanel({
   // Reset crumbs when a host trail reaches the workspace root and no longer passes through the current path.
   const breadcrumbTrail =
     breadcrumbPath === null ? null : retainedBreadcrumbTrail(folderTrail, breadcrumbPath);
-  // A trail implies a folder before reads settle, preventing file-preview flashes while navigating up.
+  // A trail or icon view implies a folder before its read settles, so navigating never flashes a file.
   const isFolder =
     attachment === undefined &&
-    (file.isNotFile || (folderTrail !== undefined && file.data === null && file.error === null));
-  const hostFolderPath = isFolder && isHostFile ? relativePath : null;
+    (knownFolder ||
+      file.isNotFile ||
+      ((folderTrail !== undefined || filesView?.mode === "grid") &&
+        file.data === null &&
+        file.error === null));
+  const browsesHostPath = attachment === undefined && isHostFile;
+  const fileReadSettled = file.data !== null || file.error !== null;
+  // Waiting for the read keeps a folder link from first rooting the tree at its parent.
+  const settledHostFolderPath =
+    !browsesHostPath || relativePath === null
+      ? null
+      : isFolder
+        ? relativePath
+        : fileReadSettled
+          ? hostParentOf(relativePath)
+          : null;
+  const [lastHostFolderPath, setLastHostFolderPath] = useState<string | null>(null);
+  const nextLastHostFolderPath = browsesHostPath
+    ? (settledHostFolderPath ?? lastHostFolderPath)
+    : null;
+  if (nextLastHostFolderPath !== lastHostFolderPath) setLastHostFolderPath(nextLastHostFolderPath);
+  // Only a sibling keeps the mounted tree while its read is pending; elsewhere the
+  // basename would select a same-named file in the old folder.
+  const hostFolderPath =
+    fileReadSettled ||
+    settledHostFolderPath !== null ||
+    relativePath === null ||
+    hostParentOf(relativePath) !== nextLastHostFolderPath
+      ? settledHostFolderPath
+      : nextLastHostFolderPath;
   // A chat-linked folder reads as a file until its read settles, and revealing a
   // folder selects it in its parent instead of opening it, so reveal waits.
   const revealsInFileManager =
-    !isFolder &&
-    (file.data !== null || file.error !== null) &&
-    serverConfig?.shellRevealInFileManager === true;
+    !isFolder && fileReadSettled && serverConfig?.shellRevealInFileManager === true;
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isFolder ? null : relativePath;
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
+  // A host file has no other context, so each open shows its folder until hidden for that open.
+  const hostFileRevealKey =
+    browsesHostPath && previewPath !== null ? `${previewPath}\n${revealRequestId}` : null;
+  const [hostExplorerHiddenFor, setHostExplorerHiddenFor] = useState<string | null>(null);
+  const explorerVisible =
+    hostFileRevealKey === null ? explorerOpen : hostExplorerHiddenFor !== hostFileRevealKey;
   const showExplorer = shouldShowFileExplorer({
     relativePath: previewPath,
-    explorerOpen,
+    explorerOpen: explorerVisible,
     attachmentOpen: attachment !== undefined,
+    explorerRoot: browsesHostPath ? hostFolderPath : cwd,
   });
   const [renderMarkdownPreferred, setRenderMarkdownPreferred] = useLocalStorage(
     RENDER_MARKDOWN_STORAGE_KEY,
@@ -1247,19 +1389,86 @@ export default function FilePreviewPanel({
     previewAvailable &&
     isBrowserPreviewFile(previewPath);
   // Navigating up preserves the file tab; retain the trail's path spelling to find its folder tab.
-  const navigateToFolder = (crumbPath: string) => {
+  const navigateToFolder = (crumbPath: string, newTab = false) => {
     const path =
       breadcrumbTrail !== null && breadcrumbPathOf(breadcrumbTrail) === crumbPath
         ? breadcrumbTrail
         : crumbPath;
-    onNavigateFolder(path, retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path), !isFolder);
+    const trail = retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path);
+    if (newTab && onOpenFolderInNewTab) onOpenFolderInNewTab(path, trail);
+    else onNavigateFolder(path, trail, !isFolder);
   };
+  const folderMissing = knownFolder && relativePath !== null && file.isMissing;
+  const treeFolderPath = (path: string) =>
+    hostFolderPath === null ? path : joinHostPath(hostFolderPath, path);
+  const openTreeFolderInNewTab = (event: ReactMouseEvent) => {
+    if (!onOpenFolderInNewTab) return;
+    const newTab = event.type === "auxclick" ? event.button === 1 : event.metaKey || event.ctrlKey;
+    if (!newTab) return;
+    const row = event.nativeEvent
+      .composedPath()
+      .find(
+        (node): node is Element =>
+          node instanceof Element &&
+          node.matches('[data-item-path$="/"]:is([role="treeitem"], [data-grid-tile])'),
+      );
+    const path = row?.getAttribute("data-item-path")?.replace(/\/$/, "");
+    if (!path) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const folderPath = treeFolderPath(path);
+    onOpenFolderInNewTab(folderPath, folderPath);
+  };
+  const gridFolder = hostFolderPath === null ? (relativePath ?? "") : "";
+  const gridParent = relativePath === null ? null : folderParentOf(relativePath);
+  const navigateFilesTab = (path: string) =>
+    onNavigateFolder(path, retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path), false);
+  const fileBrowserView: FileBrowserView | undefined =
+    filesView && isFolder
+      ? {
+          mode: filesView.mode,
+          onModeChange: filesView.onModeChange,
+          folder: gridFolder,
+          returnPath:
+            hostFolderPath === null
+              ? gridReturnPath(gridFolder, breadcrumbTrail)
+              : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath),
+          onEnterFolder: (path) => navigateFilesTab(treeFolderPath(path)),
+          onUp: gridParent === null ? null : () => navigateFilesTab(gridParent),
+          thumbnailResource: (path) =>
+            workspaceAssetResource({
+              kind: "media-file",
+              threadRef,
+              draft,
+              workspaceRoot: cwd,
+              absolutePath: path,
+            }),
+          budgetKey: `${environmentId}:${threadRef.threadId}:${expansionKeySuffix ?? "files"}`,
+        }
+      : undefined;
   const absolutePath =
     breadcrumbPath === ""
       ? cwd
       : relativePath && attachment === undefined
         ? resolvePathLinkTarget(relativePath, cwd)
         : null;
+  // Tabs may hold a path relative to the project or absolute, so both spellings retarget.
+  const retargetMovedPaths = (moves: readonly FilePathMove[]) => {
+    const relativeMoves = moves.flatMap(({ from, to }) => {
+      const relativeFrom = workspaceRelativeFilePath(from, cwd);
+      const relativeTo = workspaceRelativeFilePath(to, cwd);
+      return relativeFrom === null || relativeTo === null || relativeFrom === "."
+        ? []
+        : [{ from: relativeFrom, to: relativeTo }];
+    });
+    useRightPanelStore.getState().retargetFileSurfaces(threadRef, [...moves, ...relativeMoves]);
+  };
+  const onFileTreeChange = useEffectEvent((change: FileTreeChange) => {
+    if (change.environmentId !== environmentId || absolutePath === null) return;
+    if (change.removed.some((path) => isSameOrInside(absolutePath, path))) file.refresh();
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rereads this file when a file operation in this window moves or trashes it
+  useEffect(() => subscribeFileTreeChanges(onFileTreeChange), []);
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
   // Mounting the file read under the workspace mutation id refetches it after each mutation.
   useAtomMount(
@@ -1270,7 +1479,7 @@ export default function FilePreviewPanel({
       (isFolder || (!isMedia && !isPdf && !isDocument)) &&
       !selectedFilePending
       ? revisionedQuery(
-          getProjectFileQueryAtom(environmentId, cwd, relativePath),
+          getProjectFileQueryAtom(environmentId, cwd, relativePath, knownFolder),
           workspaceMutationId,
         )
       : NO_FILE_REVISION_ATOM,
@@ -1288,6 +1497,10 @@ export default function FilePreviewPanel({
   }, [breadcrumbPath, breadcrumbTrail]);
 
   const toggleExplorer = () => {
+    if (hostFileRevealKey !== null) {
+      setHostExplorerHiddenFor(explorerVisible ? hostFileRevealKey : null);
+      return;
+    }
     setExplorerOpen((current) => {
       const next = !current;
       try {
@@ -1417,16 +1630,25 @@ export default function FilePreviewPanel({
               <Globe2 className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
-          {!isHostFile && previewPath !== null ? (
+          {!attachment && previewPath !== null ? (
             <FileSurfaceAction
-              label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
-              pressed={explorerOpen}
+              label={explorerVisible ? "Hide file explorer" : "Show file explorer"}
+              pressed={explorerVisible}
               onPress={toggleExplorer}
             >
               <FolderTree className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
         </div>
+      ) : null}
+      {folderMissing && relativePath !== null ? (
+        <MissingFolderRecovery
+          environmentId={environmentId}
+          cwd={cwd}
+          path={relativePath}
+          projectName={projectName}
+          onNavigate={(path) => onNavigateFolder(path, path, false)}
+        />
       ) : null}
       {relativePath && !attachment && !isHostFile && !canWriteFiles && !fileAccess.isPending ? (
         <div className="shrink-0 border-b px-3 py-1.5 text-2xs text-muted-foreground">
@@ -1538,24 +1760,17 @@ export default function FilePreviewPanel({
           ) : relativePath &&
             absolutePath &&
             (isDocument || file.readError?.failure === "binary_file") ? (
-            <AttachmentFilePreview
-              key={`${environmentId}:${absolutePath}:${workspaceMutationId}:${fileRefreshRevision}`}
+            <WorkspaceDocumentPreview
+              key={`${environmentId}:${absolutePath}`}
+              environmentId={environmentId}
+              threadRef={threadRef}
+              draft={draft}
+              document={isDocument}
+              absolutePath={absolutePath}
+              workspaceRoot={cwd}
               name={relativePath.split(/[\\/]/).at(-1) || relativePath}
-              mimeType="application/octet-stream"
-              sizeBytes={0}
-              asset={{
-                environmentId,
-                resource:
-                  draft && isDocument
-                    ? { _tag: "draft-workspace-file", cwd, path: absolutePath }
-                    : {
-                        _tag: "media-file",
-                        threadId: threadRef.threadId,
-                        path: absolutePath,
-                        ...(isDocument ? {} : { disposition: "attachment" as const }),
-                      },
-              }}
-              origin="File"
+              workspaceMutationId={workspaceMutationId}
+              refreshRevision={fileRefreshRevision}
             />
           ) : relativePath && file.error && file.data === null ? (
             <div
@@ -1646,6 +1861,8 @@ export default function FilePreviewPanel({
           <FileExplorerPane resizable={Boolean(previewPath)}>
             <div
               className="contents"
+              onClickCapture={openTreeFolderInNewTab}
+              onAuxClick={openTreeFolderInNewTab}
               onClick={focusEditorOnTreeRowClickOrEnter}
               onKeyDown={(event) => {
                 if (event.key === "Enter") focusEditorOnTreeRowClickOrEnter(event);
@@ -1660,10 +1877,25 @@ export default function FilePreviewPanel({
                 selectedPath={
                   hostFolderPath === null
                     ? relativePath
-                    : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
+                    : previewPath !== null
+                      ? (fileBreadcrumbs("", previewPath).at(-1)?.label ?? null)
+                      : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
                 }
                 selectedPathRevealId={revealRequestId}
                 onOpenFile={onOpenFile}
+                onPathsMoved={retargetMovedPaths}
+                {...(expansionKeySuffix === undefined
+                  ? {}
+                  : {
+                      expansionKey: `${environmentId}:${hostFolderPath ?? cwd}#${expansionKeySuffix}`,
+                    })}
+                {...(onOpenFolderInNewTab
+                  ? {
+                      onOpenFolderInNewTab: (folderPath: string) =>
+                        onOpenFolderInNewTab(folderPath, folderPath),
+                    }
+                  : {})}
+                {...(fileBrowserView ? { view: fileBrowserView } : {})}
                 answersPanelFind={!previewPath}
                 workspaceMutationId={workspaceMutationId}
                 {...(previewPath && !isMedia && !isPdf

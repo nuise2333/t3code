@@ -1,7 +1,7 @@
 import { DEFAULT_THEMES, preloadHighlighter } from "@pierre/diffs";
 import { EnvironmentId, ThreadId, type ProjectReadFileResult } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 import { act, fakeTimers, render } from "../../../test/render";
@@ -15,8 +15,11 @@ import {
 
 const state = vi.hoisted(() => ({
   file: null as ProjectReadFileResult | null,
+  isNotFile: false,
   optimistic: null as ProjectReadFileResult | null,
   writeFile: vi.fn(),
+  assetUrl: { _tag: "Loading" } as import("~/assets/assetUrls").AssetUrlState,
+  mintUrl: vi.fn<() => Promise<string | null>>(),
 }));
 
 vi.mock(import("@t3tools/client-runtime/state/runtime"), async (original) => ({
@@ -58,10 +61,24 @@ vi.mock(import("~/hooks/useTheme"), async (original) => ({
 vi.mock(import("~/hooks/useWorkspaceMutationRefresh"), () => ({
   useWorkspaceMutationRefresh: vi.fn(),
 }));
+vi.mock(import("~/assets/assetUrls"), async (original) => ({
+  ...(await original()),
+  useAssetUrlRefresh: () => state.mintUrl,
+  useAssetUrlState: () => state.assetUrl,
+}));
+// The Word engine compiles a large WebAssembly bundle; these tests only need the URL it loads.
+vi.mock(import("./OfficeFilePreview"), () => ({
+  OfficeFilePreview: ({ src }: { src: string }) => <div data-testid="office-preview">{src}</div>,
+}));
 vi.mock(import("./FileBreadcrumbs"), () => ({ FileBreadcrumbs: () => <></> }));
 vi.mock(import("./FileBrowserPanel"), () => ({
-  default: () => (
-    <div role="tree">
+  default: (props: { cwd: string; selectedPath: string | null; view?: { folder: string } }) => (
+    <div
+      role="tree"
+      data-cwd={props.cwd}
+      data-selected-path={props.selectedPath ?? ""}
+      data-view-folder={props.view?.folder}
+    >
       <button type="button" role="treeitem" data-item-path="src/">
         src
       </button>
@@ -81,8 +98,9 @@ vi.mock(import("./projectFilesQueryState"), async (original) => ({
     error: null,
     isPending: false,
     readError: null,
-    isNotFile: false,
-    isFile: true,
+    isNotFile: state.isNotFile,
+    isMissing: false,
+    isFile: !state.isNotFile,
     refresh: vi.fn(),
   }),
   getOptimisticProjectFileQueryData: () => state.optimistic,
@@ -108,7 +126,11 @@ function setup() {
   localStorage.setItem(keys[0]!, "false");
   localStorage.setItem(keys[1]!, "true");
   state.file = null;
+  state.isNotFile = false;
   state.optimistic = null;
+  state.assetUrl = { _tag: "Loading" };
+  let mints = 0;
+  state.mintUrl.mockReset().mockImplementation(async () => `/assets/report.docx?mint=${++mints}`);
   state.writeFile.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   return {
     [Symbol.dispose]() {
@@ -131,7 +153,13 @@ function markdownPreview(truncated: boolean, contents = "- [ ] Keep the rest of 
   return filePreview("tasks.md");
 }
 
-function filePreview(relativePath: string) {
+function filePreview(
+  relativePath: string,
+  workspaceMutationId: string | null = null,
+  revealRequestId = 0,
+  filesView?: ComponentProps<typeof FilePreviewPanel>["filesView"],
+  folderTrail?: string,
+) {
   return (
     <FilePreviewPanel
       environmentId={environmentId}
@@ -144,15 +172,27 @@ function filePreview(relativePath: string) {
       availableEditors={[]}
       openInShortcutEnabled={false}
       revealLine={null}
-      revealRequestId={0}
+      revealRequestId={revealRequestId}
       onOpenFile={vi.fn()}
       onNavigateFolder={vi.fn()}
-      folderTrail={undefined}
+      folderTrail={folderTrail}
       onPendingChange={vi.fn()}
       selectedFilePending={false}
-      workspaceMutationId={null}
+      workspaceMutationId={workspaceMutationId}
+      filesView={filesView}
     />
   );
+}
+
+function documentPreview(workspaceMutationId: string, fileRevision: string) {
+  state.file = null;
+  state.assetUrl = {
+    _tag: "Success",
+    url: "/assets/report.docx",
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    fileRevision,
+  };
+  return filePreview("report.docx", workspaceMutationId);
 }
 
 function deepActiveElement() {
@@ -243,6 +283,58 @@ describe("source file focus", () => {
   });
 });
 
+describe("host file explorer", () => {
+  it("roots the tree at the file's folder on each open, despite a hidden explorer", async () => {
+    using _settings = setup();
+    const path = "/tmp/notes/report.md";
+    state.file = { relativePath: path, contents: "Notes\n", byteLength: 6, truncated: false };
+    await using screen = await render(filePreview(path, null, 1));
+    const tree = screen.getByRole("tree");
+    await expect.element(tree).toHaveAttribute("data-cwd", "/tmp/notes");
+    await expect.element(tree).toHaveAttribute("data-selected-path", "report.md");
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide file explorer" }));
+    await expect.element(tree).not.toBeInTheDocument();
+
+    await screen.rerender(filePreview(path, null, 2));
+    await expect.element(screen.getByRole("tree")).toHaveAttribute("data-cwd", "/tmp/notes");
+
+    state.file = null;
+    await screen.rerender(filePreview("/tmp/notes/todo.md", null, 3));
+    await expect.element(screen.getByRole("tree")).toHaveAttribute("data-cwd", "/tmp/notes");
+    await expect.element(screen.getByRole("tree")).toHaveAttribute("data-selected-path", "todo.md");
+
+    await screen.rerender(filePreview("/other/report.md", null, 4));
+    await expect.element(screen.getByRole("tree")).not.toBeInTheDocument();
+  });
+
+  it("offers the icon view for a folder read but never for a file", async () => {
+    using _settings = setup();
+    const filesView = { mode: "list" as const, onModeChange: vi.fn() };
+    state.file = {
+      relativePath: "/tmp/notes/a.md",
+      contents: "A\n",
+      byteLength: 2,
+      truncated: false,
+    };
+    await using screen = await render(filePreview("/tmp/notes/a.md", null, 1, filesView));
+    await expect.element(screen.getByRole("tree")).toHaveAttribute("data-cwd", "/tmp/notes");
+    await expect.element(screen.getByRole("tree")).not.toHaveAttribute("data-view-folder");
+
+    state.file = null;
+    state.isNotFile = true;
+    await screen.rerender(filePreview("/tmp/notes", null, 1, filesView));
+    await expect.element(screen.getByRole("tree")).toHaveAttribute("data-view-folder", "");
+
+    await screen.rerender(filePreview("src", null, 1, filesView));
+    await expect.element(screen.getByRole("tree")).toHaveAttribute("data-view-folder", "src");
+
+    state.isNotFile = false;
+    await screen.rerender(filePreview("src/lib", null, 1, filesView, "src/lib/deep"));
+    await expect.element(screen.getByRole("tree")).toHaveAttribute("data-view-folder", "src/lib");
+  });
+});
+
 describe("rendered Markdown task saves", () => {
   it("keeps a truncated read read-only without queuing a replacement", async () => {
     using _settings = setup();
@@ -274,8 +366,68 @@ describe("rendered Markdown task saves", () => {
         cwd: "/workspace",
         relativePath: "tasks.md",
         contents: "- [x] Keep the rest of this file\n",
+        createIfMissing: false,
       },
     });
+  });
+});
+
+describe("workspace document previews", () => {
+  it("keeps an unchanged document loaded when another workspace change lands", async () => {
+    using _settings = setup();
+    await using screen = await render(documentPreview("mutation-1", "revision-1"));
+    const preview = screen.getByTestId("office-preview");
+    await expect.element(preview).toHaveTextContent("/assets/report.docx?mint=1");
+    const loaded = preview.element();
+
+    await screen.rerender(documentPreview("mutation-2", "revision-1"));
+
+    expect(state.mintUrl, "an unchanged document re-minted its URL").toHaveBeenCalledOnce();
+    expect(screen.container.contains(loaded), "an unchanged document was remounted").toBe(true);
+  });
+
+  it("keeps an unchanged document mounted while its revision check reloads", async () => {
+    using _settings = setup();
+    await using screen = await render(documentPreview("mutation-1", "revision-1"));
+    const preview = screen.getByTestId("office-preview");
+    await expect.element(preview).toHaveTextContent("/assets/report.docx?mint=1");
+    const loaded = preview.element();
+
+    state.assetUrl = { _tag: "Loading" };
+    await screen.rerender(filePreview("report.docx", "mutation-1"));
+    await screen.rerender(documentPreview("mutation-1", "revision-1"));
+
+    expect(
+      state.mintUrl,
+      "a reloading revision check re-minted the document URL",
+    ).toHaveBeenCalledOnce();
+    expect(
+      screen.container.contains(loaded),
+      "a reloading revision check remounted the document",
+    ).toBe(true);
+  });
+
+  it("reloads the document when its URL can no longer be minted", async () => {
+    using _settings = setup();
+    await using screen = await render(documentPreview("mutation-1", "revision-1"));
+    const preview = screen.getByTestId("office-preview");
+    await expect.element(preview).toHaveTextContent("/assets/report.docx?mint=1");
+
+    state.assetUrl = { _tag: "Failure" };
+    await screen.rerender(filePreview("report.docx", "mutation-2"));
+
+    await expect.element(preview).toHaveTextContent("/assets/report.docx?mint=2");
+  });
+
+  it("loads the new bytes when the document itself changes", async () => {
+    using _settings = setup();
+    await using screen = await render(documentPreview("mutation-1", "revision-1"));
+    const preview = screen.getByTestId("office-preview");
+    await expect.element(preview).toHaveTextContent("/assets/report.docx?mint=1");
+
+    await screen.rerender(documentPreview("mutation-2", "revision-2"));
+
+    await expect.element(preview).toHaveTextContent("/assets/report.docx?mint=2");
   });
 });
 

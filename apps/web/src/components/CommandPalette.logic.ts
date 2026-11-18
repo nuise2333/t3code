@@ -5,6 +5,7 @@ import {
   rankSearchGroups,
   scoreSearchTerms,
   scoreThreadSearch,
+  threadRecentUse,
   type SearchMatchHint,
   type SearchRange,
   type ThreadSearchSubject,
@@ -36,7 +37,7 @@ import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 import { isSidebarHiddenThread } from "./Sidebar.logic";
 
-export const RECENT_THREAD_LIMIT = 12;
+const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";
 export const ADDON_ICON_CLASS = "size-4";
 
@@ -214,6 +215,8 @@ export interface CommandPaletteActionItem extends CommandPaletteItem {
   readonly run: () => Promise<void>;
   /** A pin toggle on the row, also reached with the pin shortcut while the row is highlighted. */
   readonly pin?: CommandPaletteItemPin;
+  /** Set on toggle rows; exposed to assistive technology as `aria-checked`. */
+  readonly checked?: boolean;
 }
 
 export interface CommandPaletteItemPin {
@@ -779,9 +782,14 @@ export function filterPinnedBrowseEntries(input: {
     ? ""
     : input.filterQuery;
   const { visibleEntries } = filterFilesystemBrowseEntries(input.browseEntries, visibleFilterQuery);
+  const normalizedFilterQuery = input.filterQuery.normalize("NFC");
+  const normalizedMatches = input.browseEntries.filter((entry) =>
+    namesMatch(entry.name.normalize("NFC"), normalizedFilterQuery),
+  );
   const exactEntry =
     input.filterQuery.length > 0
-      ? (input.browseEntries.find((entry) => namesMatch(entry.name, input.filterQuery)) ?? null)
+      ? (input.browseEntries.find((entry) => namesMatch(entry.name, input.filterQuery)) ??
+        (normalizedMatches.length === 1 ? normalizedMatches[0] : null))
       : null;
   return { visibleEntries, exactEntry };
 }
@@ -794,6 +802,27 @@ export function getCommandPaletteMode(input: {
     return input.isBrowsing ? "submenu-browse" : "submenu";
   }
   return input.isBrowsing ? "root-browse" : "root";
+}
+
+/**
+ * Recent means used recently: written in or opened, whichever is later. The
+ * open thread would always lead that list, so it is left out.
+ */
+export function buildRecentThreadItems(
+  threadItems: ReadonlyArray<CommandPaletteActionItem>,
+  activeThread: { readonly environmentId: string; readonly id: string } | null | undefined,
+): CommandPaletteActionItem[] {
+  const activeThreadValue = activeThread
+    ? `thread:${activeThread.environmentId}:${activeThread.id}`
+    : null;
+  return threadItems
+    .filter((item) => item.value !== activeThreadValue)
+    .toSorted(
+      (left, right) =>
+        (right.threadSearch ? threadRecentUse(right.threadSearch) : 0) -
+        (left.threadSearch ? threadRecentUse(left.threadSearch) : 0),
+    )
+    .slice(0, RECENT_THREAD_LIMIT);
 }
 
 export function buildRootGroups(input: {

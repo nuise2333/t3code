@@ -14,10 +14,13 @@ import {
 import { useDiffPanelStore } from "../../diffPanelStore";
 import { type ThreadPanelPresentation } from "../../rightPanelLayout";
 import {
+  type FilesSurface,
+  newFilesSurfaceId,
   selectThreadPanelOpen,
   type RightPanelSurface,
   useRightPanelStore,
 } from "../../rightPanelStore";
+import { duplicateExpandedDirectories } from "../files/fileTreeExpansion";
 import { requestWorkspaceContentFocus, requestWorkspaceFocus } from "../../lib/workspaceFocus";
 import { setActivePreviewTab } from "../../previewStateStore";
 import { isBrowserSettingsReadError } from "../../browser/openFileInPreview";
@@ -140,9 +143,17 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
   const openChangesFromThreadPanelStable = useStableCallback(openChangesFromThreadPanel);
   const addFilesSurface = () => {
     if (!activeThreadRef || !activeProject) return;
-    useRightPanelStore.getState().open(activeThreadRef, "files");
+    useRightPanelStore.getState().openFilesTab(activeThreadRef);
   };
   const addFilesSurfaceStable = useStableCallback(addFilesSurface);
+  const duplicateFilesTabStable = useStableCallback((surface: FilesSurface) => {
+    if (!activeThreadRef) return;
+    const id = newFilesSurfaceId();
+    if (surface.id !== "files") duplicateExpandedDirectories(surface.id, id);
+    useRightPanelStore
+      .getState()
+      .openFilesTab(activeThreadRef, { ...surface, id, anchorId: surface.id });
+  });
   const addPullRequestsSurface = () => {
     if (!activeThreadRef || !pullRequestsSurfaceAvailable) return;
     useRightPanelStore.getState().open(activeThreadRef, "pull-requests");
@@ -262,24 +273,15 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
       relativePath,
       resolvePathLinkTarget(relativePath, gitCwd ?? activeProjectCwd ?? ""),
     );
-    void navigator.clipboard.writeText(clipboardPath).then(
-      () => {
-        toastManager.add({
-          type: "success",
-          title: "Path copied",
-          description: clipboardPath,
-        });
-      },
-      (error) => {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Failed to copy path",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      },
-    );
+    void navigator.clipboard.writeText(clipboardPath).then(undefined, (error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to copy path",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    });
   };
   const copyRightPanelFilePathStable = useStableCallback(copyRightPanelFilePath);
   const addPullRequestSurface = () => {
@@ -336,6 +338,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     closePreviewPanelStable,
     copyRightPanelFilePathStable,
     createBrowserSurface,
+    duplicateFilesTabStable,
     createBrowserSurfaceStable,
     moveRightPanelSurfaceStable,
     onOpenToolDiffStable,

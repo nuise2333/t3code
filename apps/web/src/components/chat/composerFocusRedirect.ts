@@ -71,6 +71,30 @@ function isKeyClaimedInPath(event: KeyboardEvent): boolean {
     );
 }
 
+/** `Control+Alt+Shift+Meta+Key`, in that order, as `data-local-shortcuts` lists them. */
+function pressedShortcut(event: KeyboardEvent): string {
+  const modifiers = [
+    event.ctrlKey && "Control",
+    event.altKey && "Alt",
+    event.shiftKey && "Shift",
+    event.metaKey && "Meta",
+  ].filter(Boolean);
+  return [...modifiers, event.key.length === 1 ? event.key.toUpperCase() : event.key].join("+");
+}
+
+/** A focused region, such as the file tree, that handles this modified key itself. */
+export function isShortcutClaimedLocally(event: KeyboardEvent): boolean {
+  if (!event.metaKey && !event.ctrlKey) return false;
+  const pressed = pressedShortcut(event);
+  return event
+    .composedPath()
+    .some(
+      (target) =>
+        target instanceof Element &&
+        (target.getAttribute("data-local-shortcuts")?.split(/\s+/).includes(pressed) ?? false),
+    );
+}
+
 export function shouldRedirectInputToComposer(event: Event): boolean {
   if (event.defaultPrevented) return false;
   // Never persist or send secret-request typing through the composer.

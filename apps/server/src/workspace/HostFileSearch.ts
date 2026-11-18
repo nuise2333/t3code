@@ -1,4 +1,12 @@
-import type { ProjectEntryKind } from "@t3tools/contracts";
+import {
+  FilesystemSearchHostError,
+  type FilesystemSearchHostEntry,
+  type FilesystemSearchHostInput,
+  type FilesystemSearchHostResult,
+  type HostFileSearchBackend,
+  type ProjectEntryKind,
+} from "@t3tools/contracts";
+import { fileCategoryOf } from "@t3tools/shared/fileCategory";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { isNetworkPath } from "@t3tools/shared/path";
 import {
@@ -13,7 +21,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
@@ -32,34 +39,6 @@ const SPOTLIGHT_INDEXING_PROBE_TTL = "30 seconds";
 const LOCATE_GLOB_CHARACTERS = /[*?[\]\\]/gu;
 const WINDOWS_NAME_FORBIDDEN_CHARACTERS = /[<>:"/\\|?*]/gu;
 const ASCII_PUNCTUATION = /[!-/:-@[-`{-~]/gu;
-
-export type HostFileSearchBackend = "spotlight" | "plocate" | "locate" | "everything";
-
-export interface FilesystemSearchHostInput {
-  readonly query: string;
-  readonly limit: number;
-  readonly kind?: ProjectEntryKind | undefined;
-}
-
-export interface FilesystemSearchHostEntry {
-  readonly path: string;
-  readonly kind: ProjectEntryKind;
-}
-
-export interface FilesystemSearchHostResult {
-  readonly entries: ReadonlyArray<FilesystemSearchHostEntry>;
-  /** More matches existed, or the index answered too slowly to list them all. */
-  readonly truncated: boolean;
-}
-
-export class FilesystemSearchHostError extends Schema.TaggedError<FilesystemSearchHostError>()(
-  "FilesystemSearchHostError",
-  {
-    /** `unavailable`: the host has no usable file index right now. */
-    reason: Schema.Literals(["unavailable", "failed"]),
-    detail: Schema.optional(Schema.String),
-  },
-) {}
 
 export interface HostFileSearchAdapter {
   readonly backend: HostFileSearchBackend;
@@ -206,7 +185,7 @@ function basenameOf(path: string, platform: NodeJS.Platform): string {
 /** Filters and ranks rows as they stream in, keeping only the best `capacity`. */
 export function makeHostSearchCollector(options: {
   readonly backend: HostFileSearchBackend;
-  readonly input: Pick<FilesystemSearchHostInput, "query" | "kind">;
+  readonly input: Pick<FilesystemSearchHostInput, "query" | "kind" | "category">;
   readonly context: HostSearchContext;
   readonly capacity: number;
   readonly rawCap?: number;
@@ -227,6 +206,12 @@ export function makeHostSearchCollector(options: {
     if (row.path.length === 0 || isHostSearchNoise(row.path, context)) return;
     if (input.kind !== undefined && row.kind !== undefined && row.kind !== input.kind) return;
     const basename = basenameOf(row.path, context.platform);
+    if (
+      input.category !== undefined &&
+      (row.kind === "directory" || fileCategoryOf(basename) !== input.category)
+    ) {
+      return;
+    }
     const score = scoreSubsequenceMatch(basename.normalize("NFC").toLowerCase(), query);
     if (score === null) return;
     matches += 1;

@@ -2,8 +2,10 @@ import {
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
+  AuthFilesystemWriteScope,
   AuthProvidersManageScope,
   AuthSettingsWriteScope,
+  AuthAccessWriteScope,
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -71,6 +73,26 @@ describe("RPC authorization scopes", () => {
   it("lets thread readers observe and refresh checkout branches", () => {
     for (const method of [WS_METHODS.subscribeVcsBranch, WS_METHODS.vcsRefreshBranch]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    }
+  });
+
+  it("still lets readers load settings the way installed Swift clients ask", () => {
+    expect(requiredScopeForRpcMethod("server.getSettings")).toBe(AuthOrchestrationReadScope);
+  });
+
+  it("lets file readers browse and search the whole host", () => {
+    for (const method of [
+      WS_METHODS.filesystemBrowse,
+      WS_METHODS.filesystemGetMetadata,
+      WS_METHODS.filesystemSearchHost,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthFilesystemReadScope);
+    }
+  });
+
+  it("requires file write permission to change files", () => {
+    for (const method of [WS_METHODS.projectsWriteFile, WS_METHODS.filesystemFileOperation]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthFilesystemWriteScope);
     }
   });
 
@@ -263,35 +285,42 @@ describe("settings mutation authorization", () => {
     }),
   );
 
-  it.effect("does not let a settings grant create or remove providers or secret providers", () =>
-    Effect.gen(function* () {
-      let handled = false;
-      const client = yield* RpcTest.makeClient(group).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            group.toLayerHandler(WS_METHODS.serverUpdateSettings, () =>
-              Effect.sync(() => {
-                handled = true;
-                return DEFAULT_SERVER_SETTINGS;
-              }),
+  it.effect(
+    "does not let a settings grant manage providers or turn off T3 Connect device approval",
+    () =>
+      Effect.gen(function* () {
+        let handled = false;
+        const client = yield* RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(WS_METHODS.serverUpdateSettings, () =>
+                Effect.sync(() => {
+                  handled = true;
+                  return DEFAULT_SERVER_SETTINGS;
+                }),
+              ),
+              RpcAuthorization.layer([AuthSettingsWriteScope]),
             ),
-            RpcAuthorization.layer([AuthSettingsWriteScope]),
           ),
-        ),
-      );
-      expect(
-        yield* client[WS_METHODS.serverUpdateSettings]({
-          patch: {},
-          providerInstanceMutation,
-        }).pipe(Effect.flip),
-      ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
-      expect(
-        yield* client[WS_METHODS.serverUpdateSettings]({
-          patch: { secretProviders: { [SecretProviderId.make("personal")]: null } },
-        }).pipe(Effect.flip),
-      ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
-      expect(handled).toBe(false);
-    }),
+        );
+        expect(
+          yield* client[WS_METHODS.serverUpdateSettings]({
+            patch: {},
+            providerInstanceMutation,
+          }).pipe(Effect.flip),
+        ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
+        expect(
+          yield* client[WS_METHODS.serverUpdateSettings]({
+            patch: { secretProviders: { [SecretProviderId.make("personal")]: null } },
+          }).pipe(Effect.flip),
+        ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
+        expect(
+          yield* client[WS_METHODS.serverUpdateSettings]({
+            patch: { requireConnectDeviceApproval: false },
+          }).pipe(Effect.flip),
+        ).toMatchObject({ requiredPermission: AuthAccessWriteScope });
+        expect(handled).toBe(false);
+      }),
   );
 });
 

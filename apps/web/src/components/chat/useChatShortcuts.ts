@@ -11,7 +11,7 @@ import { isInSideChatPane } from "../../lib/sideChatPane";
 import { getTerminalFocusOwner, type TerminalFocusOwner } from "../../lib/terminalFocus";
 import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { BranchToolbarHandle } from "../BranchToolbar";
-import { shouldTypeToFocusComposer } from "./composerFocusRedirect";
+import { isShortcutClaimedLocally, shouldTypeToFocusComposer } from "./composerFocusRedirect";
 import { composerShortcutCommands } from "./composerShortcuts";
 
 /** Returning false lets the key event through untouched. */
@@ -67,6 +67,7 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
     if (!input.enabled || isCommandPaletteOpen() || isInSideChatPane(event.target)) return;
     const terminalFocusOwner = getTerminalFocusOwner();
     if (event.defaultPrevented && terminalFocusOwner === null) return;
+    if (isShortcutClaimedLocally(event)) return;
     const shortcutContext = input.getShortcutContext(event.target);
 
     if (

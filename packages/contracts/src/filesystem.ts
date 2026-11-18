@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ProjectEntryKind, ProjectFileCategory } from "./project.ts";
 
 const FILESYSTEM_PATH_MAX_LENGTH = 512;
 
@@ -109,5 +110,144 @@ export class FilesystemBrowseError extends Schema.TaggedError<FilesystemBrowseEr
         decodedFilesystemBrowseErrorMessage(props) ??
         `Failed to browse filesystem path '${props.partialPath}'${cwd}.`,
     } as any);
+  }
+}
+
+const FILESYSTEM_SEARCH_HOST_MAX_LIMIT = 200;
+
+export const HostFileSearchBackend = Schema.Literals([
+  "spotlight",
+  "plocate",
+  "locate",
+  "everything",
+]);
+export type HostFileSearchBackend = typeof HostFileSearchBackend.Type;
+
+export const FilesystemSearchHostInput = Schema.Struct({
+  query: TrimmedNonEmptyString.check(Schema.isMinLength(2), Schema.isMaxLength(256)),
+  limit: PositiveInt.check(Schema.isLessThanOrEqualTo(FILESYSTEM_SEARCH_HOST_MAX_LIMIT)),
+  kind: Schema.optional(ProjectEntryKind),
+  category: Schema.optional(ProjectFileCategory),
+});
+export type FilesystemSearchHostInput = typeof FilesystemSearchHostInput.Type;
+
+export const FilesystemSearchHostEntry = Schema.Struct({
+  /** Absolute host path, untrimmed: names may end in whitespace. */
+  path: Schema.String.check(Schema.isNonEmpty()),
+  kind: ProjectEntryKind,
+});
+export type FilesystemSearchHostEntry = typeof FilesystemSearchHostEntry.Type;
+
+export const FilesystemSearchHostResult = Schema.Struct({
+  entries: Schema.Array(FilesystemSearchHostEntry),
+  /** More matches existed, or the index answered too slowly to list them all. */
+  truncated: Schema.Boolean,
+});
+export type FilesystemSearchHostResult = typeof FilesystemSearchHostResult.Type;
+
+export class FilesystemSearchHostError extends Schema.TaggedError<FilesystemSearchHostError>()(
+  "FilesystemSearchHostError",
+  {
+    /** `unavailable`: the host has no usable file index right now. */
+    reason: Schema.Literals(["unavailable", "failed"]),
+    detail: Schema.optional(Schema.String),
+  },
+) {
+  override get message(): string {
+    return this.reason === "unavailable"
+      ? "File search is not available on this host."
+      : "File search failed on this host.";
+  }
+}
+
+const FILESYSTEM_FILE_OPERATION_BATCH_LIMIT = 128;
+
+/** Relative to the operation's `root`, or an absolute host path. */
+const FileOperationPath = Schema.NonEmptyString.check(
+  Schema.isMaxLength(FILESYSTEM_PATH_MAX_LENGTH),
+);
+const FileOperationPaths = Schema.Array(FileOperationPath).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(FILESYSTEM_FILE_OPERATION_BATCH_LIMIT),
+);
+
+export const FilesystemFileOperation = Schema.Union([
+  Schema.TaggedStruct("createFile", { path: FileOperationPath }),
+  Schema.TaggedStruct("createDirectory", { path: FileOperationPath }),
+  Schema.TaggedStruct("rename", {
+    path: FileOperationPath,
+    name: Schema.NonEmptyString.check(Schema.isMaxLength(255)),
+  }),
+  Schema.TaggedStruct("move", {
+    paths: FileOperationPaths,
+    destinationDirectory: FileOperationPath,
+  }),
+  /** Keeps both on a taken name ("name 2.ext"); a copy into the source's own folder duplicates. */
+  Schema.TaggedStruct("copy", {
+    paths: FileOperationPaths,
+    destinationDirectory: FileOperationPath,
+  }),
+  Schema.TaggedStruct("trash", {
+    paths: FileOperationPaths,
+    /** `delete` removes permanently only the items the host trash could not take. */
+    onUnavailable: Schema.Literals(["fail", "delete"]),
+  }),
+]);
+export type FilesystemFileOperation = typeof FilesystemFileOperation.Type;
+
+export const FilesystemFileOperationInput = Schema.Struct({
+  /** A project or worktree root, or a host folder; relative paths resolve against it. */
+  root: TrimmedNonEmptyString.check(Schema.isMaxLength(FILESYSTEM_PATH_MAX_LENGTH)),
+  operation: FilesystemFileOperation,
+});
+export type FilesystemFileOperationInput = typeof FilesystemFileOperationInput.Type;
+
+export const FilesystemFileOperationFailure = Schema.Literals([
+  "name_taken",
+  "invalid_name",
+  "not_found",
+  "not_directory",
+  "permission_denied",
+  /** Git metadata, a repository or workspace root, a system folder, home, or T3 home. */
+  "protected",
+  /** Resolves outside a project root, through a symlink for example. */
+  "outside_root",
+  "into_itself",
+  "cross_device",
+  "too_large",
+  "trash_unavailable",
+  "failed",
+]);
+export type FilesystemFileOperationFailure = typeof FilesystemFileOperationFailure.Type;
+
+export const FilesystemFileOperationItem = Schema.Struct({
+  /** As requested. */
+  path: Schema.String,
+  /** Where the item now is, after a create, rename, move, or copy. */
+  destination: Schema.optionalKey(Schema.String),
+  failure: Schema.optionalKey(FilesystemFileOperationFailure),
+});
+export type FilesystemFileOperationItem = typeof FilesystemFileOperationItem.Type;
+
+/**
+ * Items follow request order. Paths inside `root` come back root-relative with `/`
+ * separators (`""` is the root itself); other paths come back absolute.
+ */
+export const FilesystemFileOperationResult = Schema.Struct({
+  items: Schema.Array(FilesystemFileOperationItem),
+  changedDirectories: Schema.Array(Schema.String),
+});
+export type FilesystemFileOperationResult = typeof FilesystemFileOperationResult.Type;
+
+export class FilesystemFileOperationError extends Schema.TaggedError<FilesystemFileOperationError>()(
+  "FilesystemFileOperationError",
+  {
+    root: Schema.String,
+    /** `root_unavailable`: the root is missing, not a folder, or a network path. */
+    reason: Schema.Literals(["root_unavailable"]),
+  },
+) {
+  override get message(): string {
+    return `'${this.root}' is not an existing local folder.`;
   }
 }

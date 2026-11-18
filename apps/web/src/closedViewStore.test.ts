@@ -42,6 +42,19 @@ describe("closedViewStore", () => {
     { id: "bad", kind: "panel-tab", threadRef: {}, surface: { kind: "diff", id: "diff" } },
     { id: "bad", kind: "panel-tab", threadRef: refA, surface: {} },
     { id: "bad", kind: "panel-tab", threadRef: refA, surface: { kind: "file", id: "file:x" } },
+    { id: "bad", kind: "panel-tab", threadRef: refA, surface: { kind: "files", id: "files:" } },
+    {
+      id: "bad",
+      kind: "panel-tab",
+      threadRef: refA,
+      surface: { kind: "files", id: "files:a", folderPath: 3 },
+    },
+    {
+      id: "bad",
+      kind: "panel-tab",
+      threadRef: refA,
+      surface: { kind: "files", id: "files:a", view: "icons" },
+    },
     {
       id: "bad",
       kind: "panel-tab",
@@ -97,6 +110,11 @@ describe("closedViewStore", () => {
       surface: { id: "side-chat:side", kind: "side-chat", threadId: ThreadId.make("side") },
     });
     const publicId = store.remember(diff(refA));
+    const filesTabId = store.remember({
+      kind: "panel-tab",
+      threadRef: refA,
+      surface: { id: "files:tab", kind: "files", folderPath: "src", view: "grid" },
+    });
     const browserId = store.remember({
       kind: "browser",
       threadRef: refA,
@@ -125,6 +143,7 @@ describe("closedViewStore", () => {
     expect(useClosedViewStore.persist.hasHydrated()).toBe(true);
     expect(useClosedViewStore.getState().entries.map((entry) => entry.id)).toEqual([
       browserId,
+      filesTabId,
       publicId,
       sideChatId,
     ]);

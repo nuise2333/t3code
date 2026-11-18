@@ -44,6 +44,14 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
     void this.persistLatest();
   }
 
+  /** Forgets the unwritten draft, for a file that is gone. */
+  discard(): void {
+    this.clearTimer();
+    if (this.latestRevision === this.confirmedRevision) return;
+    this.confirmedRevision = this.latestRevision;
+    this.options.onPendingChange(false);
+  }
+
   dispose(): void {
     this.disposed = true;
     this.clearTimer();
@@ -78,7 +86,7 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
     const succeeded = result._tag === "Success";
     let confirmed = false;
     if (succeeded) {
-      this.confirmedRevision = revision;
+      this.confirmedRevision = Math.max(this.confirmedRevision, revision);
       confirmed = this.options.onConfirmed(contents) !== false;
     }
 

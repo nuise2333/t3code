@@ -11,7 +11,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 import { randomUUID } from "./lib/utils";
-import { type RightPanelSurface } from "./rightPanelStore";
+import { isFilesSurfaceId, type RightPanelSurface } from "./rightPanelStore";
 
 export type ClosedView =
   | {
@@ -61,9 +61,15 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
   if (!surface || typeof surface.id !== "string") return false;
   switch (surface.kind) {
     case "diff":
-    case "files":
     case "pull-requests":
       return surface.id === surface.kind;
+    case "files":
+      return (
+        isFilesSurfaceId(surface.id) &&
+        (surface.folderPath === undefined || typeof surface.folderPath === "string") &&
+        (surface.folderTrail === undefined || typeof surface.folderTrail === "string") &&
+        (surface.view === undefined || surface.view === "list" || surface.view === "grid")
+      );
     case "preview":
       return surface.resourceId === null || typeof surface.resourceId === "string";
     case "file":

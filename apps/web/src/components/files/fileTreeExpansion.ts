@@ -80,8 +80,9 @@ export function coalesceReentrantCalls(run: () => void): () => void {
 }
 
 const EXPANDED_DIRECTORIES_STORAGE_KEY = "t3code.fileTreeExpandedDirectories";
-// Roots are kept most recent first and capped so worktrees that come and go do not grow storage.
-const MAX_STORED_ROOTS = 20;
+// Roots are kept most recent first and capped so worktrees and Files tabs that come and go do not
+// grow storage.
+const MAX_STORED_ROOTS = 50;
 const StoredExpandedDirectories = Schema.Array(
   Schema.Struct({ root: Schema.String, paths: Schema.Array(Schema.String) }),
 );
@@ -95,13 +96,45 @@ function readStoredExpandedDirectories() {
   }
 }
 
-export function readExpandedDirectories(root: string): readonly string[] {
-  return readStoredExpandedDirectories().find((entry) => entry.root === root)?.paths ?? [];
+/** A root with nothing saved starts from `fallbackRoot`'s folders. */
+export function readExpandedDirectories(root: string, fallbackRoot?: string): readonly string[] {
+  const stored = readStoredExpandedDirectories();
+  return (
+    (
+      stored.find((entry) => entry.root === root) ??
+      (fallbackRoot === undefined ? undefined : stored.find((entry) => entry.root === fallbackRoot))
+    )?.paths ?? []
+  );
 }
 
-export function writeExpandedDirectories(root: string, paths: readonly string[]): void {
-  const others = readStoredExpandedDirectories().filter((entry) => entry.root !== root);
-  const next = paths.length > 0 ? [{ root, paths }, ...others] : others;
+/** keepEmpty saves an empty list so a fallback does not reexpand what was collapsed. */
+export function writeExpandedDirectories(
+  root: string,
+  paths: readonly string[],
+  keepEmpty = false,
+): void {
+  writeStoredExpandedDirectories(root, paths.length > 0 || keepEmpty ? [{ root, paths }] : []);
+}
+
+/** Gives `toSuffix`'s tab a copy of each root `fromSuffix`'s tab saved. */
+export function duplicateExpandedDirectories(fromSuffix: string, toSuffix: string): void {
+  const copies = readStoredExpandedDirectories().flatMap((entry) =>
+    entry.root.endsWith(`#${fromSuffix}`)
+      ? [{ root: `${entry.root.slice(0, -fromSuffix.length)}${toSuffix}`, paths: entry.paths }]
+      : [],
+  );
+  if (copies.length > 0) writeStoredExpandedDirectories(null, copies);
+}
+
+function writeStoredExpandedDirectories(
+  replacedRoot: string | null,
+  added: readonly { root: string; paths: readonly string[] }[],
+): void {
+  const addedRoots = new Set(added.map((entry) => entry.root));
+  const others = readStoredExpandedDirectories().filter(
+    (entry) => entry.root !== replacedRoot && !addedRoots.has(entry.root),
+  );
+  const next = [...added, ...others];
   try {
     setLocalStorageItem(
       EXPANDED_DIRECTORIES_STORAGE_KEY,

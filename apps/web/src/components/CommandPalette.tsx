@@ -64,6 +64,7 @@ import {
   ChevronRightIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
+  FilesIcon,
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
@@ -148,7 +149,11 @@ import {
   waitForProject,
 } from "../state/entities";
 import { visibleLinkedThreads } from "@t3tools/client-runtime/state/threads";
-import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
+import {
+  resolveThreadActionProjectRef,
+  startNewThreadFromContext,
+  threadHasStarted,
+} from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
   ensureBrowseDirectoryPath,
@@ -214,7 +219,7 @@ import {
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
-  RECENT_THREAD_LIMIT,
+  buildRecentThreadItems,
   createCommandPaletteSearchState,
   type CommandPaletteGroup,
   resolveAddProjectEntry,
@@ -277,7 +282,6 @@ import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
-import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const EMPTY_FOLDER_SEARCH_ENTRIES: FilesystemSearchDirectoriesResult["entries"] = [];
@@ -733,6 +737,7 @@ function OpenCommandPaletteDialog(props: {
   const relativePathNeedsActiveProject =
     isExplicitRelativeProjectPath(query.trim()) && currentProjectCwdForBrowse === null;
   const browseAccess = useFilesystemReadAccess(browseEnvironmentId);
+  const currentProjectFileAccess = useFilesystemReadAccess(currentProjectEnvironmentId);
   const hasBrowseTarget =
     isBrowsing &&
     browsePath.directoryPath.length > 0 &&
@@ -969,19 +974,7 @@ function OpenCommandPaletteDialog(props: {
     now: searchNow,
     isSearchPending: isThreadSearchPending,
   } = useCommandPaletteThreadItems({ activeThread: activeThread ?? null, threadSearchQuery });
-  // Recent means used recently: written in or opened, whichever is later. The
-  // open thread would always lead that list, so it is left out.
-  const activeThreadValue = activeThread
-    ? `thread:${activeThread.environmentId}:${activeThread.id}`
-    : null;
-  const recentThreadItems = allThreadItems
-    .filter((item) => item.value !== activeThreadValue)
-    .toSorted(
-      (left, right) =>
-        (right.threadSearch ? threadRecentUse(right.threadSearch) : 0) -
-        (left.threadSearch ? threadRecentUse(left.threadSearch) : 0),
-    )
-    .slice(0, RECENT_THREAD_LIMIT);
+  const recentThreadItems = buildRecentThreadItems(allThreadItems, activeThread);
 
   const pushPaletteView = useStableCallback((view: CommandPaletteView): void => {
     browseNavigation.invalidate();
@@ -1448,6 +1441,7 @@ function OpenCommandPaletteDialog(props: {
               ? providersByEnvironment.get(promptLinkProjectRef.environmentId)
               : undefined) ?? [],
           threadModelSelection: activeThread?.modelSelection ?? null,
+          threadStarted: threadHasStarted(activeThread),
         };
   const plainPromptLink = promptLinkInput
     ? composerPromptLink({ ...promptLinkInput, withContext: false })
@@ -1584,6 +1578,21 @@ function OpenCommandPaletteDialog(props: {
       openChildSearch("files", { query, linkedThreadSearch });
     },
   });
+
+  if (previewPanelThreadRef !== null && currentProject !== null) {
+    const threadRef = previewPanelThreadRef;
+    actionItems.push({
+      kind: "action",
+      value: "action:new-files-tab",
+      searchTerms: ["new files tab", "file browser", "explorer", "folder", "open files"],
+      title: "New Files tab",
+      icon: <FilesIcon className={ITEM_ICON_CLASS} />,
+      disabled: !currentProjectFileAccess.canReadFiles,
+      run: async () => {
+        useRightPanelStore.getState().openFilesTab(threadRef);
+      },
+    });
+  }
 
   actionItems.push({
     kind: "action",
@@ -2490,6 +2499,7 @@ function OpenCommandPaletteDialog(props: {
                 ),
                 ...(isCreatingNewProject ? { disabled: true } : {}),
                 keepOpen: true,
+                checked: newProjectPublishes,
                 run: async () => {
                   setNewProjectPublishes((publishes) => !publishes);
                 },

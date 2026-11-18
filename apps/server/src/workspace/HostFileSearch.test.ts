@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import type { FilesystemSearchHostInput } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -19,7 +20,6 @@ import {
   isHostSearchNoise,
   makeHostSearchCollector,
   makeWithAdapter,
-  type FilesystemSearchHostInput,
   type HostFileSearchAdapter,
 } from "./HostFileSearch.ts";
 
@@ -266,6 +266,21 @@ describe("makeHostSearchCollector", () => {
     expect(collector.push("/x/node_modules/ab\0/x/.git/ab\0/x/ab\0/x/abc\0")).toBe(false);
     expect(collector.capped).toBe(true);
     expect(collector.rows().map((row) => row.path)).toEqual(["/x/ab"]);
+  });
+
+  it("keeps only the category's files and reads Spotlight's kind", () => {
+    const collector = makeHostSearchCollector({
+      backend: "spotlight",
+      input: { query: "plan", category: "document" },
+      context: darwin,
+      capacity: 10,
+    });
+    collector.push(
+      spotlightRow("/Users/me/plan.pdf", ["com.adobe.pdf", "public.data"]) +
+        spotlightRow("/Users/me/plan.png", ["public.png", "public.image"]) +
+        spotlightRow("/Users/me/plan.md", FOLDER_TREE),
+    );
+    expect(collector.rows()).toEqual([{ path: "/Users/me/plan.pdf", kind: "file" }]);
   });
 
   it("reads a Spotlight package such as .app as a directory", () => {

@@ -102,6 +102,7 @@ import { previewBridge } from "./preview/previewBridge";
 import { dispatchPreviewAction } from "./preview/previewActionBus";
 import { preventThumbButtonFocus, takeThumbButtonNavigation } from "./preview/thumbButtons";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
+import { fileBreadcrumbs } from "./files/filePath";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
@@ -126,6 +127,8 @@ export interface RightPanelTabsProps {
   /** Maps server-local session ids to desktop runtime ids; session ids cannot address desktop operations. */
   previewRuntimeTabId?: ((tabId: string) => string) | undefined;
   terminalLabelsById: ReadonlyMap<string, string>;
+  /** Titles a Files tab at the workspace root. */
+  projectName?: string | undefined;
   onActivate: (surface: RightPanelSurface) => void;
   onRenameDevice?: (surfaceId: string, title: string) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
@@ -134,6 +137,7 @@ export interface RightPanelTabsProps {
   onCloseAllSurfaces: () => void;
   onMoveSurface?: (surfaceId: string, toIndex: number) => void;
   onCopyFilePath: (relativePath: string) => void;
+  onDuplicateFilesTab?: (surface: Extract<RightPanelSurface, { kind: "files" }>) => void;
   onAddBrowser: () => void;
   /** Keep separate from the DOM click handler so a MouseEvent cannot become a profile id. */
   onAddBrowserInProfile: (profileId: string) => void;
@@ -212,6 +216,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
 type TabContextMenuAction =
   | "rename"
   | "copy-path"
+  | "duplicate"
   | "toggle-mute"
   | "close"
   | "close-others"
@@ -573,12 +578,15 @@ function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
+  projectName: string | undefined,
 ): string {
   switch (surface.kind) {
     case "diff":
       return "Diff";
     case "files":
-      return "Files";
+      return surface.folderPath === undefined
+        ? projectName || "Files"
+        : (fileBreadcrumbs("", surface.folderPath).at(-1)?.label ?? surface.folderPath);
     case "file":
       return surface.relativePath.slice(
         Math.max(surface.relativePath.lastIndexOf("/"), surface.relativePath.lastIndexOf("\\")) + 1,
@@ -1193,6 +1201,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     if (surface.kind === "file" && surface.attachment === undefined) {
       items.push({ id: "copy-path", label: "Copy path" });
     }
+    if (surface.kind === "files" && props.onDuplicateFilesTab) {
+      items.push({ id: "duplicate", label: "Duplicate tab" });
+    }
     const menuPreviewTabId = previewTabIdOf(surface, props.previewSessions);
     const menuOverlay = menuPreviewTabId ? (props.desktopByTabId[menuPreviewTabId] ?? null) : null;
     const menuMuted = menuOverlay?.audioMuted ?? false;
@@ -1233,6 +1244,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         if (surface.kind === "file" && surface.attachment === undefined) {
           props.onCopyFilePath(surface.relativePath);
         }
+        break;
+      case "duplicate":
+        if (surface.kind === "files") props.onDuplicateFilesTab?.(surface);
         break;
       case "toggle-mute": {
         const runtimeTabId =
@@ -1329,7 +1343,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       workspaceFocusKey={`panel:${props.environmentId}:${props.activeSurfaceId ?? "empty"}`}
       workspaceLabel={
         focusedSurface
-          ? `Workspace panel: ${surfaceTitle(focusedSurface, props.previewSessions, props.terminalLabelsById)}`
+          ? `Workspace panel: ${surfaceTitle(
+              focusedSurface,
+              props.previewSessions,
+              props.terminalLabelsById,
+              props.projectName,
+            )}`
           : "Workspace panel"
       }
       mode={props.mode}
@@ -1361,7 +1380,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           ref={attachTabList}
           hideScrollbars
           scrollFade
-          className="min-w-0 flex-1"
+          className={cn(
+            "min-w-0 flex-1",
+            ownsDesktopTitleBar && tabScrollState.hasOverflow && "[-webkit-app-region:no-drag]",
+          )}
           data-right-panel-tab-list
         >
           <div className="flex h-full w-max min-w-full items-center gap-1">
@@ -1380,7 +1402,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     dragDisabled={!props.onMoveSurface || renamingDevice === surface.id}
                     active={surface.id === props.activeSurfaceId}
                     pending={props.pendingSurfaceIds.has(surface.id)}
-                    title={surfaceTitle(surface, props.previewSessions, props.terminalLabelsById)}
+                    title={surfaceTitle(
+                      surface,
+                      props.previewSessions,
+                      props.terminalLabelsById,
+                      props.projectName,
+                    )}
                     audio={tabAudioState(
                       previewTabId ? (props.desktopByTabId[previewTabId] ?? null) : null,
                     )}

@@ -6,6 +6,7 @@ import {
 import {
   createThreadSearchResultsAtomFamily,
   makeThreadSearchKey,
+  refinesOrWidensQuery,
   visibleThreadSearch,
   type EnvironmentThreadSearchMatch,
   type SettledThreadSearch,
@@ -24,6 +25,7 @@ import type {
   ProjectContentMatch,
   ProjectEntry,
   ProjectEntryKind,
+  ProjectFileCategory,
   ThreadId,
   TurnItemId,
   VcsListRefsResult,
@@ -34,7 +36,7 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useState } from "react";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { useFilesystemReadAccess } from "./filesystem";
+import { filesystemEnvironment, useFilesystemReadAccess } from "./filesystem";
 import { orchestrationEnvironment } from "./orchestration";
 import { olderSettledThreads, threadFamilies } from "./threads";
 import { isPaginatedBranchesNextPagePending } from "./paginatedBranches";
@@ -43,6 +45,7 @@ import { useEnvironmentQuery } from "./query";
 import { vcsEnvironment } from "./vcs";
 
 const PROJECT_PATH_SEARCH_DEBOUNCE_MS = 120;
+const HOST_PATH_SEARCH_MIN_QUERY_LENGTH = 2;
 const COMPOSER_PATH_SEARCH_LIMIT = 80;
 const PROJECT_CONTENT_SEARCH_DEBOUNCE_MS = 120;
 const PROJECT_CONTENT_SEARCH_LIMIT = 500;
@@ -276,6 +279,7 @@ export function usePaginatedBranches(target: VcsRefTarget) {
 type ProjectPathSearchTarget = ComposerPathSearchTarget & {
   readonly kind?: ProjectEntryKind | undefined;
   readonly imageOnly?: boolean | undefined;
+  readonly category?: ProjectFileCategory | undefined;
 };
 
 function areProjectPathSearchTargetsEqual(
@@ -287,8 +291,110 @@ function areProjectPathSearchTargetsEqual(
     left.cwd === right.cwd &&
     left.query === right.query &&
     left.kind === right.kind &&
-    left.imageOnly === right.imageOnly
+    left.imageOnly === right.imageOnly &&
+    left.category === right.category
   );
+}
+
+interface SettledProjectPathSearch {
+  readonly target: ProjectPathSearchTarget;
+  readonly entries: ReadonlyArray<ProjectEntry>;
+  readonly truncated: boolean;
+}
+
+/** Earlier results that may show while `target` searches: same place and filters, same, refined or widened query. */
+export function retainedProjectPathSearch(
+  target: ProjectPathSearchTarget,
+  previous: SettledProjectPathSearch | null,
+): SettledProjectPathSearch | null {
+  return previous !== null &&
+    previous.target.environmentId === target.environmentId &&
+    previous.target.cwd === target.cwd &&
+    previous.target.kind === target.kind &&
+    previous.target.imageOnly === target.imageOnly &&
+    previous.target.category === target.category &&
+    isSameOrRelatedQuery(target.query?.trim() ?? "", previous.target.query?.trim() ?? "")
+    ? previous
+    : null;
+}
+
+function isSameOrRelatedQuery(current: string, before: string) {
+  return current === before || refinesOrWidensQuery(current, before);
+}
+
+interface PathSearchPage {
+  readonly entries: ReadonlyArray<ProjectEntry>;
+  readonly truncated: boolean;
+}
+
+type SearchablePathSearchTarget = ProjectPathSearchTarget & {
+  readonly environmentId: EnvironmentId;
+  readonly query: string;
+};
+
+function boundedPathSearchQuery(query: string): string {
+  return query.slice(0, 256).replace(/[\uD800-\uDBFF]$/, "");
+}
+
+/** Debounces typing, gates on file access, and keeps related earlier rows while a search runs. */
+function useDebouncedPathSearch<T extends SearchablePathSearchTarget, E>(
+  target: ProjectPathSearchTarget,
+  search: {
+    readonly isSearchable: (target: ProjectPathSearchTarget) => target is T;
+    readonly atom: (target: T) => Atom.Atom<AsyncResult.AsyncResult<PathSearchPage, E>>;
+  },
+) {
+  const normalizedTarget = {
+    environmentId: target.environmentId,
+    cwd: target.cwd,
+    query: target.query == null ? null : target.query.trim(),
+    kind: target.kind,
+    imageOnly: target.imageOnly,
+    category: target.category,
+  };
+  // Only typing waits: a changed filter reads its own cached search at once, and so does searching nothing.
+  const debounced = useDebouncedValue(normalizedTarget, PROJECT_PATH_SEARCH_DEBOUNCE_MS);
+  const debouncedTarget = {
+    ...debounced,
+    query: normalizedTarget.query === null ? null : debounced.query,
+    kind: normalizedTarget.kind,
+    imageOnly: normalizedTarget.imageOnly,
+    category: normalizedTarget.category,
+  };
+  const fileAccess = useFilesystemReadAccess(debouncedTarget.environmentId);
+  const { canReadFiles } = fileAccess;
+  const searchTarget = search.isSearchable(debouncedTarget) ? debouncedTarget : null;
+  const result = useEnvironmentQuery(
+    canReadFiles && searchTarget !== null ? search.atom(searchTarget) : null,
+  );
+  const hasTarget = searchTarget !== null;
+  const isPending =
+    !areProjectPathSearchTargetsEqual(normalizedTarget, debouncedTarget) ||
+    (hasTarget && (fileAccess.isPending || result.isPending));
+  const settled =
+    !isPending && result.data
+      ? { target: debouncedTarget, entries: result.data.entries, truncated: result.data.truncated }
+      : null;
+  // Kept from earlier renders: React's pattern for information from previous renders.
+  const [previous, setPrevious] = useState<SettledProjectPathSearch | null>(null);
+  if (settled !== null && previous?.entries !== settled.entries) setPrevious(settled);
+  const shown = isPending ? retainedProjectPathSearch(normalizedTarget, previous) : settled;
+  const searchedTarget = shown?.target ?? debouncedTarget;
+
+  return {
+    entries: shown?.entries ?? EMPTY_PROJECT_ENTRIES,
+    error:
+      !hasTarget || fileAccess.isPending
+        ? null
+        : canReadFiles
+          ? result.error
+          : (fileAccess.error ?? "This connection cannot search host files."),
+    isPending,
+    searchedTarget,
+    searchedQuery: searchedTarget.query ?? "",
+    truncated: shown?.truncated ?? false,
+    refresh: result.refresh,
+  };
 }
 
 export function useProjectPathSearch(
@@ -297,57 +403,65 @@ export function useProjectPathSearch(
   options?: { readonly allowEmptyQuery?: boolean },
 ) {
   const allowEmptyQuery = options?.allowEmptyQuery === true;
-  const normalizedTarget = {
-    environmentId: target.environmentId,
-    cwd: target.cwd,
-    query: target.query == null ? null : target.query.trim(),
-    kind: target.kind,
-    imageOnly: target.imageOnly,
-  };
-  const debouncedTarget = useDebouncedValue(normalizedTarget, PROJECT_PATH_SEARCH_DEBOUNCE_MS);
-  const fileAccess = useFilesystemReadAccess(debouncedTarget.environmentId);
-  const { canReadFiles } = fileAccess;
-  const searchTarget =
-    debouncedTarget.environmentId !== null &&
-    debouncedTarget.cwd !== null &&
-    debouncedTarget.query !== null &&
-    (allowEmptyQuery || debouncedTarget.query.length > 0)
-      ? {
-          environmentId: debouncedTarget.environmentId,
-          input: {
-            cwd: debouncedTarget.cwd,
-            query: debouncedTarget.query.slice(0, 256).replace(/[\uD800-\uDBFF]$/, ""),
-            limit,
-            ...(debouncedTarget.kind ? { kind: debouncedTarget.kind } : {}),
-            ...(debouncedTarget.imageOnly ? { imageOnly: true } : {}),
-          },
-        }
-      : null;
-  const result = useEnvironmentQuery(
-    canReadFiles && searchTarget !== null ? projectEnvironment.searchEntries(searchTarget) : null,
-  );
-  const hasTarget = searchTarget !== null;
+  return useDebouncedPathSearch(target, {
+    isSearchable: (candidate): candidate is SearchablePathSearchTarget & { readonly cwd: string } =>
+      candidate.environmentId !== null &&
+      candidate.cwd !== null &&
+      candidate.query !== null &&
+      (allowEmptyQuery || candidate.query.length > 0),
+    atom: (searchTarget) =>
+      projectEnvironment.searchEntries({
+        environmentId: searchTarget.environmentId,
+        input: {
+          cwd: searchTarget.cwd,
+          query: boundedPathSearchQuery(searchTarget.query),
+          limit,
+          ...(searchTarget.kind ? { kind: searchTarget.kind } : {}),
+          ...(searchTarget.imageOnly ? { imageOnly: true } : {}),
+          ...(searchTarget.category ? { category: searchTarget.category } : {}),
+        },
+      }),
+  });
+}
 
+/** Names across the host's OS file index. A null query, or one under two characters, searches nothing. */
+export function useHostPathSearch(
+  target: {
+    readonly environmentId: EnvironmentId | null;
+    readonly query: string | null;
+    readonly kind?: ProjectEntryKind | undefined;
+    readonly category?: ProjectFileCategory | undefined;
+  },
+  limit: number,
+) {
+  const search = useDebouncedPathSearch(
+    { ...target, cwd: null },
+    {
+      isSearchable: (candidate): candidate is SearchablePathSearchTarget =>
+        candidate.environmentId !== null &&
+        candidate.query !== null &&
+        candidate.query.length >= HOST_PATH_SEARCH_MIN_QUERY_LENGTH,
+      atom: (searchTarget) =>
+        filesystemEnvironment.searchHost({
+          environmentId: searchTarget.environmentId,
+          input: {
+            query: boundedPathSearchQuery(searchTarget.query).trim(),
+            limit,
+            ...(searchTarget.kind ? { kind: searchTarget.kind } : {}),
+            ...(searchTarget.category ? { category: searchTarget.category } : {}),
+          },
+        }),
+    },
+  );
   return {
-    entries: result.data?.entries ?? EMPTY_PROJECT_ENTRIES,
-    error:
-      !hasTarget || fileAccess.isPending
-        ? null
-        : canReadFiles
-          ? result.error
-          : (fileAccess.error ?? "This connection cannot search host files."),
-    isPending:
-      !areProjectPathSearchTargetsEqual(normalizedTarget, debouncedTarget) ||
-      (hasTarget && (fileAccess.isPending || result.isPending)),
-    searchedTarget: debouncedTarget,
-    searchedQuery: debouncedTarget.query ?? "",
-    truncated: result.data?.truncated ?? false,
-    refresh: result.refresh,
+    ...search,
+    queryTooShort:
+      target.query !== null && target.query.trim().length < HOST_PATH_SEARCH_MIN_QUERY_LENGTH,
   };
 }
 
 export function useComposerPathSearch(target: ComposerPathSearchTarget) {
-  return useProjectPathSearch(target, COMPOSER_PATH_SEARCH_LIMIT);
+  return useProjectPathSearch(target, COMPOSER_PATH_SEARCH_LIMIT, { allowEmptyQuery: true });
 }
 
 interface ProjectContentSearchTarget {

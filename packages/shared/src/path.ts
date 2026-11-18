@@ -134,6 +134,31 @@ export function isHostPath(value: string): boolean {
 const QUOTED_PATH_AT_END = /(?:'((?:[^']|'\\'')+)'|"([^"]+)")\s*$/;
 const SHELL_ESCAPE = /\\([\s'"\\()[\]{}<>|&;$`!*?#~^=])/g;
 
+/** `\` separates folders in Windows paths, so it only escapes in `/` and `~/` paths. */
+function unescapeShellPath(path: string): string {
+  return isWindowsAbsolutePath(path) ? path : path.replace(SHELL_ESCAPE, "$1");
+}
+
+/**
+ * The path text a search query holds once Finder, a terminal, or a file URL's wrapping is removed,
+ * or null for an undecodable file URL. It may still be relative or a plain word.
+ */
+export function unwrapPastedPath(query: string): string | null {
+  let candidate = query.trim();
+  const quoted = /^(['"])(.+)\1$/s.exec(candidate);
+  if (quoted?.[2]) candidate = quoted[2];
+  if (candidate.startsWith("file://")) {
+    try {
+      candidate = stripSlashPrefixedWindowsDrive(decodeURIComponent(new URL(candidate).pathname));
+    } catch {
+      return null;
+    }
+  }
+  return candidate.startsWith("/") || candidate.startsWith("~/")
+    ? unescapeShellPath(candidate)
+    : candidate;
+}
+
 /**
  * What a folder box holds after a change. A full path pasted into it replaces the box, even after
  * the text already there, because `~/'/a b'` would create that nested folder.
@@ -155,8 +180,7 @@ export function resolvePastedPath(previous: string, next: string): string {
   const afterFolder = /[/\\]$/.test(previous) && next.startsWith(previous);
   const path = afterFolder ? next.slice(previous.length) : next;
   if (!isHostPath(path)) return next;
-  // `\` separates folders in Windows paths, so it only escapes in `/` and `~/` paths.
-  return isWindowsAbsolutePath(path) ? path : path.replace(SHELL_ESCAPE, "$1");
+  return unescapeShellPath(path);
 }
 
 export function resolveWorkspaceFilePath(path: string, workspaceRoot: string): string {

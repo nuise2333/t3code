@@ -90,6 +90,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverRemoveKeybinding]: AuthSettingsWriteScope,
   [WS_METHODS.serverGetStorageCleanupReport]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetDatabaseStorage]: AuthOrchestrationReadScope,
+  [WS_METHODS.serverGetSettings]: AuthOrchestrationReadScope,
   [WS_METHODS.peerLinksList]: AuthAccessReadScope,
   [WS_METHODS.serverUpdateSettings]: AuthSettingsWriteScope,
   [WS_METHODS.serverSearchAcpRegistry]: AuthOrchestrationReadScope,
@@ -161,6 +162,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.filesystemBrowse]: AuthFilesystemReadScope,
   [WS_METHODS.filesystemSearchDirectories]: AuthFilesystemReadScope,
   [WS_METHODS.filesystemGetMetadata]: AuthFilesystemReadScope,
+  [WS_METHODS.filesystemSearchHost]: AuthFilesystemReadScope,
+  // The whole host, as browsing and search are; protected locations are refused server side.
+  [WS_METHODS.filesystemFileOperation]: AuthFilesystemWriteScope,
   [WS_METHODS.agentSessionsScan]: AuthOrchestrationReadScope,
   [WS_METHODS.agentSessionsImport]: AuthOrchestrationOperateScope,
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,

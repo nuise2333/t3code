@@ -4,7 +4,10 @@ import {
   breadcrumbPathOf,
   fileBreadcrumbChildren,
   fileBreadcrumbs,
+  folderReadOutcome,
+  hostParentOf,
   isListableHostFolder,
+  missingFolderProbeStep,
   retainedBreadcrumbTrail,
 } from "./filePath";
 
@@ -56,6 +59,25 @@ describe("breadcrumbPathOf", () => {
   });
 });
 
+describe("hostParentOf", () => {
+  it.each([
+    ["/a", "/"],
+    ["/tmp/report.md", "/tmp"],
+    ["/tmp/folder/", "/tmp"],
+    ["~/a", "~/"],
+    ["~/.claude/CLAUDE.md", "~/.claude"],
+    ["C:\\a", "C:\\"],
+    ["C:/a", "C:\\"],
+    ["C:\\Temp\\report.md", "C:\\Temp"],
+    ["\\\\srv\\share\\a", "\\\\srv\\share"],
+    ["/", null],
+    ["~/", null],
+    ["C:\\", null],
+  ])("parent of %j is %j", (path, expected) => {
+    expect(hostParentOf(path)).toBe(expected);
+  });
+});
+
 describe("fileBreadcrumbChildren", () => {
   const entries = [
     { path: "README.md", kind: "file" as const },
@@ -96,5 +118,32 @@ describe("retainedBreadcrumbTrail", () => {
     ["\\\\nas\\share\\docs\\notes", "\\\\nas\\share", "\\\\nas\\share\\docs\\notes"],
   ])("from trail %j to %j keeps %j", (trail, path, expected) => {
     expect(retainedBreadcrumbTrail(trail, path)).toBe(expected);
+  });
+});
+
+describe("missingFolderProbeStep", () => {
+  const read = (overrides: Partial<Parameters<typeof folderReadOutcome>[0]>) =>
+    folderReadOutcome({
+      data: null,
+      error: null,
+      isNotFile: false,
+      isMissing: false,
+      ...overrides,
+    });
+
+  it.each([
+    ["src/gone", read({ isMissing: true, error: "missing" }), { kind: "walk", next: "src" }],
+    ["src", read({ isMissing: true, error: "missing" }), { kind: "walk", next: "" }],
+    ["src/now-a-file", read({ data: {} }), { kind: "walk", next: "src" }],
+    ["src", read({ isNotFile: true, error: "folder" }), { kind: "target", path: "src" }],
+    ["src", read({}), { kind: "wait" }],
+    // Permission, escape, transport and missing-scope errors leave the folder where it is.
+    ["/Users/me/Library/x", read({ error: "EACCES" }), { kind: "stop" }],
+    ["", read({}), { kind: "target", path: "" }],
+    ["/tmp/gone", read({ isMissing: true, error: "missing" }), { kind: "walk", next: "/tmp" }],
+    ["/", read({ isMissing: true, error: "missing" }), { kind: "walk", next: null }],
+    [null, read({}), { kind: "stop" }],
+  ] as const)("candidate %j read as %j steps to %j", (candidate, outcome, expected) => {
+    expect(missingFolderProbeStep(candidate, outcome)).toEqual(expected);
   });
 });

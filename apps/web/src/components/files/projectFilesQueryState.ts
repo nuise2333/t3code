@@ -1,6 +1,8 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import {
   type EnvironmentId,
+  type ProjectEntryKind,
+  type ProjectFileCategory,
   type ProjectListEntriesResult,
   ProjectReadFileError,
   type ProjectReadFileResult,
@@ -14,8 +16,7 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useFilesystemReadAccess } from "~/state/filesystem";
 import { projectEnvironment } from "~/state/projects";
-import { useProjectPathSearch } from "~/state/queries";
-import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+import { useHostPathSearch, useProjectPathSearch } from "~/state/queries";
 import { revisionedQuery } from "~/state/revisionedQuery";
 
 const EMPTY_PROJECT_FILE_PATH = "";
@@ -52,6 +53,8 @@ interface ProjectQueryState<A> {
 interface ProjectFileQueryState extends ProjectQueryState<ProjectReadFileResult> {
   readonly readError: ProjectReadFileError | null;
   readonly isNotFile: boolean;
+  /** The path is gone, as opposed to unreadable or failing to load. */
+  readonly isMissing: boolean;
   readonly isFile: boolean;
 }
 
@@ -70,13 +73,14 @@ export function getProjectFileQueryAtom(
   environmentId: EnvironmentId,
   cwd: string,
   relativePath: string | null,
+  allowMissing = false,
 ) {
   return projectEnvironment.readFile({
     environmentId,
     input: {
       cwd,
       relativePath: relativePath ?? EMPTY_PROJECT_FILE_PATH,
-      ...(relativePath === T3_PROJECT_FILE_NAME ? { allowMissing: true } : {}),
+      ...(allowMissing || relativePath === T3_PROJECT_FILE_NAME ? { allowMissing: true } : {}),
     },
   });
 }
@@ -92,7 +96,7 @@ export function setProjectFileQueryData(
     unsavedFileMounts.set(atom, appAtomRegistry.mount(atom));
   }
   appAtomRegistry.set(atom, {
-    confirmedAgainst: undefined,
+    saved: false,
     data: {
       relativePath,
       contents,
@@ -128,7 +132,7 @@ export function getUnsavedProjectFileQueryData(
   relativePath: string,
 ): ProjectReadFileResult | null {
   const optimistic = appAtomRegistry.get(optimisticFileAtom(environmentId, cwd, relativePath));
-  return optimistic?.confirmedAgainst === undefined ? (optimistic?.data ?? null) : null;
+  return !optimistic?.saved ? (optimistic?.data ?? null) : null;
 }
 
 export function confirmProjectFileQueryData(
@@ -142,21 +146,13 @@ export function confirmProjectFileQueryData(
   if (optimisticFile?.data.contents !== contents) return false;
 
   const queryAtom = getProjectFileQueryAtom(environmentId, cwd, relativePath);
-  const confirmed = {
+  appAtomRegistry.set(atom, {
     ...optimisticFile,
-    confirmedAgainst: appAtomRegistry.get(queryAtom),
-  };
-  appAtomRegistry.set(atom, confirmed);
+    saved: true,
+    confirmingQuery: queryAtom,
+  });
   releaseUnsavedFile(atom);
   appAtomRegistry.refresh(queryAtom);
-  void executeAtomQuery(appAtomRegistry, queryAtom, {
-    reportDefect: false,
-    reportFailure: false,
-  }).then((result) => {
-    if (result._tag === "Success" && appAtomRegistry.get(atom) === confirmed) {
-      appAtomRegistry.set(atom, null);
-    }
-  });
   return true;
 }
 
@@ -218,31 +214,70 @@ export function useProjectEntriesQuery(
   };
 }
 
-/** Empty queries return frecency-ranked files without transferring the full workspace listing. */
+interface ProjectFilePickerFilter {
+  readonly kind?: ProjectEntryKind;
+  readonly category?: ProjectFileCategory;
+  readonly imageOnly?: boolean;
+}
+
+const FILES_ONLY: ProjectFilePickerFilter = { kind: "file" };
+
+/**
+ * Empty queries return frecency-ranked paths without transferring the full workspace listing.
+ * A null `filter` searches nothing.
+ */
 export function useProjectFilePickerQuery(
   environmentId: EnvironmentId,
   cwd: string,
   query: string,
   limit: number,
-  options?: { readonly imageOnly?: boolean },
+  filter: ProjectFilePickerFilter | null = FILES_ONLY,
 ) {
   const search = useProjectPathSearch(
     {
       environmentId,
       cwd,
-      query,
-      kind: "file",
-      ...(options?.imageOnly ? { imageOnly: true } : {}),
+      query: filter === null ? null : query,
+      kind: filter?.kind,
+      ...(filter?.imageOnly ? { imageOnly: true } : {}),
+      category: filter?.category,
     },
     limit,
     { allowEmptyQuery: true },
   );
 
   return {
-    entries: search.isPending ? [] : search.entries,
+    entries: search.entries,
     error: search.error,
     isPending: search.isPending,
     matchedQuery: search.searchedQuery,
+  };
+}
+
+/** The picker's host scope: absolute paths from the host's file index. A null `filter` searches nothing. */
+export function useHostFilePickerQuery(
+  environmentId: EnvironmentId,
+  query: string,
+  limit: number,
+  filter: ProjectFilePickerFilter | null,
+) {
+  const search = useHostPathSearch(
+    {
+      environmentId,
+      query: filter === null ? null : query,
+      kind: filter?.kind,
+      category: filter?.category,
+    },
+    limit,
+  );
+
+  return {
+    entries: search.entries,
+    error: search.error,
+    isPending: search.isPending,
+    matchedQuery: search.searchedQuery,
+    truncated: search.truncated,
+    queryTooShort: search.queryTooShort,
   };
 }
 
@@ -251,6 +286,8 @@ export function useProjectFileQuery(
   cwd: string,
   relativePath: string | null,
   enabled = true,
+  /** Folder probes only: editor reads stay strict so autosave never treats a trashed file as new. */
+  allowMissing = false,
 ): ProjectFileQueryState {
   // Read media-like paths too; a failed read is how folders with those names are detected.
   const fileAccess = useFilesystemReadAccess(environmentId);
@@ -258,7 +295,7 @@ export function useProjectFileQuery(
   const isQueryEnabled = enabled;
   const atom =
     enabled && canReadFiles
-      ? getProjectFileQueryAtom(environmentId, cwd, relativePath)
+      ? getProjectFileQueryAtom(environmentId, cwd, relativePath, allowMissing)
       : EMPTY_PROJECT_FILE_QUERY_ATOM;
   const result = useAtomValue(atom);
   const refreshAtom = useAtomRefresh(atom);
@@ -287,6 +324,7 @@ export function useProjectFileQuery(
     isPending: isQueryEnabled && (fileAccess.isPending || result.waiting),
     readError,
     isNotFile,
+    isMissing: canReadFiles && !optimisticFile && (isMissing || readError?.failure === "not_found"),
     // A folder error overrides cached contents retained across failed refreshes.
     isFile: !isNotFile && (data !== null || readError?.failure === "binary_file"),
     refresh,

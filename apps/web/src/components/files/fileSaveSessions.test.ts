@@ -25,6 +25,7 @@ function setup() {
   const persist = vi.fn<FileSaveSessionDeps["persist"]>(async () => AsyncResult.success(undefined));
   const confirm = vi.fn((_target: FileSaveTarget, _contents: string) => true);
   const onPendingChange = vi.fn();
+  const discardUnsaved = vi.fn();
   const sessions = createFileSaveSessions({
     debounceMs: 500,
     canPersist: () => state.writable,
@@ -37,6 +38,7 @@ function setup() {
     persist,
     confirm,
     readUnsaved: () => state.unsaved,
+    discardUnsaved,
   });
   const writes = () => persist.mock.calls.map(([written, contents]) => [written, contents]);
   return {
@@ -45,6 +47,7 @@ function setup() {
     persist,
     confirm,
     onPendingChange,
+    discardUnsaved,
     writes,
     [Symbol.dispose]: () => vi.useRealTimers(),
   };
@@ -245,6 +248,38 @@ describe("file save sessions", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(h.writes()).toEqual([[target, "pending edit"]]);
     expect(h.onPendingChange).toHaveBeenLastCalledWith("file.txt", false);
+  });
+
+  it("writes drafts under a path before it moves, and forgets them once it is gone", async () => {
+    using h = setup();
+    const nested = { ...target, relativePath: "src/a.ts" };
+    const sibling = { ...target, relativePath: "srcs/b.ts" };
+    h.sessions.acquire(nested, h.onPendingChange);
+    h.sessions.acquire(sibling, h.onPendingChange);
+    h.persist.mockImplementationOnce(async () => AsyncResult.failure(Cause.fail("offline")));
+    h.sessions.change(nested, "nested draft");
+    h.sessions.change(sibling, "sibling draft");
+    let flushed = false;
+    const flush = h.sessions.flushUnder(target.environmentId, ["/workspace/src"]).then(() => {
+      flushed = true;
+    });
+    expect(h.writes()).toEqual([[nested, "nested draft"]]);
+    await flush;
+    expect(flushed).toBe(true);
+    expect(h.sessions.unsavedUnder(target.environmentId, ["/workspace/src"])).toEqual(["src/a.ts"]);
+    await h.sessions.flushUnder(target.environmentId, ["/workspace/src"]);
+    expect(h.sessions.unsavedUnder(target.environmentId, ["/workspace/src"])).toEqual([]);
+
+    h.sessions.change(nested, "edit after the move");
+    h.sessions.discardUnder(target.environmentId, ["/workspace/src"]);
+    expect(h.onPendingChange).toHaveBeenLastCalledWith("src/a.ts", false);
+    expect(h.discardUnsaved).toHaveBeenCalledWith(nested);
+    await vi.runAllTimersAsync();
+    expect(h.writes()).toEqual([
+      [nested, "nested draft"],
+      [nested, "nested draft"],
+      [sibling, "sibling draft"],
+    ]);
   });
 
   it("skips recovery while unwritable and stops watching access after release", async () => {

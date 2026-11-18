@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   sessionAtom: {},
   searchAtom: {},
   searchRequests: vi.fn(),
+  hostSearchAtom: {},
+  hostSearchRequests: vi.fn(),
   contentAtom: {},
   contentRequests: vi.fn(),
   contentError: null as string | null,
@@ -46,6 +48,15 @@ vi.mock("./projects", () => ({
     return state.contentAtom;
   },
 }));
+vi.mock("./filesystem", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./filesystem")>()),
+  filesystemEnvironment: {
+    searchHost: (target: unknown) => {
+      state.hostSearchRequests(target);
+      return state.hostSearchAtom;
+    },
+  },
+}));
 vi.mock("../rpc/atomRegistry", () => ({ appAtomRegistry: {} }));
 vi.mock("./orchestration", () => ({ orchestrationEnvironment: {} }));
 vi.mock("./threads", () => ({ useEnvironmentThread: vi.fn() }));
@@ -73,7 +84,12 @@ vi.mock("./query", () => ({
   }),
 }));
 
-import { useComposerPathSearch, useProjectContentSearch } from "./queries";
+import {
+  retainedProjectPathSearch,
+  useComposerPathSearch,
+  useHostPathSearch,
+  useProjectContentSearch,
+} from "./queries";
 
 const target = {
   environmentId: EnvironmentId.make("test-environment"),
@@ -87,6 +103,7 @@ beforeEach(() => {
   state.sessionWaiting = false;
   state.phase = "connected";
   state.searchRequests.mockClear();
+  state.hostSearchRequests.mockClear();
   state.contentRequests.mockClear();
   state.contentError = null;
 });
@@ -100,6 +117,7 @@ const contentTarget = {
 };
 
 it.each([
+  { query: "", expected: "" },
   { query: "src", expected: "src" },
   { query: "a".repeat(256), expected: "a".repeat(256) },
   {
@@ -123,6 +141,65 @@ it.each([
     expect(result.isPending).toBe(false);
   },
 );
+
+it.each([
+  { query: null, input: null, queryTooShort: false },
+  { query: " a ", input: null, queryTooShort: true },
+  { query: " ab ", input: { query: "ab", limit: 50 }, queryTooShort: false },
+  {
+    query: "report",
+    kind: "file" as const,
+    category: "document" as const,
+    input: { query: "report", limit: 50, kind: "file", category: "document" },
+    queryTooShort: false,
+  },
+])(
+  "host path search sends $query only from two characters",
+  ({ query, kind, category, input, queryTooShort }) => {
+    state.session = { authenticated: true, scopes: [AuthFilesystemReadScope] };
+    const result = useHostPathSearch(
+      { environmentId: target.environmentId, query, kind, category },
+      50,
+    );
+
+    expect(state.searchRequests).not.toHaveBeenCalled();
+    if (input === null) expect(state.hostSearchRequests).not.toHaveBeenCalled();
+    else
+      expect(state.hostSearchRequests).toHaveBeenCalledExactlyOnceWith({
+        environmentId: target.environmentId,
+        input,
+      });
+    expect(result).toMatchObject({ isPending: false, error: null, queryTooShort });
+  },
+);
+
+it.each([
+  { name: "refines", change: { query: "src/in" }, retained: true },
+  { name: "widens", change: { query: "s" }, retained: true },
+  { name: "ignores surrounding whitespace", change: { query: " srcx " }, retained: true },
+  { name: "drops an unrelated query", change: { query: "lib" }, retained: false },
+  { name: "drops an empty query", change: { query: "" }, retained: false },
+  { name: "keeps the same empty query", previousQuery: "", change: { query: " " }, retained: true },
+  { name: "drops a cleared query", change: { query: null }, retained: false },
+  { name: "drops another cwd", change: { cwd: "/other" }, retained: false },
+  {
+    name: "drops another environment",
+    change: { environmentId: EnvironmentId.make("other-environment") },
+    retained: false,
+  },
+  { name: "drops another kind", change: { kind: "directory" as const }, retained: false },
+  { name: "drops another image filter", change: { imageOnly: true }, retained: false },
+  { name: "drops another category", change: { category: "code" as const }, retained: false },
+])("retained path search results: $name", ({ previousQuery = target.query, change, retained }) => {
+  const previous = {
+    target: { ...target, query: previousQuery, kind: "file" as const },
+    entries: [{ path: "src/index.ts", kind: "file" as const }],
+    truncated: true,
+  };
+  expect(retainedProjectPathSearch({ ...previous.target, ...change }, previous)).toBe(
+    retained ? previous : null,
+  );
+});
 
 it("explains an overlong content query instead of sending it", () => {
   state.session = { authenticated: true, scopes: [AuthFilesystemReadScope] };

@@ -93,6 +93,12 @@ import {
   FilesystemBrowseError,
   FilesystemSearchDirectoriesInput,
   FilesystemSearchDirectoriesResult,
+  FilesystemSearchHostInput,
+  FilesystemSearchHostResult,
+  FilesystemSearchHostError,
+  FilesystemFileOperationInput,
+  FilesystemFileOperationResult,
+  FilesystemFileOperationError,
 } from "./filesystem.ts";
 import {
   AgentSessionImportInput,
@@ -365,7 +371,7 @@ import {
   DatabaseStorageStatus,
   ServerSettings,
   ServerSettingsError,
-  ServerSettingsPatch,
+  ClientServerSettingsPatch,
   ListTextGeneratorModelsInput,
   ListTextGeneratorModelsResult,
   TextGeneratorError,
@@ -433,6 +439,8 @@ export const WS_METHODS = {
   filesystemBrowse: "filesystem.browse",
   filesystemSearchDirectories: "filesystem.searchDirectories",
   filesystemGetMetadata: "filesystem.getMetadata",
+  filesystemSearchHost: "filesystem.searchHost",
+  filesystemFileOperation: "filesystem.fileOperation",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
   assetsCreateUrl: "assets.createUrl",
@@ -526,6 +534,7 @@ export const WS_METHODS = {
   peerLinksLink: "peerLinks.link",
   peerLinksUnlink: "peerLinks.unlink",
   peerLinksAnswerRequest: "peerLinks.answerRequest",
+  serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverCheckSecretSource: "server.checkSecretSource",
@@ -867,9 +876,16 @@ const WsPeerLinksAnswerRequestRpc = Rpc.make(WS_METHODS.peerLinksAnswerRequest, 
   error: Schema.Union([PeerLinkRequestError, EnvironmentAuthorizationError]),
 });
 
+// No in-tree caller; installed Swift TestFlight builds still request it.
+const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
+  payload: Schema.Struct({}),
+  success: ServerSettings,
+  error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
 const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
   payload: Schema.Struct({
-    patch: ServerSettingsPatch,
+    patch: ClientServerSettingsPatch,
     providerInstanceMutation: Schema.optionalKey(ProviderInstanceMutation),
   }),
   success: ServerSettings,
@@ -1448,6 +1464,18 @@ const WsFilesystemSearchDirectoriesRpc = Rpc.make(WS_METHODS.filesystemSearchDir
   payload: FilesystemSearchDirectoriesInput,
   success: FilesystemSearchDirectoriesResult,
   error: EnvironmentAuthorizationError,
+});
+
+const WsFilesystemSearchHostRpc = Rpc.make(WS_METHODS.filesystemSearchHost, {
+  payload: FilesystemSearchHostInput,
+  success: FilesystemSearchHostResult,
+  error: Schema.Union([FilesystemSearchHostError, EnvironmentAuthorizationError]),
+});
+
+const WsFilesystemFileOperationRpc = Rpc.make(WS_METHODS.filesystemFileOperation, {
+  payload: FilesystemFileOperationInput,
+  success: FilesystemFileOperationResult,
+  error: Schema.Union([FilesystemFileOperationError, EnvironmentAuthorizationError]),
 });
 
 const WsAgentSessionsScanRpc = Rpc.make(WS_METHODS.agentSessionsScan, {
@@ -2141,6 +2169,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRunStorageCleanupRpc,
   WsServerGetStorageCleanupReportRpc,
   WsServerGetDatabaseStorageRpc,
+  WsServerGetSettingsRpc,
   WsServerReclaimDatabaseSpaceRpc,
   WsServerUpdateSettingsRpc,
   WsPeerLinksListRpc,
@@ -2246,6 +2275,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemBrowseRpc,
   WsFilesystemSearchDirectoriesRpc,
   WsFilesystemGetMetadataRpc,
+  WsFilesystemSearchHostRpc,
+  WsFilesystemFileOperationRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
   WsAssetsCreateUrlRpc,
