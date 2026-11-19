@@ -231,6 +231,10 @@ already running, the thread's own model leads from your next message; choose
 **No team** in the same menu to turn it off. While a thread leads a team, a strip
 above the composer shows the team, its lead and a tally of delegated tasks;
 expand it to see each task's member, status and time, and open a task's thread.
+**Workflow** on the strip opens the run beside the chat: every handover in order
+with what the lead asked for and what came back, and a way to stop a task that
+is still working. **Round 2** marks a task a member got after its earlier one
+ended, such as a fix sent back after a review.
 
 **Lead guidance** under the teams is added to every lead's instructions from its
 next turn, for example "you only lead; never edit files yourself".

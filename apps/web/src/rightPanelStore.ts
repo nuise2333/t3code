@@ -24,6 +24,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-request",
   "pull-requests",
   "side-chat",
+  "agent-team",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -77,7 +78,8 @@ export type RightPanelSurface =
       detailTab?: PullRequestDetailTab;
     }
   | { id: "pull-requests"; kind: "pull-requests" }
-  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
+  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
+  | { id: "agent-team"; kind: "agent-team" };
 
 export type FilesViewMode = "list" | "grid";
 
@@ -258,6 +260,8 @@ const singletonSurface = (
       return { id: "diff", kind };
     case "pull-requests":
       return { id: "pull-requests", kind };
+    case "agent-team":
+      return { id: "agent-team", kind };
     case "device":
       return { id: "device", kind };
   }

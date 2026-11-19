@@ -194,36 +194,40 @@ describe("routing groups", () => {
     ).toStrictEqual([]);
   });
 
+  const leadThreadId = ThreadId.make("thread:lead");
+  const minute = (n: number) =>
+    DateTime.makeUnsafe(`2026-11-17T09:${String(n).padStart(2, "0")}:00.000Z`);
+  const teamTask = (
+    id: string,
+    status: OrchestrationV2Subagent["status"],
+    extra: Partial<OrchestrationV2Subagent> = {},
+  ): OrchestrationV2Subagent => ({
+    id: NodeId.make(id),
+    threadId: leadThreadId,
+    runId: null,
+    parentNodeId: NodeId.make("node:root"),
+    origin: "app_owned",
+    createdBy: "agent",
+    driver: ProviderDriverKind.make("codex"),
+    providerInstanceId: instanceId,
+    providerThreadId: null,
+    childThreadId: ThreadId.make(`thread:${id}`),
+    nativeTaskRef: null,
+    prompt: `Do ${id}\nwith details`,
+    title: null,
+    model: "gpt-6",
+    modelSelection: { instanceId, model: "gpt-6" },
+    status,
+    result: null,
+    startedAt: minute(0),
+    completedAt: null,
+    updatedAt: minute(0),
+    ...extra,
+  });
+
   it("tallies the tasks a thread handed to its team's members", () => {
-    const threadId = ThreadId.make("thread:lead");
-    const at = DateTime.makeUnsafe("2026-11-17T09:00:00.000Z");
-    const task = (
-      id: string,
-      status: OrchestrationV2Subagent["status"],
-      extra: Partial<OrchestrationV2Subagent> = {},
-    ): OrchestrationV2Subagent => ({
-      id: NodeId.make(id),
-      threadId,
-      runId: null,
-      parentNodeId: NodeId.make("node:root"),
-      origin: "app_owned",
-      createdBy: "agent",
-      driver: ProviderDriverKind.make("codex"),
-      providerInstanceId: instanceId,
-      providerThreadId: null,
-      childThreadId: ThreadId.make(`thread:${id}`),
-      nativeTaskRef: null,
-      prompt: `Do ${id}\nwith details`,
-      title: null,
-      model: "gpt-6",
-      modelSelection: { instanceId, model: "gpt-6" },
-      status,
-      result: null,
-      startedAt: at,
-      completedAt: null,
-      updatedAt: at,
-      ...extra,
-    });
+    const threadId = leadThreadId;
+    const task = teamTask;
     const progress = agentTeamProgress({
       threadId,
       team: group,
@@ -245,6 +249,62 @@ describe("routing groups", () => {
     ]);
     expect([progress.working, progress.done, progress.failed]).toStrictEqual([1, 1, 1]);
     expect(progress.rows[0]?.childThreadId).toBe("thread:a");
+  });
+
+  it("orders a team's handovers, counts a member's redo rounds and places the lead", () => {
+    const claudeMember = { instanceId: claude, model: "opus" };
+    const done = (start: number, end: number): Partial<OrchestrationV2Subagent> => ({
+      startedAt: minute(start),
+      completedAt: minute(end),
+    });
+    const subagents = [
+      teamTask("queued", "pending", { startedAt: null }),
+      teamTask("redo", "failed", { ...done(6, 8), result: "  Tests still fail\n" }),
+      teamTask("first", "completed", done(0, 2)),
+      // Ran beside "first", so it is not a redo of it.
+      teamTask("beside", "completed", done(1, 3)),
+      teamTask("other", "completed", { ...done(4, 5), modelSelection: claudeMember }),
+    ];
+    const workflow = (leadRunning: boolean | undefined, tasks = subagents) =>
+      agentTeamProgress({
+        threadId: leadThreadId,
+        team: null,
+        providers,
+        subagents: tasks,
+        leadRunning,
+      });
+    const waiting = workflow(true);
+    expect(waiting.rows.map((row) => [row.id, row.member, row.round])).toStrictEqual([
+      ["first", "GPT 6", 1],
+      ["beside", "GPT 6", 1],
+      ["other", "Claude Opus", 1],
+      ["redo", "GPT 6", 2],
+      ["queued", "GPT 6", 3],
+    ]);
+    expect(waiting.rows[3]).toMatchObject({
+      brief: "Do redo\nwith details",
+      report: "Tests still fail",
+      stoppable: false,
+    });
+    // A member that has not started still counts as working, so the lead is not between handovers.
+    expect([waiting.working, waiting.lead, waiting.completedAt]).toStrictEqual([1, null, null]);
+    expect(waiting.startedAt).toBe("2026-11-17T09:00:00.000Z");
+
+    const settled = subagents.slice(1);
+    expect(workflow(true, settled)).toMatchObject({ lead: "reviewing", completedAt: null });
+    expect(workflow(false, settled)).toMatchObject({
+      lead: null,
+      completedAt: "2026-11-17T09:08:00.000Z",
+    });
+    expect(workflow(undefined, settled).lead).toBeNull();
+    expect(workflow(true, []).lead).toBe("planning");
+
+    const running = workflow(true, [
+      teamTask("live", "running", { progress: " Reading the parser ", prompt: "x\n".repeat(40) }),
+    ]).rows[0];
+    expect(running).toMatchObject({ progress: "Reading the parser", stoppable: true, round: 1 });
+    expect(running?.brief.split("\n")).toHaveLength(9);
+    expect(running?.brief.endsWith("…")).toBe(true);
   });
 
   it("offers groups only to a new single-model thread on a server that resolves them", () => {

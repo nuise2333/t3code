@@ -46,6 +46,7 @@ import {
   MessagesSquare,
   Plus,
   TerminalSquare,
+  Users,
   Volume2Icon,
   VolumeOffIcon,
 } from "lucide-react";
@@ -600,6 +601,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
+    case "agent-team":
+      return "Team";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "side-chat":
@@ -692,6 +695,8 @@ function SurfaceIcon({
       );
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
+    case "agent-team":
+      return <Users className="size-3 shrink-0" />;
     case "side-chat":
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
     case "device":

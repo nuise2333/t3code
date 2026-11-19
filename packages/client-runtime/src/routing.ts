@@ -10,6 +10,7 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
+  type ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderOptionDescriptor,
   type RouteDecision,
@@ -678,13 +679,26 @@ export function plainRoutingGroups(
   return groups.filter((group) => group.team !== true);
 }
 
-/** One task the lead handed to a team member, for the composer's team strip. */
+/** One task the lead handed to a team member: a step of the team's workflow. */
 export interface AgentTeamTaskRow {
   readonly id: string;
   readonly title: string;
   /** The member that runs it, such as "GPT-6.1". */
   readonly member: string;
+  readonly driver: ProviderDriverKind;
+  /** The member's model and options, for its provider icon and effort. */
+  readonly selection: ModelSelection;
   readonly status: "working" | "done" | "failed" | "stopped";
+  /** Above 1 when this member got the task after an earlier task of its own ended: a redo. */
+  readonly round: number;
+  /** The first lines of what the lead asked for. */
+  readonly brief: string;
+  /** The first lines of the member's final report; null until it has one. */
+  readonly report: string | null;
+  /** What a working member last said it is doing. */
+  readonly progress: string | null;
+  /** A started task the lead's thread can still stop. */
+  readonly stoppable: boolean;
   readonly childThreadId: ThreadId | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
@@ -695,6 +709,15 @@ export interface AgentTeamProgress {
   readonly working: number;
   readonly done: number;
   readonly failed: number;
+  /** When the first task started. */
+  readonly startedAt: string | null;
+  /** When the last task ended; null while a member works or the lead runs. */
+  readonly completedAt: string | null;
+  /**
+   * The lead runs with no member working: it plans before its first handover and reviews after
+   * one. Null when it is idle, a member works, or the caller cannot tell whether it runs.
+   */
+  readonly lead: "planning" | "reviewing" | null;
 }
 
 const TEAM_TASK_STATUS: Record<OrchestrationV2Subagent["status"], AgentTeamTaskRow["status"]> = {
@@ -712,9 +735,31 @@ function isoOrNull(value: DateTime.Utc | null): string | null {
   return value === null ? null : DateTime.formatIso(value);
 }
 
+/** Started tasks by start time; ones not started yet keep their order after them. */
+function byStart(
+  left: Pick<AgentTeamTaskRow, "startedAt">,
+  right: Pick<AgentTeamTaskRow, "startedAt">,
+): number {
+  if (left.startedAt === null || right.startedAt === null) {
+    return Number(left.startedAt === null) - Number(right.startedAt === null);
+  }
+  return Date.parse(left.startedAt) - Date.parse(right.startedAt);
+}
+
+/** The earlier task ended before the later one began, so the later one is a new handover. */
+function endedBefore(
+  earlier: Pick<AgentTeamTaskRow, "status" | "completedAt">,
+  later: Pick<AgentTeamTaskRow, "startedAt">,
+): boolean {
+  if (earlier.status === "working") return false;
+  if (earlier.completedAt === null || later.startedAt === null) return true;
+  return Date.parse(earlier.completedAt) <= Date.parse(later.startedAt);
+}
+
 /**
- * The tasks a thread delegated to its team's members, oldest first. Only tasks the thread itself
- * delegated (not a provider's own subagents or workflows) to a member of the team count.
+ * The tasks a thread delegated to its team's members, in the order they started; ones not started
+ * yet come last. Only tasks the thread itself delegated (not a provider's own subagents or
+ * workflows) to a member of the team count.
  */
 export function agentTeamProgress(input: {
   readonly threadId: string;
@@ -722,41 +767,88 @@ export function agentTeamProgress(input: {
   readonly team: Pick<RoutingGroup, "members"> | null;
   readonly subagents: ReadonlyArray<OrchestrationV2Subagent>;
   readonly providers: ReadonlyArray<ModelNameSource>;
+  /** Whether the lead's own thread runs now; leave out when unknown. */
+  readonly leadRunning?: boolean | undefined;
 }): AgentTeamProgress {
-  const rows = input.subagents.flatMap((task): AgentTeamTaskRow[] => {
-    if (task.threadId !== input.threadId || task.origin !== "app_owned") return [];
-    if (task.workflow !== undefined || task.councilLens !== undefined) return [];
-    const selection = task.modelSelection;
-    const member =
-      selection &&
-      (input.team === null
-        ? selection
-        : input.team.members.find(
-            (candidate) =>
-              candidate.instanceId === selection.instanceId && candidate.model === selection.model,
-          ));
-    if (!member) return [];
-    return [
-      {
-        id: task.id,
-        title: task.title?.trim() || promptTitle(task.prompt),
-        member: routingMemberLabel(member, input.providers),
-        status: TEAM_TASK_STATUS[task.status],
-        childThreadId: task.childThreadId,
-        startedAt: isoOrNull(task.startedAt),
-        completedAt: isoOrNull(task.completedAt),
-      },
-    ];
-  });
+  const tasks = input.subagents
+    .flatMap((task): Omit<AgentTeamTaskRow, "round">[] => {
+      if (task.threadId !== input.threadId || task.origin !== "app_owned") return [];
+      if (task.workflow !== undefined || task.councilLens !== undefined) return [];
+      const selection = task.modelSelection;
+      const member =
+        selection &&
+        (input.team === null
+          ? selection
+          : input.team.members.find(
+              (candidate) =>
+                candidate.instanceId === selection.instanceId &&
+                candidate.model === selection.model,
+            ));
+      if (!selection || !member) return [];
+      const status = TEAM_TASK_STATUS[task.status];
+      return [
+        {
+          id: task.id,
+          title: task.title?.trim() || promptTitle(task.prompt),
+          member: routingMemberLabel(member, input.providers),
+          driver: task.driver,
+          selection,
+          status,
+          brief: excerpt(task.prompt),
+          report: task.result?.trim() ? excerpt(task.result) : null,
+          progress: status === "working" ? task.progress?.trim() || null : null,
+          stoppable: status === "working" && task.startedAt !== null,
+          childThreadId: task.childThreadId,
+          startedAt: isoOrNull(task.startedAt),
+          completedAt: isoOrNull(task.completedAt),
+        },
+      ];
+    })
+    .sort(byStart);
+  const rows: AgentTeamTaskRow[] = [];
+  for (const task of tasks) {
+    const previous = rows.filter(
+      (row) =>
+        row.selection.instanceId === task.selection.instanceId &&
+        row.selection.model === task.selection.model &&
+        endedBefore(row, task),
+    );
+    rows.push({ ...task, round: Math.max(0, ...previous.map((row) => row.round)) + 1 });
+  }
+  const working = rows.filter((row) => row.status === "working").length;
+  const lead =
+    input.leadRunning === true && working === 0
+      ? rows.length === 0
+        ? "planning"
+        : "reviewing"
+      : null;
+  const ends = rows.flatMap((row) => (row.completedAt === null ? [] : [row.completedAt]));
   return {
     rows,
-    working: rows.filter((row) => row.status === "working").length,
+    working,
     done: rows.filter((row) => row.status === "done").length,
     failed: rows.filter((row) => row.status === "failed").length,
+    startedAt: rows[0]?.startedAt ?? null,
+    completedAt:
+      working > 0 || lead !== null || ends.length === 0
+        ? null
+        : ends.reduce((latest, end) => (Date.parse(end) > Date.parse(latest) ? end : latest)),
+    lead,
   };
 }
 
 function promptTitle(prompt: string): string {
   const line = prompt.trim().split("\n", 1)[0]?.trim() ?? "";
   return line.length > 80 ? `${line.slice(0, 79)}…` : line || "Task";
+}
+
+const EXCERPT_LINES = 8;
+const EXCERPT_CHARS = 600;
+
+/** The first lines of a prompt or report, cut with an ellipsis when there is more. */
+function excerpt(text: string): string {
+  const lines = text.trim().split("\n");
+  const head = lines.slice(0, EXCERPT_LINES).join("\n").trimEnd();
+  if (head.length > EXCERPT_CHARS) return `${head.slice(0, EXCERPT_CHARS - 1).trimEnd()}…`;
+  return lines.length > EXCERPT_LINES ? `${head}\n…` : head;
 }

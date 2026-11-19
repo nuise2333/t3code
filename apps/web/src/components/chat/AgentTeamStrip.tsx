@@ -6,6 +6,7 @@ import {
   ChevronUpIcon,
   CircleSlashIcon,
   LoaderCircleIcon,
+  PanelRightOpenIcon,
   UsersIcon,
   XIcon,
 } from "lucide-react";
@@ -16,12 +17,15 @@ import { AgentElapsed } from "./AgentElapsed";
 import { ComposerBanner } from "./ComposerBanner";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 
-const STATUS_LABELS: Record<AgentTeamTaskRow["status"], string> = {
+export const AGENT_TEAM_STATUS_LABELS: Record<AgentTeamTaskRow["status"], string> = {
   working: "Working",
   done: "Done",
   failed: "Failed",
   stopped: "Stopped",
 };
+
+/** "Team Crew", but "Balanced team" stays as it is. */
+export const agentTeamTitle = (name: string) => (/\bteam$/i.test(name) ? name : `Team ${name}`);
 
 function agentTeamTally(progress: AgentTeamProgress): string {
   if (progress.rows.length === 0) return "The lead delegates to members as it plans.";
@@ -36,7 +40,7 @@ function agentTeamTally(progress: AgentTeamProgress): string {
 
 /**
  * The team the thread leads, above the composer: its name and lead, a tally of delegated tasks,
- * and, expanded, one row per task that opens the member's thread.
+ * and, expanded, one row per task that opens the member's thread. Workflow opens the full run.
  */
 export function agentTeamBannerItem(input: {
   readonly name: string;
@@ -45,6 +49,8 @@ export function agentTeamBannerItem(input: {
   readonly expanded: boolean;
   readonly onToggle: () => void;
   readonly onOpenThread: (threadId: ThreadId) => void;
+  /** Opens the team's workflow panel; absent where the thread has no right panel. */
+  readonly onOpenWorkflow?: (() => void) | undefined;
 }): ComposerBannerStackItem {
   const { progress } = input;
   const ToggleIcon = input.expanded ? ChevronUpIcon : ChevronDownIcon;
@@ -52,29 +58,44 @@ export function agentTeamBannerItem(input: {
     id: "agent-team",
     variant: "default",
     icon: <UsersIcon />,
-    title: /\bteam$/i.test(input.name) ? input.name : `Team ${input.name}`,
+    title: agentTeamTitle(input.name),
     description: `${input.summary} · ${agentTeamTally(progress)}`,
-    ...(progress.rows.length === 0
+    ...(progress.rows.length === 0 && !input.onOpenWorkflow
       ? {}
       : {
           actions: (
-            <Button
-              size="xs"
-              variant="ghost"
-              aria-expanded={input.expanded}
-              aria-label={input.expanded ? "Hide team tasks" : "Show team tasks"}
-              onClick={input.onToggle}
-            >
-              <ToggleIcon />
-              {progress.rows.length} {progress.rows.length === 1 ? "task" : "tasks"}
-            </Button>
+            <>
+              {input.onOpenWorkflow ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label="Open team workflow"
+                  onClick={input.onOpenWorkflow}
+                >
+                  <PanelRightOpenIcon />
+                  Workflow
+                </Button>
+              ) : null}
+              {progress.rows.length === 0 ? null : (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-expanded={input.expanded}
+                  aria-label={input.expanded ? "Hide team tasks" : "Show team tasks"}
+                  onClick={input.onToggle}
+                >
+                  <ToggleIcon />
+                  {progress.rows.length} {progress.rows.length === 1 ? "task" : "tasks"}
+                </Button>
+              )}
+            </>
           ),
         }),
     ...(input.expanded && progress.rows.length > 0
       ? {
           children: (
             <ComposerBanner.Scroll className="max-h-[min(14rem,30dvh)]">
-              <ul aria-label={`Team ${input.name} tasks`} className="grid gap-px">
+              <ul aria-label={`${agentTeamTitle(input.name)} tasks`} className="grid gap-px">
                 {progress.rows.map((row) => (
                   <AgentTeamTaskItem key={row.id} row={row} onOpenThread={input.onOpenThread} />
                 ))}
@@ -96,7 +117,7 @@ function AgentTeamTaskItem({
   const childThreadId = row.childThreadId;
   const content = (
     <>
-      <StatusIcon status={row.status} />
+      <AgentTeamStatusIcon status={row.status} />
       <span className="min-w-0 flex-1 truncate">{row.title}</span>
       <span className="max-w-[40%] shrink-0 truncate text-muted-foreground">{row.member}</span>
       <span className="w-12 shrink-0 text-end text-muted-foreground">
@@ -121,7 +142,7 @@ function AgentTeamTaskItem({
         <button
           type="button"
           className={cn(rowClassName, "cursor-pointer hover:bg-accent focus-visible:bg-accent")}
-          aria-label={`${row.title}, ${row.member}, ${STATUS_LABELS[row.status]}. Open its thread`}
+          aria-label={`${row.title}, ${row.member}, ${AGENT_TEAM_STATUS_LABELS[row.status]}. Open its thread`}
           onClick={() => onOpenThread(childThreadId)}
         >
           {content}
@@ -131,8 +152,8 @@ function AgentTeamTaskItem({
   );
 }
 
-function StatusIcon({ status }: { readonly status: AgentTeamTaskRow["status"] }) {
-  const label = STATUS_LABELS[status];
+export function AgentTeamStatusIcon({ status }: { readonly status: AgentTeamTaskRow["status"] }) {
+  const label = AGENT_TEAM_STATUS_LABELS[status];
   const className = "size-3.5 shrink-0";
   switch (status) {
     case "working":
