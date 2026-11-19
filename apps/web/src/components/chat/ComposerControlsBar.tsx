@@ -2,12 +2,12 @@ import type { ChatComposerProps } from "./ChatComposer";
 import type { PromptUltrathink } from "./TraitsPicker";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
-import { CircleAlertIcon } from "lucide-react";
+import { CircleAlertIcon, UsersIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
-import { ComposerTeamMenu } from "./ComposerTeamMenu";
+import { ComposerTeamSetup } from "./ComposerTeamSetup";
 import type { PickerTeams } from "./ModelPickerContent";
 import type { ModelPickerTeamRow } from "./modelPickerKeys";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { draftThreadAssistsAtom } from "./threadAssistsDraft";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useAtomValue } from "@effect/atom-react";
@@ -448,8 +448,12 @@ export function ComposerControlsBar(props: {
   const disableTeam = selectNoTeam;
   const showTeamControl =
     teamsCapability && (routeKind === "server" ? serverThreadId !== undefined : Boolean(draftId));
-  // The model picker's Team tab offers the same choices; its setup row opens the menu's setup.
+  // Teams are picked in the model picker's Team tab; its setup row opens the setup beside it.
   const [teamSetupOpen, setTeamSetupOpen] = useState(false);
+  const modelPickerAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const setModelPickerAnchor = useStableCallback((trigger: HTMLButtonElement | null) => {
+    modelPickerAnchorRef.current = trigger;
+  });
   const selectPickerTeam = useStableCallback((row: ModelPickerTeamRow) => {
     switch (row.kind) {
       case "none":
@@ -474,28 +478,26 @@ export function ComposerControlsBar(props: {
         onSelect: selectPickerTeam,
       }
     : undefined;
-  const teamControl = showTeamControl ? (
-    <ComposerTeamMenu
-      setupOpen={teamSetupOpen}
-      onSetupOpenChange={setTeamSetupOpen}
-      teams={savedTeams}
-      teamChoices={teamChoices}
-      onSelectAuto={selectAutoTeam}
-      onSelectTeam={selectSavedTeam}
-      onSelectNone={selectNoTeam}
-      hidden={composerControlsHidden}
-      active={activeTeam}
-      newThread={routeKind !== "server"}
-      entries={providerInstanceEntries}
-      currentSelection={selectedModelSelection}
-      sharedGuidance={serverConfig?.settings.agentTeamLeadGuidance ?? ""}
-      size={controlSize}
-      disabledReason={teamDisabledReason}
-      onSaveTeams={saveTeams}
-      onApply={applyTeam}
-      onDisable={disableTeam}
-    />
-  ) : null;
+  const teamSetup =
+    showTeamControl && teamSetupOpen ? (
+      <ComposerTeamSetup
+        teams={savedTeams}
+        active={activeTeam}
+        newThread={routeKind !== "server"}
+        entries={providerInstanceEntries}
+        currentSelection={selectedModelSelection}
+        sharedGuidance={serverConfig?.settings.agentTeamLeadGuidance ?? ""}
+        anchor={modelPickerAnchorRef}
+        disabledReason={teamDisabledReason}
+        onClose={() => setTeamSetupOpen(false)}
+        onSaveTeams={saveTeams}
+        onApply={applyTeam}
+        onDisable={disableTeam}
+      />
+    ) : null;
+  // With the Team button gone, the model trigger names the thread's team.
+  const teamTriggerDetail =
+    activeTeam && !pickedGroup?.team ? `Agent team: ${activeTeam.name}` : null;
   const restingBlockDefs = showModeBlock
     ? [
         {
@@ -550,8 +552,26 @@ export function ComposerControlsBar(props: {
         MODEL_TRIGGER_STATES,
         composerControlsCollapsed ? "min-w-13 shrink text-xs!" : "min-w-13",
       )}
-      triggerSuffix={effort.suffix}
-      triggerDetail={effort.detail}
+      triggerSuffix={
+        teamTriggerDetail ? (
+          <>
+            {effort.suffix}
+            <UsersIcon
+              data-composer-agent-team="on"
+              className="size-3.5 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+          </>
+        ) : (
+          effort.suffix
+        )
+      }
+      triggerDetail={
+        teamTriggerDetail && !effort.detail?.includes(activeTeam?.name ?? "")
+          ? [effort.detail, teamTriggerDetail].filter(Boolean).join(" · ")
+          : effort.detail
+      }
+      onTriggerRef={setModelPickerAnchor}
       {...(pickedGroup ? { triggerLabel: pickedGroup.name } : {})}
       // Teams live in the Team tab, so the groups tab keeps only plain routing groups.
       routingGroups={
@@ -619,7 +639,7 @@ export function ComposerControlsBar(props: {
   ) : (
     <>
       {composerModelPicker}
-      {teamControl}
+      {teamSetup}
       <ComposerThreadAssists
         environmentId={environmentId}
         serverThreadId={serverThreadId}

@@ -139,6 +139,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onRoutingGroupSelect?: (groupId: string) => void;
   /** The thread's agent team, as a tab under Favorites; picking a row closes the picker. */
   teams?: PickerTeams;
+  /** Receives the trigger, for surfaces the picker opens beside it, such as the team setup. */
+  onTriggerRef?: (trigger: HTMLButtonElement | null) => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
@@ -375,7 +377,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverTrigger
         render={
           <ComposerControl
-            ref={triggerRef}
+            ref={(node: HTMLButtonElement | null) => {
+              triggerRef.current = node;
+              props.onTriggerRef?.(node);
+            }}
             aria-label={[
               props.triggerAriaLabel ?? props.triggerLabel ?? allModelNames ?? triggerLabel,
               props.triggerDetail,
