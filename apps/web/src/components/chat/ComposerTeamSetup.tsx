@@ -24,7 +24,10 @@ import {
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { createModelSelection } from "@t3tools/shared/model";
+import { selectsPlanAgent } from "../../modelSelection";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import { TraitsPicker } from "./TraitsPicker";
 
 /** The setup kept when no named profile is picked; it is a team like any other. */
 const CUSTOM_TEAM_ID = "custom-setup";
@@ -74,6 +77,53 @@ function InfoMark(props: { readonly label: string; readonly text: string }) {
 }
 
 function ModelField(props: {
+  readonly label: string;
+  readonly value: ModelSelection | null;
+  readonly entries: ReadonlyArray<ProviderInstanceEntry>;
+  readonly onChange: (selection: ModelSelection) => void;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-1.5">
+      <div className="min-w-0 flex-1">
+        <ModelSelect {...props} />
+      </div>
+      <MemberEffort {...props} />
+    </div>
+  );
+}
+
+/** The member's reasoning effort and other options, kept with it in the saved team. */
+function MemberEffort(props: {
+  readonly label: string;
+  readonly value: ModelSelection | null;
+  readonly entries: ReadonlyArray<ProviderInstanceEntry>;
+  readonly onChange: (selection: ModelSelection) => void;
+}) {
+  const value = props.value;
+  const entry = value
+    ? props.entries.find((candidate) => candidate.instanceId === value.instanceId)
+    : null;
+  if (!value || !entry) return null;
+  return (
+    <div data-team-member-effort className="shrink-0">
+      <TraitsPicker
+        provider={entry.driverKind}
+        instanceId={value.instanceId}
+        models={entry.models}
+        model={value.model}
+        modelOptions={value.options ?? []}
+        allowPromptInjectedEffort={false}
+        includePlanAgent={selectsPlanAgent(value.options)}
+        triggerClassName="max-w-28"
+        onModelOptionsChange={(options) =>
+          props.onChange(createModelSelection(value.instanceId, value.model, options))
+        }
+      />
+    </div>
+  );
+}
+
+function ModelSelect(props: {
   readonly label: string;
   readonly value: ModelSelection | null;
   readonly entries: ReadonlyArray<ProviderInstanceEntry>;

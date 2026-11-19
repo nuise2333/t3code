@@ -221,7 +221,8 @@ right under Favorites):
 
 While the **Agent team** tab is open, the picker's right column widens into
 **Architect & workers**, the team setup: pick the architect (the lead) and its
-workers, add lead guidance for this team, and limit how many tasks run at once.
+workers, set each one's reasoning effort with the gauge button beside its model,
+add lead guidance for this team, and limit how many tasks run at once.
 **Save setup** keeps it as **Custom setup** and turns it on; **Save as…** keeps
 it as a named profile you can pick later, and **Use a single agent** turns the
 team off. The lead plans the work, delegates each task to a team model as a

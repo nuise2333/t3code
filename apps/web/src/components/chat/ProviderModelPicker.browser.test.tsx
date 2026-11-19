@@ -4,6 +4,7 @@ import {
   ProviderInstanceId,
   type ModelSelection,
 } from "@t3tools/contracts";
+import { createModelCapabilities } from "@t3tools/shared/model";
 import { useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
@@ -403,7 +404,22 @@ it("edits the team setup inside the picker without closing it", async () => {
         slug: name.toLowerCase(),
         name: `${name} model`,
         isCustom: false,
-        capabilities: {},
+        capabilities: createModelCapabilities({
+          optionDescriptors: [
+            {
+              id: "thought_level",
+              label: "Thinking",
+              type: "select",
+              role: "reasoning",
+              currentValue: "medium",
+              options: [
+                { id: "low", label: "Low" },
+                { id: "medium", label: "Medium" },
+                { id: "high", label: "High" },
+              ],
+            },
+          ],
+        }),
       })),
       slashCommands: [],
       skills: [],
@@ -453,6 +469,10 @@ it("edits the team setup inside the picker without closing it", async () => {
   await setup.getByRole("combobox", { name: "Worker 1 model" }).click();
   await page.getByRole("option", { name: "Beta model" }).click();
   await setup.getByRole("textbox").fill("Plan first");
+  const efforts = setup.element().querySelectorAll("[data-team-member-effort] button");
+  expect(efforts).toHaveLength(2);
+  (efforts[1] as HTMLButtonElement).click();
+  await page.getByRole("menuitemradio", { name: "High" }).click();
   await expect.element(setup).toBeVisible();
   await setup.getByRole("button", { name: "Save setup" }).click();
   expect(onApply).toHaveBeenCalledWith(
@@ -460,7 +480,11 @@ it("edits the team setup inside the picker without closing it", async () => {
       leadGuidance: "Plan first",
       members: [
         { instanceId: codex!.instanceId, model: "alpha" },
-        { instanceId: codex!.instanceId, model: "beta" },
+        {
+          instanceId: codex!.instanceId,
+          model: "beta",
+          options: [{ id: "thought_level", value: "high" }],
+        },
       ],
     }),
   );
