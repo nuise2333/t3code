@@ -33,6 +33,86 @@ export interface AgentTeamView {
   readonly leadLabel: string;
   readonly lead: ModelSelection;
   readonly progress: AgentTeamProgress;
+  /** A saved team's workers, listed before they get a task; T3 picks an automatic team's. */
+  readonly workers?: ReadonlyArray<{ readonly label: string; readonly selection: ModelSelection }>;
+}
+
+type AgentState = AgentTeamTaskRow["status"] | "planning" | "reviewing" | "waiting" | "idle";
+
+/** One agent of the team and what it does now, for the panel's Agents list. */
+interface AgentTeamAgent {
+  readonly key: string;
+  readonly role: "lead" | "worker";
+  readonly label: string;
+  readonly selection: ModelSelection;
+  readonly driver: AgentTeamTaskRow["driver"] | undefined;
+  readonly state: AgentState;
+  /** What it is on now, or what it did last. */
+  readonly activity: string | null;
+  readonly done: number;
+  readonly total: number;
+}
+
+const AGENT_STATE_LABELS: Record<AgentState, string> = {
+  ...AGENT_TEAM_STATUS_LABELS,
+  planning: "Planning",
+  reviewing: "Reviewing",
+  waiting: "Waiting on workers",
+  idle: "Idle",
+};
+
+const selectionKey = (selection: Pick<ModelSelection, "instanceId" | "model">) =>
+  `${selection.instanceId}\u0000${selection.model}`;
+
+/** The lead, then each worker with its latest task: working, else how its last task ended. */
+function agentTeamAgents(team: AgentTeamView): ReadonlyArray<AgentTeamAgent> {
+  const { progress } = team;
+  const lead: AgentTeamAgent = {
+    key: `lead:${selectionKey(team.lead)}`,
+    role: "lead",
+    label: team.leadLabel,
+    selection: team.lead,
+    driver: undefined,
+    state: progress.lead ?? (progress.working > 0 ? "waiting" : "idle"),
+    activity: progress.lead === null ? null : LEAD_STEP[progress.lead].detail,
+    done: 0,
+    total: 0,
+  };
+  const workers = new Map<
+    string,
+    { label: string; selection: ModelSelection; rows: AgentTeamTaskRow[] }
+  >();
+  for (const worker of team.workers ?? []) {
+    workers.set(selectionKey(worker.selection), { ...worker, rows: [] });
+  }
+  for (const row of progress.rows) {
+    const key = selectionKey(row.selection);
+    const worker = workers.get(key);
+    if (worker) worker.rows.push(row);
+    else workers.set(key, { label: row.member, selection: row.selection, rows: [row] });
+  }
+  return [
+    lead,
+    ...[...workers].map(([key, worker]): AgentTeamAgent => {
+      const current = worker.rows.find((row) => row.status === "working") ?? worker.rows.at(-1);
+      return {
+        key: `worker:${key}`,
+        role: "worker",
+        label: worker.label,
+        selection: worker.selection,
+        driver: worker.rows[0]?.driver,
+        state: current?.status ?? "idle",
+        activity:
+          current === undefined
+            ? null
+            : current.status === "working"
+              ? (current.progress ?? current.title)
+              : current.title,
+        done: worker.rows.filter((row) => row.status === "done").length,
+        total: worker.rows.length,
+      };
+    }),
+  ];
 }
 
 const LEAD_STEP: Record<
@@ -67,7 +147,7 @@ export function AgentTeamWorkflowPanel(props: {
   if (team === null) {
     return (
       <PanelNotice title="No team on this thread">
-        Pick a team from the composer's Team menu to have this thread lead one.
+        Pick a team in the model picker's Agent team tab to have this thread lead one.
       </PanelNotice>
     );
   }
@@ -175,10 +255,16 @@ export function AgentTeamWorkflowPanel(props: {
           </>
         ) : null}
       </header>
-      {rows.length === 0 && progress.lead === null ? (
-        <PanelNotice title="No tasks yet">The lead delegates to members as it plans.</PanelNotice>
-      ) : (
-        <ScrollArea scrollFade className="min-h-0 flex-1">
+      <ScrollArea scrollFade className="min-h-0 flex-1">
+        <AgentList agents={agentTeamAgents(team)} providers={props.providers} />
+        <h3 className="px-3 pt-1 text-2xs font-medium text-muted-foreground select-none">
+          Handovers
+        </h3>
+        {rows.length === 0 && progress.lead === null ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">
+            No tasks yet. The lead delegates to members as it plans.
+          </p>
+        ) : (
           <ol aria-label="Team workflow" className="flex flex-col p-3" onKeyDown={moveBetweenSteps}>
             {rows.map((row, index) => (
               <WorkflowStep
@@ -212,9 +298,85 @@ export function AgentTeamWorkflowPanel(props: {
               </li>
             )}
           </ol>
-        </ScrollArea>
-      )}
+        )}
+      </ScrollArea>
     </div>
+  );
+}
+
+function AgentStateIcon(props: { readonly state: AgentState }) {
+  const { state } = props;
+  if (state === "working" || state === "done" || state === "failed" || state === "stopped") {
+    return <AgentTeamStatusIcon status={state} />;
+  }
+  if (state === "planning" || state === "reviewing") {
+    return (
+      <LoaderCircleIcon
+        aria-label={AGENT_STATE_LABELS[state]}
+        className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none"
+      />
+    );
+  }
+  return (
+    <span
+      role="img"
+      aria-label={AGENT_STATE_LABELS[state]}
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        state === "waiting" ? "bg-info/60" : "bg-muted-foreground/40",
+      )}
+    />
+  );
+}
+
+/** Every agent of the team, one row each: its model, role, state and current work. */
+function AgentList(props: {
+  readonly agents: ReadonlyArray<AgentTeamAgent>;
+  readonly providers: ReadonlyArray<ServerProvider>;
+}) {
+  return (
+    <section aria-label="Agents" className="flex flex-col gap-1 px-3 pt-3 pb-2">
+      <h3 className="text-2xs font-medium text-muted-foreground select-none">Agents</h3>
+      <ul className="flex flex-col gap-1">
+        {props.agents.map((agent) => (
+          <li
+            key={agent.key}
+            data-agent-team-agent={agent.role}
+            data-agent-state={agent.state}
+            className="flex min-w-0 items-start gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5"
+          >
+            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+              <AgentStateIcon state={agent.state} />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="flex min-w-0 items-center gap-1.5 text-xs">
+                <span className="min-w-0 flex-1 font-medium">
+                  <ModelLine
+                    label={agent.label}
+                    selection={agent.selection}
+                    driver={agent.driver}
+                    providers={props.providers}
+                  />
+                </span>
+                {agent.role === "lead" ? (
+                  <Badge variant="outline" size="sm">
+                    Lead
+                  </Badge>
+                ) : agent.total > 0 ? (
+                  <span className="shrink-0 text-2xs text-muted-foreground tabular-nums">
+                    {agent.done}/{agent.total} done
+                  </span>
+                ) : null}
+              </span>
+              <span className="truncate text-2xs text-muted-foreground">
+                {AGENT_STATE_LABELS[agent.state]}
+                {agent.activity ? ` · ${agent.activity}` : ""}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

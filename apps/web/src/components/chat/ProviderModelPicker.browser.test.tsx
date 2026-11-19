@@ -4,6 +4,7 @@ import {
   ProviderInstanceId,
   type ModelSelection,
 } from "@t3tools/contracts";
+import { createModelCapabilities } from "@t3tools/shared/model";
 import { useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
@@ -13,6 +14,7 @@ import "~/index.css";
 import { render } from "../../../test/render";
 import { __setClientSettingsForTests } from "../../hooks/useSettings";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
+import { ComposerTeamSetup } from "./ComposerTeamSetup";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 
 it("keeps each registry image when adding a model from another ACP agent", async () => {
@@ -326,8 +328,164 @@ it("lists agent teams in a tab under Favorites and closes on a pick", async () =
   await expect
     .element(page.getByRole("option", { name: /Content team/ }))
     .toHaveAttribute("aria-checked", "true");
-  await expect.element(page.getByRole("option", { name: /Architect & workers/ })).toBeVisible();
   await page.getByRole("option", { name: /Balanced team/ }).click();
   expect(onSelect).toHaveBeenCalledWith({ kind: "auto", auto: "balanced" });
   await expect.element(page.getByPlaceholder("Search models...")).not.toBeInTheDocument();
+});
+
+it("opens a team thread on its team and shows the setup beside the list", async () => {
+  const entries = deriveProviderInstanceEntries([
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready" as const,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [{ slug: "codex", name: "Codex model", isCustom: false, capabilities: {} }],
+      slashCommands: [],
+      skills: [],
+    },
+  ]);
+  const [codex] = entries;
+  const onSelect = vi.fn();
+
+  await using screen = await render(
+    <ProviderModelPicker
+      environmentId={null}
+      activeInstanceId={codex!.instanceId}
+      model="codex"
+      lockedProvider={null}
+      instanceEntries={entries}
+      modelOptionsByInstance={new Map(entries.map((entry) => [entry.instanceId, entry.models]))}
+      triggerAriaLabel="Choose model"
+      triggerLabel="Content team"
+      triggerIcon={<span data-testid="team-icon" />}
+      onInstanceModelChange={() => {}}
+      effortColumn={<div>Effort levels</div>}
+      teams={{
+        activeId: "content",
+        saved: [{ id: "content", name: "Content team", summary: "Opus leads Fable" }],
+        disabledReason: null,
+        onSelect,
+        setupColumn: <div>Team setup body</div>,
+      }}
+    />,
+  );
+  const trigger = screen.getByRole("button", { name: "Choose model" });
+  await expect.element(trigger).toHaveTextContent("Content team");
+  await expect.element(screen.getByTestId("team-icon")).toBeInTheDocument();
+  await trigger.click();
+  await expect.element(page.getByText("Team setup body")).toBeVisible();
+  await expect.element(page.getByText("Effort levels")).not.toBeInTheDocument();
+  await page.getByRole("option", { name: /Balanced team/ }).click();
+  expect(onSelect).toHaveBeenCalledWith({ kind: "auto", auto: "balanced" });
+  await expect.element(page.getByText("Team setup body")).toBeVisible();
+
+  await page.getByRole("button", { name: "Favorites", exact: true }).click();
+  await expect.element(page.getByText("Effort levels")).toBeVisible();
+  await expect.element(page.getByText("Team setup body")).not.toBeInTheDocument();
+});
+
+it("edits the team setup inside the picker without closing it", async () => {
+  const entries = deriveProviderInstanceEntries([
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready" as const,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: ["Alpha", "Beta"].map((name) => ({
+        slug: name.toLowerCase(),
+        name: `${name} model`,
+        isCustom: false,
+        capabilities: createModelCapabilities({
+          optionDescriptors: [
+            {
+              id: "thought_level",
+              label: "Thinking",
+              type: "select",
+              role: "reasoning",
+              currentValue: "medium",
+              options: [
+                { id: "low", label: "Low" },
+                { id: "medium", label: "Medium" },
+                { id: "high", label: "High" },
+              ],
+            },
+          ],
+        }),
+      })),
+      slashCommands: [],
+      skills: [],
+    },
+  ]);
+  const [codex] = entries;
+  const onApply = vi.fn();
+  const onSaveTeams = vi.fn();
+
+  await using screen = await render(
+    <ProviderModelPicker
+      environmentId={null}
+      activeInstanceId={codex!.instanceId}
+      model="alpha"
+      lockedProvider={null}
+      instanceEntries={entries}
+      modelOptionsByInstance={new Map(entries.map((entry) => [entry.instanceId, entry.models]))}
+      triggerAriaLabel="Choose model"
+      onInstanceModelChange={() => {}}
+      effortColumn={<div>Effort levels</div>}
+      teams={{
+        activeId: null,
+        saved: [],
+        disabledReason: null,
+        onSelect: () => {},
+        setupColumn: (
+          <ComposerTeamSetup
+            teams={[]}
+            active={null}
+            newThread={false}
+            entries={entries}
+            currentSelection={{ instanceId: codex!.instanceId, model: "alpha" }}
+            sharedGuidance=""
+            onDone={() => {}}
+            onSaveTeams={onSaveTeams}
+            onApply={onApply}
+            onDisable={() => {}}
+          />
+        ),
+      }}
+    />,
+  );
+  await screen.getByRole("button", { name: "Choose model" }).click();
+  await page.getByRole("button", { name: "Agent team", exact: true }).click();
+  const setup = page.getByRole("form", { name: "Architect & workers" });
+  await expect.element(setup).toBeVisible();
+  await setup.getByRole("combobox", { name: "Worker 1 model" }).click();
+  await page.getByRole("option", { name: "Beta model" }).click();
+  await setup.getByRole("textbox").fill("Plan first");
+  const efforts = setup.element().querySelectorAll("[data-team-member-effort] button");
+  expect(efforts).toHaveLength(2);
+  (efforts[1] as HTMLButtonElement).click();
+  await page.getByRole("menuitemradio", { name: "High" }).click();
+  await expect.element(setup).toBeVisible();
+  await setup.getByRole("button", { name: "Save setup" }).click();
+  expect(onApply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      leadGuidance: "Plan first",
+      members: [
+        { instanceId: codex!.instanceId, model: "alpha" },
+        {
+          instanceId: codex!.instanceId,
+          model: "beta",
+          options: [{ id: "thought_level", value: "high" }],
+        },
+      ],
+    }),
+  );
 });

@@ -150,6 +150,9 @@ export interface RightPanelTabsProps {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  /** Opens the Team workflow; absent where agent teams are not offered. */
+  onAddAgentTeam?: (() => void) | undefined;
+  agentTeamAvailable?: boolean;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -187,6 +190,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: "No linked pull requests are available for this thread.",
   device: "Devices are only available from a thread.",
   sideChat: "Side chats start after the first message.",
+  agentTeam: "Pick an agent team in the model picker first.",
 } as const;
 
 // Closed keepMounted popups must stop blocking shortcuts once their exit transition ends.
@@ -212,6 +216,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: "No linked pull requests available.",
   device: "Available from a thread.",
   sideChat: "Available after the first message.",
+  agentTeam: "Available when this thread leads a team.",
 } as const;
 
 type TabContextMenuAction =
@@ -332,6 +337,9 @@ function RightPanelEmptyState(props: {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  /** Opens the Team workflow; absent where agent teams are not offered. */
+  onAddAgentTeam?: (() => void) | undefined;
+  agentTeamAvailable?: boolean;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -412,6 +420,19 @@ function RightPanelEmptyState(props: {
             available: props.sideChatAvailable && !props.sideChatDisabledReason,
             disabledReason: props.sideChatDisabledReason ?? SURFACE_UNAVAILABLE_HINTS.sideChat,
             onClick: props.onAddSideChat,
+          },
+        ]
+      : []),
+    ...(props.onAddAgentTeam
+      ? [
+          {
+            label: "Team workflow",
+            description: "Follow each agent of this thread's team.",
+            icon: Users,
+            shortcut: "W",
+            available: props.agentTeamAvailable === true,
+            disabledReason: SURFACE_UNAVAILABLE_HINTS.agentTeam,
+            onClick: props.onAddAgentTeam,
           },
         ]
       : []),
@@ -1174,6 +1195,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           },
         ]
       : []),
+    ...(props.onAddAgentTeam
+      ? [
+          {
+            label: "Team workflow",
+            icon: Users,
+            shortcut: "W",
+            available: props.agentTeamAvailable === true,
+            disabledReason: SURFACE_DISABLED_REASONS.agentTeam,
+            onClick: props.onAddAgentTeam,
+          },
+        ]
+      : []),
   ] as const;
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1576,6 +1609,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
             onAddSideChat={props.onAddSideChat}
+            onAddAgentTeam={props.onAddAgentTeam}
+            agentTeamAvailable={props.agentTeamAvailable === true}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}

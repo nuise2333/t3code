@@ -218,22 +218,31 @@ right under Favorites):
   pass, the cheapest one tier stronger, or the strongest available. The kind you
   pick is remembered, and new threads start with it until you pick **No team**.
 - **Your teams**: the teams you saved, led by the thread's model.
-- **Architect & workers…** opens the team setup: pick the architect (the lead) and its workers, add lead
-  guidance for this team, and limit how many tasks run at once. **Save setup**
-  keeps it as **Custom setup** and turns it on; **Save as…** keeps it as a named
-  profile you can pick later, and **Use a single agent** turns the team off. The lead plans the
-  work, delegates each task to a team model as a delegated task, checks the
-  results, and answers you. It can delegate only to the team's models.
+
+While the **Agent team** tab is open, the picker's right column widens into
+**Architect & workers**, the team setup: pick the architect (the lead) and its
+workers, set each one's reasoning effort with the gauge button beside its model,
+add lead guidance for this team, and limit how many tasks run at once.
+**Save setup** keeps it as **Custom setup** and turns it on; **Save as…** keeps
+it as a named profile you can pick later, and **Use a single agent** turns the
+team off. The lead plans the work, delegates each task to a team model as a
+delegated task, checks the results, and answers you. It can delegate only to the
+team's models.
 
 On a new thread the team's first available model leads. In a thread that is
 already running, the thread's own model leads from your next message; choose
-**No team** in the same tab to turn it off. The model button shows a people
-icon while the thread leads a team. While a thread leads a team, a strip
+**No team** in the same tab to turn it off. While the thread leads a team, the
+model button shows a people icon and the team's name, and the picker opens on
+the **Agent team** tab. While a thread leads a team, a strip
 above the composer shows the team, its lead and a tally of delegated tasks;
 expand it to see each task's member, status and time, and open a task's thread.
-**Workflow** on the strip opens the run beside the chat: every handover in order
-with what the lead asked for and what came back, and a way to stop a task that
-is still working. **Round 2** marks a task a member got after its earlier one
+**Workflow** on the strip, or **Team workflow** (**W**) under **Open a surface**
+in the right panel, opens the run beside the chat. It opens by itself the first
+time the team starts working in a session. **Agents** lists the lead and each
+worker with what it is doing now (planning, working on a task, waiting, idle)
+and how many of its tasks are done; below it, **Handovers** shows every
+handover in order with what the lead asked for and what came back, and a way to
+stop a task that is still working. **Round 2** marks a task a member got after its earlier one
 ended, such as a fix sent back after a review.
 
 **Lead guidance** under the teams is added to every lead's instructions from its

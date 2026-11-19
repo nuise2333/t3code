@@ -461,6 +461,9 @@ const DismissedKeySchema = Schema.NullOr(Schema.String);
 
 const ignoreComposerFocus = () => {};
 
+/** Threads whose Team workflow opened by itself this session, so a closed tab stays closed. */
+const autoOpenedAgentTeamThreads = new Set<string>();
+
 export default function ChatView(props: ChatViewProps) {
   const {
     environmentId,
@@ -2753,6 +2756,7 @@ export default function ChatView(props: ChatViewProps) {
           modelSelection: serverProjection.thread.modelSelection,
         })
       : null;
+  const teamsOffered = isServerThread && serverConfig?.environment.capabilities.agentTeams === true;
   const autoTeam = teamRef === null ? undefined : AUTO_TEAMS.find((team) => team.id === teamRef.id);
   const savedTeam =
     teamRef === null || autoTeam !== undefined || serverProjection === null
@@ -2777,6 +2781,9 @@ export default function ChatView(props: ChatViewProps) {
           : agentTeamSummary(savedTeam!, lead, providers),
       leadLabel,
       lead,
+      workers: (savedTeam?.members ?? [])
+        .filter((member) => member.instanceId !== lead.instanceId || member.model !== lead.model)
+        .map((member) => ({ label: routingMemberLabel(member, providers), selection: member })),
       progress: agentTeamProgress({
         threadId: serverProjection.thread.id,
         team: savedTeam,
@@ -2793,6 +2800,24 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef === null || embedded
       ? undefined
       : () => useRightPanelStore.getState().open(activeThreadRef, "agent-team");
+  const agentTeamLive =
+    agentTeamView !== null &&
+    (agentTeamView.progress.working > 0 || agentTeamView.progress.lead !== null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the Team workflow once when this thread's team starts working; a closed tab stays closed for the session
+  useEffect(() => {
+    if (!agentTeamLive || activeThreadRef === null || embedded || shouldUsePlanSidebarSheet) return;
+    const key = scopedThreadKey(activeThreadRef);
+    if (autoOpenedAgentTeamThreads.has(key)) return;
+    autoOpenedAgentTeamThreads.add(key);
+    if (rightPanelState.surfaces.some((surface) => surface.kind === "agent-team")) return;
+    useRightPanelStore.getState().open(activeThreadRef, "agent-team");
+  }, [
+    agentTeamLive,
+    activeThreadRef,
+    embedded,
+    shouldUsePlanSidebarSheet,
+    rightPanelState.surfaces,
+  ]);
   const stopAgentTeamTask = async (taskId: string) => {
     if (serverProjection === null) return;
     const result = await interruptThreadTurn({
@@ -4301,6 +4326,8 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
+          onAddAgentTeam={teamsOffered ? openAgentTeamWorkflow : undefined}
+          agentTeamAvailable={agentTeamView !== null}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && isGitRepo}

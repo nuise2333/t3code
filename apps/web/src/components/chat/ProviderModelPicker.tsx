@@ -28,7 +28,7 @@ import {
 } from "./ModelPickerContent";
 import type { ModelPickerTeamRow } from "./modelPickerKeys";
 import type { PickerRoutingGroup } from "@t3tools/client-runtime/routing";
-import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
+import { type ModelPickerTab, retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ModelEsque, getDisplayModelName, getTriggerDisplayModelName } from "./providerIconUtils";
@@ -139,8 +139,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onRoutingGroupSelect?: (groupId: string) => void;
   /** The thread's agent team, as a tab under Favorites; picking a row closes the picker. */
   teams?: PickerTeams;
-  /** Receives the trigger, for surfaces the picker opens beside it, such as the team setup. */
-  onTriggerRef?: (trigger: HTMLButtonElement | null) => void;
+  /** Stands in for the provider icon when `triggerLabel` names something else, such as a team. */
+  triggerIcon?: ReactNode;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
@@ -168,6 +168,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const isCoarsePointer = useMediaQuery({ pointer: "coarse" });
   const size = props.size ?? "sm";
   const docked = props.effortColumn !== undefined;
+  const [pickerTab, setPickerTab] = useState<ModelPickerTab | null>(null);
+  const teamSetupColumn =
+    docked && pickerTab === "team" ? (props.teams?.setupColumn ?? null) : null;
 
   const activeEntry =
     props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null;
@@ -340,10 +343,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               ...props.teams,
               onSelect: (row: ModelPickerTeamRow) => {
                 if (props.disabled) return;
-                setIsMenuOpen(false);
+                // Docked, the setup beside the list follows the pick, so the popup stays open.
+                if (!docked) setIsMenuOpen(false);
                 props.teams?.onSelect(row);
               },
             },
+            onTabChange: setPickerTab,
           }
         : {})}
       {...(docked
@@ -377,10 +382,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverTrigger
         render={
           <ComposerControl
-            ref={(node: HTMLButtonElement | null) => {
-              triggerRef.current = node;
-              props.onTriggerRef?.(node);
-            }}
+            ref={triggerRef}
             aria-label={[
               props.triggerAriaLabel ?? props.triggerLabel ?? allModelNames ?? triggerLabel,
               props.triggerDetail,
@@ -442,7 +444,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 </span>
               ) : null}
             </span>
-          ) : activeEntry && props.triggerLabel === undefined ? (
+          ) : props.triggerLabel !== undefined ? (
+            (props.triggerIcon ?? null)
+          ) : activeEntry ? (
             // Narrow compacted composers hide the provider icon before truncating the name.
             <span data-chat-provider-model-picker-icon className="contents">
               <ProviderInstanceIcon
@@ -507,17 +511,28 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               <div className="flex h-86.5 min-h-0 max-sm:h-auto max-sm:flex-col">
                 {picker}
                 <div
+                  {...(teamSetupColumn ? { "data-model-picker-team-setup": true } : {})}
                   data-model-picker-effort
-                  className="flex min-h-0 w-48 flex-col sm:shrink-0 border-l border-border/70 bg-muted/40 max-sm:h-64 max-sm:w-full max-sm:border-t max-sm:border-l-0"
+                  className={cn(
+                    "flex min-h-0 flex-col sm:shrink-0 border-l border-border/70 bg-muted/40 max-sm:h-64 max-sm:w-full max-sm:border-t max-sm:border-l-0",
+                    // The team setup needs room for its model fields and guidance.
+                    teamSetupColumn ? "w-80" : "w-48",
+                  )}
                   onKeyDown={(event) => {
                     if (event.key !== "ArrowLeft" || event.altKey || event.ctrlKey || event.metaKey)
+                      return;
+                    // Left moves the caret in a field of the team setup.
+                    if (
+                      event.target instanceof Element &&
+                      event.target.closest("input, textarea, [contenteditable]")
+                    )
                       return;
                     event.preventDefault();
                     event.stopPropagation();
                     searchInputRef.current?.focus();
                   }}
                 >
-                  {props.effortColumn}
+                  {teamSetupColumn ?? props.effortColumn}
                 </div>
               </div>
               {props.footer}
