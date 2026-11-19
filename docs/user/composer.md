@@ -249,8 +249,12 @@ teams are edited on web and desktop.
 
 The leaf button beside the model picker turns on guidance that makes the agent
 spend fewer tokens in this thread: **Caveman** (terse replies, with Lite, Full
-and Ultra levels), **Lean code**, **Quiet tools** and **RTK compression** (needs
-the `rtk` command installed). The panel shows a rough estimate of the saving.
+and Ultra levels), **Lean code**, **Quiet tools**, **RTK compression** (needs
+the `rtk` command installed) and **TokenEconomizer**, which works with every
+agent: it keeps short notes about the repository that later sessions reuse,
+loads only the tools a task needs, and changes approach instead of repeating
+the same failure. Its notes live in the repository's git folder, so they are
+never committed. The panel shows a rough estimate of the saving.
 The guidance goes with your next message and is restated every few messages.
 **Start new threads like this** makes the current choice the default for new
 threads; **Turn all off** clears it.

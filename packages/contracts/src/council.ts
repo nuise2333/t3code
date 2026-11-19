@@ -3,7 +3,13 @@ import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /** Guidance packs that make an agent spend fewer tokens; each is a short, plain instruction. */
-export const TokenSaverPack = Schema.Literals(["caveman", "lean-code", "quiet-tools", "rtk"]);
+export const TokenSaverPack = Schema.Literals([
+  "caveman",
+  "lean-code",
+  "quiet-tools",
+  "rtk",
+  "economizer",
+]);
 export type TokenSaverPack = typeof TokenSaverPack.Type;
 
 /** How terse Caveman makes replies. */
@@ -11,7 +17,7 @@ export const TokenSaverLevel = Schema.Literals(["lite", "full", "ultra"]);
 export type TokenSaverLevel = typeof TokenSaverLevel.Type;
 
 export const TokenSaverSettings = Schema.Struct({
-  packs: Schema.Array(TokenSaverPack).check(Schema.isMaxLength(4)),
+  packs: Schema.Array(TokenSaverPack).check(Schema.isMaxLength(5)),
   level: TokenSaverLevel,
 });
 export type TokenSaverSettings = typeof TokenSaverSettings.Type;

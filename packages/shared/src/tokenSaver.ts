@@ -1,6 +1,6 @@
 /* Token saver packs, sent with a message when they change and as a reminder.
- * Caveman Full is caveman-micro (MIT, kuba-guzik/caveman-micro), distilled from Caveman
- * (Apache-2.0, JuliusBrussee/caveman); Lite, Ultra and the exceptions follow Caveman's rules.
+ * Caveman Full is caveman-micro (MIT), distilled from Caveman (Apache-2.0); Lite, Ultra and the
+ * exceptions follow Caveman's rules. Economizer is agent-run TokenEconomizer (Microsoft Research).
  * Savings figures are the projects' published benchmarks or estimates. */
 import type { TokenSaverLevel, TokenSaverPack, TokenSaverSettings } from "@t3tools/contracts";
 
@@ -40,6 +40,13 @@ export const TOKEN_SAVER_PACKS: ReadonlyArray<TokenSaverPackInfo> = [
     saves: "60–90% of command output",
     needs: "rtk",
   },
+  {
+    id: "economizer",
+    title: "TokenEconomizer",
+    summary:
+      "Learns from past sessions: keeps confirmed one-line repo notes, loads only tools it needs, and changes approach instead of repeating a failure.",
+    saves: "~18–31% per task (SWE-Bench)",
+  },
 ];
 
 export const TOKEN_SAVER_LEVELS: ReadonlyArray<{
@@ -78,6 +85,13 @@ const GUIDANCE: Record<Exclude<TokenSaverPack, "caveman">, string> = {
     "Write the least code that fully solves the task. Reuse existing helpers, the standard library and platform features before adding code or dependencies. No speculative abstractions, options or unrequested features. No new comments or docs unless asked. In chat, show changed lines with minimal context, not whole files.",
   "quiet-tools":
     "Keep tool output small. Search with targeted patterns (rg -n pattern path, rg -l) instead of listing or dumping trees. Read only the line ranges you need; do not re-read a file you already read unless it changed. Use quiet flags (git --no-pager, -q, --silent) and cap long output with head or tail. Run the tests closest to the change before the full suite.",
+  economizer: [
+    "Learn from experience in this repository instead of rediscovering it.",
+    "- Notes: if this is a git repo, read $(git rev-parse --git-common-dir)/t3-token-economizer.md once at the start (it lives in git's dir: never committed, shared by worktrees). Each line is `- [n] fact`, n = sessions that confirmed it. Trust n >= 3; check lower ones before relying on them.",
+    "- Before finishing, update it: bump n for a note this session confirmed, add `- [1] fact` for a durable repo fact that cost exploration (build or test command, layout, quirk), delete a note the code contradicts. One line each, at most 40 lines, no secrets.",
+    "- Tools: start with shell, read and edit. Load or call other tools, MCP servers and skills only when the task needs them; do not fetch tool schemas speculatively.",
+    "- Failure loops: after the same failure twice, stop retrying; name the likely cause and try a different approach. If that also fails the same way, stop and tell the user what you tried.",
+  ].join("\n"),
   rtk: "rtk is installed and compresses command output. Prefix shell commands with rtk: rtk git status, rtk git diff, rtk git log, rtk ls, rtk read <file>, rtk grep <pattern>, rtk find, and test runners such as rtk npm test or rtk cargo test. If rtk rejects a command, run it plainly.",
 };
 
@@ -123,6 +137,7 @@ export function tokenSaverEstimate(
     "lean-code": 0.12,
     "quiet-tools": 0.15,
     rtk: 0.2,
+    economizer: 0.2,
   };
   const kept = activeTokenSaverPacks(saver.packs, available).reduce(
     (left, id) => left * (1 - share[id]),

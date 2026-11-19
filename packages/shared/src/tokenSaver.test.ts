@@ -18,6 +18,9 @@ describe("token saver", () => {
     expect(guidance).not.toContain("rtk is installed");
     // Caveman keeps full sentences where terseness would hurt.
     expect(guidance).toContain("security warnings");
+    expect(tokenSaverGuidance({ packs: ["economizer"], level: "full" }, { rtk: false })).toContain(
+      "t3-token-economizer.md",
+    );
     expect(tokenSaverGuidance({ packs: [], level: "full" }, { rtk: true })).toContain(
       "Token saver is off",
     );
