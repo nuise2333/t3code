@@ -275,3 +275,59 @@ it("keeps the touch keyboard down while choosing a provider", async () => {
   await expect.element(page.getByRole("option", { name: /Claude model/ })).toBeVisible();
   await expect.element(search).not.toHaveFocus();
 });
+
+it("lists agent teams in a tab under Favorites and closes on a pick", async () => {
+  const entries = deriveProviderInstanceEntries(
+    ["Codex", "Claude"].map((name) => ({
+      instanceId: ProviderInstanceId.make(name.toLowerCase()),
+      driver: ProviderDriverKind.make(name.toLowerCase()),
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready" as const,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [
+        { slug: name.toLowerCase(), name: `${name} model`, isCustom: false, capabilities: {} },
+      ],
+      slashCommands: [],
+      skills: [],
+    })),
+  );
+  const [codex] = entries;
+  const onSelect = vi.fn();
+
+  await using screen = await render(
+    <ProviderModelPicker
+      environmentId={null}
+      activeInstanceId={codex!.instanceId}
+      model="codex"
+      lockedProvider={null}
+      instanceEntries={entries}
+      modelOptionsByInstance={new Map(entries.map((entry) => [entry.instanceId, entry.models]))}
+      triggerAriaLabel="Choose model"
+      onInstanceModelChange={() => {}}
+      teams={{
+        activeId: "content",
+        saved: [{ id: "content", name: "Content team", summary: "Opus leads Fable" }],
+        disabledReason: null,
+        onSelect,
+      }}
+    />,
+  );
+  await screen.getByRole("button", { name: "Choose model" }).click();
+  const sidebar = document.querySelector("[data-model-picker-sidebar]")!;
+  const tabs = Array.from(sidebar.querySelectorAll("button"), (button) =>
+    button.getAttribute("aria-label"),
+  );
+  expect(tabs.slice(0, 2)).toEqual(["Favorites", "Agent team"]);
+
+  await page.getByRole("button", { name: "Agent team", exact: true }).click();
+  await expect
+    .element(page.getByRole("option", { name: /Content team/ }))
+    .toHaveAttribute("aria-checked", "true");
+  await expect.element(page.getByRole("option", { name: /Architect & workers/ })).toBeVisible();
+  await page.getByRole("option", { name: /Balanced team/ }).click();
+  expect(onSelect).toHaveBeenCalledWith({ kind: "auto", auto: "balanced" });
+  await expect.element(page.getByPlaceholder("Search models...")).not.toBeInTheDocument();
+});

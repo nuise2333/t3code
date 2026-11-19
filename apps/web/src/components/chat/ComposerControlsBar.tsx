@@ -5,6 +5,9 @@ import { type AppModelOption } from "../../modelSelection";
 import { CircleAlertIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerTeamMenu } from "./ComposerTeamMenu";
+import type { PickerTeams } from "./ModelPickerContent";
+import type { ModelPickerTeamRow } from "./modelPickerKeys";
+import { useState } from "react";
 import { draftThreadAssistsAtom } from "./threadAssistsDraft";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useAtomValue } from "@effect/atom-react";
@@ -445,8 +448,36 @@ export function ComposerControlsBar(props: {
   const disableTeam = selectNoTeam;
   const showTeamControl =
     teamsCapability && (routeKind === "server" ? serverThreadId !== undefined : Boolean(draftId));
+  // The model picker's Team tab offers the same choices; its setup row opens the menu's setup.
+  const [teamSetupOpen, setTeamSetupOpen] = useState(false);
+  const selectPickerTeam = useStableCallback((row: ModelPickerTeamRow) => {
+    switch (row.kind) {
+      case "none":
+        selectNoTeam();
+        return;
+      case "auto":
+        selectAutoTeam(row.auto);
+        return;
+      case "saved":
+        selectSavedTeam(row.id);
+        return;
+      case "setup":
+        setTeamSetupOpen(true);
+        return;
+    }
+  });
+  const pickerTeams: PickerTeams | undefined = showTeamControl
+    ? {
+        activeId: activeTeam?.id ?? null,
+        saved: teamChoices,
+        disabledReason: teamDisabledReason,
+        onSelect: selectPickerTeam,
+      }
+    : undefined;
   const teamControl = showTeamControl ? (
     <ComposerTeamMenu
+      setupOpen={teamSetupOpen}
+      onSetupOpenChange={setTeamSetupOpen}
       teams={savedTeams}
       teamChoices={teamChoices}
       onSelectAuto={selectAutoTeam}
@@ -522,8 +553,12 @@ export function ComposerControlsBar(props: {
       triggerSuffix={effort.suffix}
       triggerDetail={effort.detail}
       {...(pickedGroup ? { triggerLabel: pickedGroup.name } : {})}
-      routingGroups={routingGroups}
+      // Teams live in the Team tab, so the groups tab keeps only plain routing groups.
+      routingGroups={
+        pickerTeams ? routingGroups.filter((group) => group.team !== true) : routingGroups
+      }
       activeRoutingGroupId={draftRoutingGroupId}
+      {...(pickerTeams ? { teams: pickerTeams } : {})}
       onRoutingGroupSelect={handleRoutingGroupSelect}
       triggerShortcuts={
         pickerOwnsModeShortcut ? "composer.effort composer.mode" : "composer.effort"

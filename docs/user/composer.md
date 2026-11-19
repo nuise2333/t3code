@@ -221,8 +221,9 @@ the team menu:
 - **Architect & workers…** opens the team setup: pick the architect (the lead) and its workers, add lead
   guidance for this team, and limit how many tasks run at once. **Save setup**
   keeps it as **Custom setup** and turns it on; **Save as…** keeps it as a named
-  profile you can pick later, and **Use a single agent** turns the team off. You
-  can also pick a team from a new thread's model picker. The lead plans the
+  profile you can pick later, and **Use a single agent** turns the team off. The
+  model picker's **Agent team** tab, right under Favorites, offers the same
+  choices. The lead plans the
   work, delegates each task to a team model as a delegated task, checks the
   results, and answers you. It can delegate only to the team's models.
 
