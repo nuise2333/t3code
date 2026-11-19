@@ -209,8 +209,8 @@ that kind's group instead of only picking an effort.
 An agent team is a lead model and the models it may hand work to, each with its
 own options such as effort. Create one in **Settings → Providers → Agent teams**
 on web and desktop; the first model leads, and the next one leads if the first
-can't run. The **Team** button (the people icon) beside the model picker opens
-the team menu:
+can't run. Pick a team in the model picker's **Agent team** tab (the people icon,
+right under Favorites):
 
 - **No team**: a single agent.
 - **Cheap team**, **Balanced team** and **Best team**: your thread's model leads
@@ -221,15 +221,14 @@ the team menu:
 - **Architect & workers…** opens the team setup: pick the architect (the lead) and its workers, add lead
   guidance for this team, and limit how many tasks run at once. **Save setup**
   keeps it as **Custom setup** and turns it on; **Save as…** keeps it as a named
-  profile you can pick later, and **Use a single agent** turns the team off. The
-  model picker's **Agent team** tab, right under Favorites, offers the same
-  choices. The lead plans the
+  profile you can pick later, and **Use a single agent** turns the team off. The lead plans the
   work, delegates each task to a team model as a delegated task, checks the
   results, and answers you. It can delegate only to the team's models.
 
 On a new thread the team's first available model leads. In a thread that is
 already running, the thread's own model leads from your next message; choose
-**No team** in the same menu to turn it off. While a thread leads a team, a strip
+**No team** in the same tab to turn it off. The model button shows a people
+icon while the thread leads a team. While a thread leads a team, a strip
 above the composer shows the team, its lead and a tally of delegated tasks;
 expand it to see each task's member, status and time, and open a task's thread.
 **Workflow** on the strip opens the run beside the chat: every handover in order
