@@ -1,7 +1,12 @@
 import { FileIcon, FolderIcon } from "lucide-react";
 import { memo } from "react";
 
-import { ensurePierreIconSprite, resolvePierreIconForEntry } from "../../pierre-icons";
+import { useFileIconTheme } from "../../fileIconThemes";
+import {
+  ensurePierreIconSprite,
+  resolvePierreIconForEntry,
+  resolveThemedIconForEntry,
+} from "../../pierre-icons";
 import { cn } from "~/lib/utils";
 
 const ICON_COLORS: Record<string, readonly [light: string, dark: string]> = {
@@ -66,9 +71,34 @@ export const PierreEntryIcon = memo(function PierreEntryIcon(props: {
   pathValue: string;
   kind: "file" | "directory";
   mimeType?: string | undefined;
+  /** Directories only: an icon theme may draw open folders differently. */
+  expanded?: boolean;
   theme: "light" | "dark";
   className?: string;
 }) {
+  const iconTheme = useFileIconTheme();
+  const themedIcon = iconTheme
+    ? resolveThemedIconForEntry(
+        iconTheme,
+        props.theme,
+        props.pathValue,
+        props.kind,
+        props.mimeType,
+        props.expanded,
+      )
+    : null;
+  if (themedIcon) {
+    return (
+      <svg
+        aria-hidden="true"
+        data-file-icon-theme-icon={themedIcon}
+        className={cn("size-4 shrink-0", props.className)}
+        viewBox="0 0 16 16"
+      >
+        <use href={`#${themedIcon}`} />
+      </svg>
+    );
+  }
   const icon = resolvePierreIconForEntry(props.pathValue, props.kind, props.mimeType);
 
   if (!icon) {

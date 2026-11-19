@@ -5,6 +5,7 @@ import { type ReactNode, useState } from "react";
 import {
   importOpenVsxThemeExtension,
   searchOpenVsxThemes,
+  type OpenVsxContributionKind,
   type OpenVsxThemeExtension,
   type OpenVsxThemeSort,
 } from "../../openVsxThemes";
@@ -34,7 +35,53 @@ const DOWNLOAD_FORMAT = new Intl.NumberFormat(undefined, {
   notation: "compact",
   maximumFractionDigits: 1,
 });
-const SUGGESTED_SEARCHES = ["Dracula", "Catppuccin", "Nord", "Tokyo Night"];
+/** What one search section finds and installs: VS Code color themes or file icon themes. */
+export interface ThemeSearchKind<Installed extends { readonly label: string }, Snapshot> {
+  readonly contribution: OpenVsxContributionKind;
+  readonly noun: string;
+  readonly heading: string;
+  readonly placeholder: string;
+  readonly suggestions: ReadonlyArray<string>;
+  readonly fallbackDescription: string;
+  readonly updateDescription: string;
+  readonly icon: typeof PaletteIcon;
+  readonly isInstalled: (extension: OpenVsxThemeExtension) => boolean;
+  /** Reads what is installed now; an update replaces exactly this. */
+  readonly readInstalled: (extension: OpenVsxThemeExtension) => Snapshot;
+  readonly hasInstalled: (snapshot: Snapshot) => boolean;
+  readonly install: (
+    extension: OpenVsxThemeExtension,
+    signal: AbortSignal,
+    snapshot: Snapshot,
+  ) => Promise<ReadonlyArray<Installed>>;
+}
+
+export const COLOR_THEME_SEARCH: ThemeSearchKind<
+  ThemeDefinition,
+  ReadonlyArray<ThemeDefinition>
+> = {
+  contribution: "themes",
+  noun: "theme",
+  heading: "Search community themes",
+  placeholder: "Search themes...",
+  suggestions: ["Dracula", "Catppuccin", "Nord", "Tokyo Night"],
+  fallbackDescription: "A community color theme for your editor.",
+  updateDescription:
+    "This replaces its installed variants, including any local edits. Variants no longer in the extension will be removed.",
+  icon: PaletteIcon,
+  isInstalled: (extension) =>
+    getCustomThemes().some((theme) => theme.collection?.id === extension.collectionId),
+  readInstalled: (extension) => getStoredCustomThemeCollection(extension.collectionId),
+  hasInstalled: (snapshot) => snapshot.length > 0,
+  install: async (extension, signal, snapshot) => {
+    const themes = await importOpenVsxThemeExtension(extension, signal);
+    signal.throwIfAborted();
+    return replaceCustomThemeCollection(extension.collectionId, themes, {
+      expectedCollection: snapshot,
+    });
+  },
+};
+
 const SORT_OPTIONS: ReadonlyArray<{ value: OpenVsxThemeSort; label: string }> = [
   { value: "downloadCount", label: "Most downloaded" },
   { value: "rating", label: "Best rated" },
@@ -58,7 +105,13 @@ function sourceLinkIcon(url: string): ReactNode {
   return <Icon className="size-3.5" />;
 }
 
-function ThemeExtensionIcon({ extension }: { extension: OpenVsxThemeExtension }) {
+function ThemeExtensionIcon({
+  extension,
+  fallbackIcon: FallbackIcon,
+}: {
+  extension: OpenVsxThemeExtension;
+  fallbackIcon: typeof PaletteIcon;
+}) {
   const [failed, setFailed] = useState(false);
 
   return (
@@ -73,7 +126,7 @@ function ThemeExtensionIcon({ extension }: { extension: OpenVsxThemeExtension })
           onError={() => setFailed(true)}
         />
       ) : (
-        <PaletteIcon className="size-4" />
+        <FallbackIcon className="size-4" />
       )}
     </div>
   );
@@ -227,12 +280,14 @@ export function createThemeSearch(
   };
 }
 
-export function ThemeSearchSection({
+export function ThemeSearchSection<Installed extends { readonly label: string }, Snapshot>({
   signal,
   onInstalled,
+  kind,
 }: {
   signal: AbortSignal;
-  onInstalled: (themes: ReadonlyArray<ThemeDefinition>, context: { updated: boolean }) => void;
+  onInstalled: (themes: ReadonlyArray<Installed>, context: { updated: boolean }) => void;
+  kind: ThemeSearchKind<Installed, Snapshot>;
 }) {
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<OpenVsxThemeSort>("downloadCount");
@@ -242,7 +297,9 @@ export function ThemeSearchSection({
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<OpenVsxThemeExtension | null>(null);
   const [themeSearch] = useState(() =>
-    createThemeSearch({ setResults, setError, setIsSearching }, signal),
+    createThemeSearch({ setResults, setError, setIsSearching }, signal, (query, options) =>
+      searchOpenVsxThemes(query, { ...options, contribution: kind.contribution }),
+    ),
   );
 
   const changeQuery = (nextQuery: string) => {
@@ -259,14 +316,14 @@ export function ThemeSearchSection({
 
   const handleInstall = async (extension: OpenVsxThemeExtension, allowUpdate: boolean) => {
     setError(null);
-    let installedCollection: ReadonlyArray<ThemeDefinition>;
+    let snapshot: Snapshot;
     try {
-      installedCollection = getStoredCustomThemeCollection(extension.collectionId);
+      snapshot = kind.readInstalled(extension);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Installed themes could not be read.");
       return;
     }
-    const updated = installedCollection.length > 0;
+    const updated = kind.hasInstalled(snapshot);
     if (updated && !allowUpdate) {
       setPendingUpdate(extension);
       return;
@@ -275,16 +332,11 @@ export function ThemeSearchSection({
     const installSignal = themeSearch.beginInstall();
     setInstallingId(extension.id);
     try {
-      const themes = await importOpenVsxThemeExtension(extension, installSignal);
-      if (!installSignal.aborted) {
-        const imported = replaceCustomThemeCollection(extension.collectionId, themes, {
-          expectedCollection: installedCollection,
-        });
-        onInstalled(imported, { updated });
-      }
+      const imported = await kind.install(extension, installSignal, snapshot);
+      if (!installSignal.aborted) onInstalled(imported, { updated });
     } catch (cause) {
       if (!installSignal.aborted) {
-        setError(cause instanceof Error ? cause.message : "That theme could not be added.");
+        setError(cause instanceof Error ? cause.message : `That ${kind.noun} could not be added.`);
       }
     }
     if (themeSearch.endInstall(installSignal)) setInstallingId(null);
@@ -294,10 +346,10 @@ export function ThemeSearchSection({
     <section className="space-y-3" aria-labelledby="theme-search-heading">
       <div>
         <h3 className="text-sm font-medium" id="theme-search-heading">
-          Search community themes
+          {kind.heading}
         </h3>
         <p className="mt-0.5 text-muted-foreground text-xs">
-          Find open-source themes from Open VSX.
+          Find open-source {kind.noun}s from Open VSX.
         </p>
       </div>
       <InputGroup>
@@ -305,7 +357,7 @@ export function ThemeSearchSection({
           {isSearching ? <Spinner aria-hidden /> : <SearchIcon aria-hidden />}
         </InputGroupAddon>
         <InputGroupInput
-          aria-label="Search Open VSX themes"
+          aria-label={`Search Open VSX ${kind.noun}s`}
           autoFocus
           onChange={(event) => changeQuery(event.currentTarget.value)}
           onKeyDown={(event) => {
@@ -313,7 +365,7 @@ export function ThemeSearchSection({
             if (event.key === "Enter" && !isSearching && installingId === null)
               themeSearch.searchNow();
           }}
-          placeholder="Search themes..."
+          placeholder={kind.placeholder}
           size="lg"
           type="search"
           value={query}
@@ -324,7 +376,7 @@ export function ThemeSearchSection({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <p className="text-muted-foreground text-xs">Popular</p>
-            {SUGGESTED_SEARCHES.map((suggestion) => (
+            {kind.suggestions.map((suggestion) => (
               <Button
                 key={suggestion}
                 disabled={installingId !== null}
@@ -370,9 +422,9 @@ export function ThemeSearchSection({
 
       <div className="sr-only" role="status">
         {isSearching
-          ? "Searching themes..."
+          ? `Searching ${kind.noun}s...`
           : results
-            ? `${results.length} supported ${results.length === 1 ? "theme" : "themes"} found.`
+            ? `${results.length} supported ${results.length === 1 ? kind.noun : `${kind.noun}s`} found.`
             : ""}
       </div>
 
@@ -384,23 +436,21 @@ export function ThemeSearchSection({
 
       {isSearching && results === null ? (
         <div className="flex min-h-20 items-center justify-center gap-2 text-muted-foreground text-sm">
-          <Spinner /> Searching themes...
+          <Spinner /> Searching {kind.noun}s...
         </div>
       ) : null}
 
       {results ? (
         results.length === 0 ? (
           <div className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
-            <p className="text-sm font-medium">No supported open-source themes found</p>
+            <p className="text-sm font-medium">No supported open-source {kind.noun}s found</p>
             <p className="mt-1 text-muted-foreground text-xs">Try a broader search.</p>
           </div>
         ) : (
           <div className="grid gap-2 sm:grid-cols-2">
             {results.map((extension) => {
               const isInstalling = installingId === extension.id;
-              const isInstalled = getCustomThemes().some(
-                (theme) => theme.collection?.id === extension.collectionId,
-              );
+              const isInstalled = kind.isInstalled(extension);
               const action = isInstalled ? "Update" : "Install";
               const progressAction = isInstalled ? "Updating" : "Installing";
               return (
@@ -409,7 +459,11 @@ export function ThemeSearchSection({
                   key={extension.id}
                 >
                   <div className="flex min-w-0 gap-3">
-                    <ThemeExtensionIcon key={extension.iconUrl} extension={extension} />
+                    <ThemeExtensionIcon
+                      key={extension.iconUrl}
+                      extension={extension}
+                      fallbackIcon={kind.icon}
+                    />
                     <div className="min-w-0 flex-1">
                       <h4 className="truncate text-sm font-medium">{extension.name}</h4>
                       <p className="truncate text-muted-foreground text-xs">
@@ -419,7 +473,7 @@ export function ThemeSearchSection({
                     </div>
                   </div>
                   <p className="line-clamp-2 min-h-8 text-muted-foreground text-xs leading-4">
-                    {extension.description || "A community color theme for your editor."}
+                    {extension.description || kind.fallbackDescription}
                   </p>
                   <div className="mt-auto flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
@@ -467,10 +521,7 @@ export function ThemeSearchSection({
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>Update “{pendingUpdate?.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This replaces its installed variants, including any local edits. Variants no longer in
-              the extension will be removed.
-            </AlertDialogDescription>
+            <AlertDialogDescription>{kind.updateDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
@@ -481,7 +532,7 @@ export function ThemeSearchSection({
                 if (extension) void handleInstall(extension, true);
               }}
             >
-              Update theme
+              Update {kind.noun}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

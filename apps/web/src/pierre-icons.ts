@@ -1,12 +1,14 @@
 import {
   createFileTreeIconResolver,
   getBuiltInSpriteSheet,
+  type FileTreeIconConfig,
   type FileTreeIcons,
 } from "@pierre/trees";
 import { VIDEO_FILE_EXTENSIONS } from "@t3tools/shared/video";
 import { fileIconPathForMimeType } from "@t3tools/shared/mediaPreview";
 
 import type { ContextChipAccentKind } from "~/lib/contextChipAccents";
+import type { FileIconTheme } from "./fileIconThemeImport";
 
 export interface PierreIconResolution {
   name: string;
@@ -248,6 +250,74 @@ export function resolvePierreIconForEntry(
         fileIconPathForMimeType(pathValue, mimeType),
       )
     : icon;
+}
+
+const themedIconsCache = new WeakMap<
+  FileIconTheme,
+  Partial<Record<"light" | "dark", FileTreeIconConfig>>
+>();
+
+/** The file tree icon config for an imported icon theme, or T3's own icons when none is active. */
+export function fileTreeIconsFor(
+  theme: FileIconTheme | null,
+  appearance: "light" | "dark",
+): FileTreeIconConfig {
+  if (!theme) return T3_PIERRE_ICONS;
+  const cached = themedIconsCache.get(theme)?.[appearance];
+  if (cached) return cached;
+  const maps = theme[appearance];
+  const icons = {
+    set: "none",
+    colored: false,
+    spriteSheet: theme.sprite,
+    byFileName: maps.fileNames,
+    byFileExtension: maps.fileExtensions,
+    byFolderName: maps.folderNames,
+    byFolderNameExpanded: maps.folderNamesExpanded,
+    remap: {
+      ...(maps.file ? { "file-tree-icon-file": maps.file } : {}),
+      ...(maps.folder ? { "file-tree-icon-folder": maps.folder } : {}),
+      ...(maps.folderExpanded ? { "file-tree-icon-folder-open": maps.folderExpanded } : {}),
+    },
+  } satisfies FileTreeIconConfig;
+  themedIconsCache.set(theme, { ...themedIconsCache.get(theme), [appearance]: icons });
+  return icons;
+}
+
+const themedResolverCache = new WeakMap<
+  FileTreeIconConfig,
+  ReturnType<typeof createFileTreeIconResolver>
+>();
+
+/** Resolves one entry against an imported icon theme; null means the theme has no icon for it. */
+export function resolveThemedIconForEntry(
+  theme: FileIconTheme,
+  appearance: "light" | "dark",
+  pathValue: string,
+  kind: "file" | "directory",
+  mimeType?: string,
+  expanded = false,
+): string | null {
+  const icons = fileTreeIconsFor(theme, appearance);
+  let resolver = themedResolverCache.get(icons);
+  if (!resolver) {
+    resolver = createFileTreeIconResolver(icons);
+    themedResolverCache.set(icons, resolver);
+  }
+  if (kind === "directory") {
+    const icon = resolver.resolveIcon(
+      expanded ? "file-tree-icon-folder-open" : "file-tree-icon-folder",
+      pathValue,
+    );
+    return icon.remappedFrom ? icon.name : null;
+  }
+  const icon = resolver.resolveIcon("file-tree-icon-file", pathValue);
+  const fallback = theme[appearance].file;
+  if (mimeType && icon.name === fallback) {
+    return resolver.resolveIcon("file-tree-icon-file", fileIconPathForMimeType(pathValue, mimeType))
+      .name;
+  }
+  return icon.remappedFrom ? icon.name : null;
 }
 
 const DOCUMENT_CHIP_KINDS: Readonly<Record<string, ContextChipAccentKind>> = {

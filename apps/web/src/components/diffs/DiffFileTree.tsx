@@ -3,6 +3,7 @@ import { FileTree, useFileTree } from "@pierre/trees/react";
 import { ChevronsDownUpIcon, ChevronsUpDownIcon } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
+import { useFileIconTheme } from "~/fileIconThemes";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
@@ -49,7 +50,8 @@ export function DiffFileTree({
 }: DiffFileTreeProps) {
   const { resolvedTheme } = useTheme();
   const paths = entries.map((entry) => entry.path);
-  const presented = diffFileTreeModel(paths);
+  const iconTheme = useFileIconTheme();
+  const presented = diffFileTreeModel(paths, iconTheme, resolvedTheme);
   const modelPaths = presented.paths;
   const icons = presented.icons;
   const directoryPaths = collectDirectoryPaths(modelPaths);

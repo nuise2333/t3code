@@ -11,6 +11,7 @@ import {
   FolderClosedIcon,
   FolderIcon,
 } from "lucide-react";
+import { useFileIconTheme } from "~/fileIconThemes";
 import { cn } from "~/lib/utils";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { PierreEntryIcon } from "./PierreEntryIcon";
@@ -163,6 +164,7 @@ const ChangedFilesTree = memo(function ChangedFilesTree(props: {
 }) {
   const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, runId, onFileContextMenu } =
     props;
+  const iconTheme = useFileIconTheme();
   // Place state before tree derivation to preserve its compiler cache.
   const [directoryExpansionState, setDirectoryExpansionState] = useState<{
     key: string | null;
@@ -217,7 +219,15 @@ const ChangedFilesTree = memo(function ChangedFilesTree(props: {
               isExpanded && "rotate-90",
             )}
           />
-          {isExpanded ? (
+          {iconTheme ? (
+            <PierreEntryIcon
+              pathValue={node.path}
+              kind="directory"
+              expanded={isExpanded}
+              theme={resolvedTheme}
+              className="size-3.5"
+            />
+          ) : isExpanded ? (
             <FolderIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
           ) : (
             <FolderClosedIcon className="size-3.5 shrink-0 text-muted-foreground/75" />

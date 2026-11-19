@@ -356,6 +356,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "file-icon-theme",
+    title: "File icons",
+    to: "/settings/appearance",
+    searchTerms: ["icon theme file folder material vscode-icons open vsx explorer tree"],
+  },
+  {
     id: "effort-display",
     title: "Effort display",
     to: "/settings/appearance",

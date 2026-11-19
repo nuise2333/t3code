@@ -46,7 +46,8 @@ import { useTheme } from "~/hooks/useTheme";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 import { useFileContextMenu, type FileContextMenuAction } from "~/fileContextMenu";
 import { readLocalApi } from "~/localApi";
-import { T3_PIERRE_ICONS } from "~/pierre-icons";
+import { useFileIconTheme } from "~/fileIconThemes";
+import { fileTreeIconsFor } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
 import { FileGridView, type GridThumbnails, treePathOf } from "./FileGridView";
@@ -284,6 +285,7 @@ export default function FileBrowserPanel({
   const panelPath = (relativePath: string) =>
     hostFolder ? joinHostPath(cwd, relativePath) : relativePath;
   const { resolvedTheme } = useTheme();
+  const treeIcons = fileTreeIconsFor(useFileIconTheme(), resolvedTheme);
   const composerRef = useComposerHandleContext();
   const fileContextMenu = useFileContextMenu(environmentId);
   const canWrite = useCanWriteFiles(environmentId);
@@ -356,7 +358,7 @@ export default function FileBrowserPanel({
     fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: true,
     initialExpansion: "closed",
-    icons: T3_PIERRE_ICONS,
+    icons: treeIcons,
     onSelectionChange: (selectedPaths) => {
       // Update drag selection even for reveals so subsequent drags cannot use stale paths.
       dragMention.handleSelectionChange(selectedPaths);
@@ -388,6 +390,10 @@ export default function FileBrowserPanel({
     onSearchChange: (value) => setQuery(value ?? ""),
     unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pushes the icon set into the imperative Pierre file tree model
+  useEffect(() => {
+    model.setIcons(treeIcons);
+  }, [treeIcons, model]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- makes the Pierre tree model re-render row decorations when loading directories change
   useEffect(() => {
     if (loadingDirectoriesRef.current === loadingDirectories) return;

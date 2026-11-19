@@ -1,0 +1,63 @@
+diff --git a/dist/iconConfig.d.ts b/dist/iconConfig.d.ts
+index 5d35ff025bfe785597a0c456caee392321383dba..3681b0f9ba27363981cefd42dbd2fe55943194b9 100644
+--- a/dist/iconConfig.d.ts
++++ b/dist/iconConfig.d.ts
+@@ -21,6 +21,10 @@ interface FileTreeIconConfig {
+   byFileExtension?: Record<string, RemappedIcon>;
+   /** Remap file icons by basename substring (e.g. "dockerfile", "license"). */
+   byFileNameContains?: Record<string, RemappedIcon>;
++  /** Folder icons by exact basename; folder rows fall back to `remap["file-tree-icon-folder"]`, then the chevron. */
++  byFolderName?: Record<string, RemappedIcon>;
++  /** Expanded folder icons by exact basename; falls back to `remap["file-tree-icon-folder-open"]`, then the chevron. */
++  byFolderNameExpanded?: Record<string, RemappedIcon>;
+ }
+ type FileTreeIcons = FileTreeBuiltInIconSet | FileTreeIconConfig;
+ interface NormalizedFileTreeIconConfig extends FileTreeIconConfig {
+diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
+index 7d3b818c43a7621ab9170da32b180232ed3c9472..47b3799a5d58ae4616652dfcd0c59c2c1a33d971 100644
+--- a/dist/render/FileTreeView.js
++++ b/dist/render/FileTreeView.js
+@@ -372,7 +372,7 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+ 		}) : null,
+ 		/* @__PURE__ */ jsx("div", {
+ 			"data-item-section": "icon",
+-			children: row.kind === "directory" ? /* @__PURE__ */ jsx(Icon, { ...resolveIcon("file-tree-icon-chevron") }) : /* @__PURE__ */ jsx(Icon, { ...resolveIcon("file-tree-icon-file", targetPath) })
++			children: row.kind === "directory" ? /* @__PURE__ */ jsx(Icon, { ...resolveIcon(row.isExpanded ? "file-tree-icon-folder-open" : "file-tree-icon-folder", targetPath) }) : /* @__PURE__ */ jsx(Icon, { ...resolveIcon("file-tree-icon-file", targetPath) })
+ 		}),
+ 		/* @__PURE__ */ jsx("div", {
+ 			"data-item-section": "content",
+diff --git a/dist/render/iconResolver.js b/dist/render/iconResolver.js
+index 7a83efc55fb746b79cff6aed0585ebd41b35ae0d..2c2c21e7e3a1f68e004a97a1886c1db4454027af 100644
+--- a/dist/render/iconResolver.js
++++ b/dist/render/iconResolver.js
+@@ -29,7 +29,19 @@ function createFileTreeIconResolver(icons) {
+ 	const iconByFileExtension = /* @__PURE__ */ new Map();
+ 	for (const [extension, icon] of Object.entries(normalizedIcons.byFileExtension ?? {})) iconByFileExtension.set(normalizeIconRuleKey(extension), icon);
+ 	const iconByFileNameContains = Object.entries(normalizedIcons.byFileNameContains ?? {}).map(([needle, icon]) => [needle.toLowerCase(), icon]);
++	const iconByFolderName = /* @__PURE__ */ new Map();
++	for (const [folderName, icon] of Object.entries(normalizedIcons.byFolderName ?? {})) iconByFolderName.set(folderName.toLowerCase(), icon);
++	const iconByFolderNameExpanded = /* @__PURE__ */ new Map();
++	for (const [folderName, icon] of Object.entries(normalizedIcons.byFolderNameExpanded ?? {})) iconByFolderNameExpanded.set(folderName.toLowerCase(), icon);
+ 	const resolveIcon = (name, filePath) => {
++		if (name === "file-tree-icon-folder" || name === "file-tree-icon-folder-open") {
++			const folderName = filePath == null ? "" : getBaseFileName(filePath.replace(/\/+$/, "")).toLowerCase();
++			const folderEntry = (name === "file-tree-icon-folder-open" ? iconByFolderNameExpanded : iconByFolderName).get(folderName);
++			if (folderEntry != null) return remapEntryToIcon(folderEntry, name);
++			const remappedFolder = iconRemap?.[name];
++			if (remappedFolder != null) return remapEntryToIcon(remappedFolder, name);
++			return resolveIcon("file-tree-icon-chevron");
++		}
+ 		if (name === "file-tree-icon-file" && filePath != null) {
+ 			const fileName = getBaseFileName(filePath);
+ 			const lowerFileName = fileName.toLowerCase();
+diff --git a/dist/sprite.d.ts b/dist/sprite.d.ts
+index f6b3e35e37c01d5447af34937e0f4a765e60db54..d0d516c9b44c4d2d350a463f9354b3963df29af4 100644
+--- a/dist/sprite.d.ts
++++ b/dist/sprite.d.ts
+@@ -1,5 +1,5 @@
+ //#region src/sprite.d.ts
+-type SVGSpriteNames = 'file-tree-icon-chevron' | 'file-tree-icon-file' | 'file-tree-icon-dot' | 'file-tree-icon-lock' | 'file-tree-icon-ellipsis';
++type SVGSpriteNames = 'file-tree-icon-chevron' | 'file-tree-icon-file' | 'file-tree-icon-dot' | 'file-tree-icon-lock' | 'file-tree-icon-ellipsis' | 'file-tree-icon-folder' | 'file-tree-icon-folder-open';
+ //#endregion
+ export { SVGSpriteNames };
+ //# sourceMappingURL=sprite.d.ts.map

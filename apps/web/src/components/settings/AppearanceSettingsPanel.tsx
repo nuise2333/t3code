@@ -33,6 +33,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { AdvancedSettings } from "./AdvancedSettings";
+import { FileIconThemeRow } from "./FileIconThemeSettings";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { ReaderSection } from "./ReaderSettings";
 import { TypographySection } from "./TypographySettings";
@@ -290,6 +291,7 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+        <FileIconThemeRow />
         <ThreadDetailsItemsRow />
         <SettingsRow
           {...searchableSetting("effort-display")}

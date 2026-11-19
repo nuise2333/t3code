@@ -117,6 +117,7 @@ overrides:
   "@ff-labs/fff-node": 0.11.0
   "@legendapp/list": 3.7.2
   "@pierre/diffs": 1.7.0-beta.4
+  "@pierre/trees": 1.0.0-beta.6
   "@react-native-ai/apple": 0.12.0
   "@react-native-menu/menu": 2.0.0
   "@react-navigation/native-stack": 7.21.0
@@ -251,6 +252,8 @@ patchedDependencies:
   # Exports the dependency-light subpaths mobile and the web diff parser import, and re-measures
   # editor carets when the code font changes.
   "@pierre/diffs@1.7.0-beta.4": patches/@pierre__diffs@1.7.0-beta.4.patch
+  # Folder rows resolve themed folder icons by name and expansion, falling back to the chevron.
+  "@pierre/trees@1.0.0-beta.6": patches/@pierre__trees@1.0.0-beta.6.patch
   "@react-native-ai/apple@0.12.0": patches/@react-native-ai__apple@0.12.0.patch
   "@react-native-menu/menu@2.0.0": patches/@react-native-menu__menu@2.0.0.patch
   "@react-navigation/native-stack@7.21.0": patches/@react-navigation%2Fnative-stack@7.21.0.patch

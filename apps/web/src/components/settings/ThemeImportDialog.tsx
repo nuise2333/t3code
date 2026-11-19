@@ -22,7 +22,7 @@ import {
 import { Alert } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Dialog, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
-import { ThemeSearchSection } from "./ThemeSearchSection";
+import { COLOR_THEME_SEARCH, ThemeSearchSection } from "./ThemeSearchSection";
 
 /**
  * The guard runs on the size before the bytes are ever read: a large file
@@ -413,6 +413,7 @@ function ThemeImportBody({
   return (
     <DialogPanel>
       <ThemeSearchSection
+        kind={COLOR_THEME_SEARCH}
         onInstalled={(themes, context) => {
           onImportedMany(themes, context);
           onClose();
