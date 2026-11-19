@@ -21,7 +21,12 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
+import {
+  ModelPickerContent,
+  resolveModelPickerSelectedModel,
+  type PickerTeams,
+} from "./ModelPickerContent";
+import type { ModelPickerTeamRow } from "./modelPickerKeys";
 import type { PickerRoutingGroup } from "@t3tools/client-runtime/routing";
 import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
@@ -132,6 +137,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   routingGroups?: ReadonlyArray<PickerRoutingGroup>;
   activeRoutingGroupId?: string | null;
   onRoutingGroupSelect?: (groupId: string) => void;
+  /** The thread's agent team, as a tab under Favorites; picking a row closes the picker. */
+  teams?: PickerTeams;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
@@ -322,6 +329,18 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               if (props.disabled) return;
               props.onRoutingGroupSelect?.(groupId);
               setIsMenuOpen(false);
+            },
+          }
+        : {})}
+      {...(props.teams
+        ? {
+            teams: {
+              ...props.teams,
+              onSelect: (row: ModelPickerTeamRow) => {
+                if (props.disabled) return;
+                setIsMenuOpen(false);
+                props.teams?.onSelect(row);
+              },
             },
           }
         : {})}

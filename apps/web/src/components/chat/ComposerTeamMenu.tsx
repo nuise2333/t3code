@@ -80,6 +80,9 @@ export const ComposerTeamMenu = memo(function ComposerTeamMenu(
     readonly onSelectAuto: (kind: AutoTeamKind) => void;
     readonly onSelectTeam: (teamId: string) => void;
     readonly onSelectNone: () => void;
+    /** Controls the setup from outside, such as the model picker's Team tab. */
+    readonly setupOpen?: boolean;
+    readonly onSetupOpenChange?: (open: boolean) => void;
   } & Omit<
     ComponentProps<typeof ComposerTeamSetup>,
     "anchor" | "onClose" | "active" | "disabledReason"
@@ -88,7 +91,9 @@ export const ComposerTeamMenu = memo(function ComposerTeamMenu(
   const size = props.size ?? "sm";
   const floatingProps = useComposerMenuProps();
   const [open, setOpen] = useComposerMenuState(props.hidden);
-  const [setupOpen, setSetupOpen] = useState(false);
+  const [uncontrolledSetupOpen, setUncontrolledSetupOpen] = useState(false);
+  const setupOpen = props.setupOpen ?? uncontrolledSetupOpen;
+  const setSetupOpen = props.onSetupOpenChange ?? setUncontrolledSetupOpen;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { active } = props;
   const blocked = Boolean(props.disabledReason);

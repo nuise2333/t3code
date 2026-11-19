@@ -1,6 +1,8 @@
 import { useLegendListRef } from "~/hooks/useLegendListRef";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
+  AUTO_TEAMS,
+  type AutoTeamKind,
   type ProviderInstanceId,
   type EnvironmentId,
   type ProviderDriverKind,
@@ -22,7 +24,17 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { ListOrderedIcon, CheckIcon, UsersIcon } from "lucide-react";
+import {
+  BotIcon,
+  CheckIcon,
+  CrownIcon,
+  ListOrderedIcon,
+  ScaleIcon,
+  SettingsIcon,
+  TagIcon,
+  UsersIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
@@ -31,9 +43,12 @@ import {
   modelPickerLegacySectionKey,
   modelPickerModelKey,
   modelPickerRoutingGroupKey,
+  modelPickerTeamKey,
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
   parseModelPickerRoutingGroupKey,
+  parseModelPickerTeamKey,
+  type ModelPickerTeamRow,
 } from "./modelPickerKeys";
 import type { PickerRoutingGroup } from "@t3tools/client-runtime/routing";
 import type { ModelPickerTab } from "./ProviderModelPicker.logic";
@@ -148,10 +163,12 @@ function adjacentModelPickerProvider(input: {
   direction: 1 | -1;
   disabledInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
   selectableUnavailableInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
+  showTeams: boolean;
   showRoutingGroups: boolean;
 }) {
   const providers: Array<ModelPickerTab> = [
     "favorites",
+    ...(input.showTeams ? (["team"] as const) : []),
     ...(input.showRoutingGroups ? (["groups"] as const) : []),
     ...input.entries
       .filter(
@@ -331,6 +348,75 @@ function WindowKeyDownListener({ onKeyDown }: { onKeyDown: (event: KeyboardEvent
   return null;
 }
 
+/** The Team tab: the thread's agent team, chosen like a model. */
+export interface PickerTeams {
+  /** The active team's id, or null for no team. */
+  readonly activeId: string | null;
+  readonly saved: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly summary: string;
+  }>;
+  /** Set when no team can be picked, such as with several models selected. */
+  readonly disabledReason: string | null;
+  readonly onSelect: (row: ModelPickerTeamRow) => void;
+}
+
+const AUTO_TEAM_ICONS: Record<AutoTeamKind, LucideIcon> = {
+  cheap: TagIcon,
+  balanced: ScaleIcon,
+  best: CrownIcon,
+};
+
+interface TeamTabRow {
+  readonly key: string;
+  readonly row: ModelPickerTeamRow;
+  readonly icon: LucideIcon;
+  readonly label: string;
+  readonly detail: string;
+  readonly checked: boolean;
+  readonly disabled: boolean;
+}
+
+function teamTabRows(teams: PickerTeams): ReadonlyArray<TeamTabRow> {
+  const blocked = teams.disabledReason !== null;
+  const rows: Array<Omit<TeamTabRow, "key">> = [
+    {
+      row: { kind: "none" },
+      icon: BotIcon,
+      label: "No team",
+      detail: "A single agent",
+      checked: teams.activeId === null,
+      disabled: false,
+    },
+    ...AUTO_TEAMS.map((team) => ({
+      row: { kind: "auto", auto: team.kind } as const,
+      icon: AUTO_TEAM_ICONS[team.kind],
+      label: team.name,
+      detail: team.description,
+      checked: teams.activeId === team.id,
+      disabled: blocked,
+    })),
+    ...teams.saved.map((team) => ({
+      row: { kind: "saved", id: team.id } as const,
+      icon: UsersIcon,
+      label: team.name,
+      detail: team.summary,
+      checked: teams.activeId === team.id,
+      disabled: blocked,
+    })),
+    {
+      row: { kind: "setup" },
+      icon: SettingsIcon,
+      label: "Architect & workers…",
+      detail: blocked ? (teams.disabledReason ?? "") : "Build and edit teams",
+      checked: false,
+      disabled: blocked,
+    },
+  ];
+  return rows.map((row) => ({ ...row, key: modelPickerTeamKey(row.row) }));
+}
+
 export const ModelPickerContent = memo(function ModelPickerContent(props: {
   environmentId: EnvironmentId | null;
   /** Keeps the open provider tab's catalog fresh for this directory. */
@@ -361,6 +447,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   routingGroups?: ReadonlyArray<PickerRoutingGroup>;
   activeRoutingGroupId?: string | null;
   onRoutingGroupSelect?: (groupId: string) => void;
+  /** The thread's agent team, as a tab under Favorites. */
+  teams?: PickerTeams;
 }) {
   const {
     searchInputRef,
@@ -403,6 +491,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return modelPickerModelKey(selection.instanceId, model?.slug ?? selection.model);
   });
   const routingGroups = props.onRoutingGroupSelect ? (props.routingGroups ?? []) : [];
+  const teamRows = props.teams ? teamTabRows(props.teams) : [];
+  const showTeams = teamRows.length > 0;
   const showRoutingGroups = routingGroups.length > 0;
   const routingGroupsLabel = !routingGroups.some((group) => group.team)
     ? "Routing groups"
@@ -471,7 +561,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     environmentId: props.environmentId,
     gitCwd: props.workspaceCwd ?? null,
     instanceId:
-      selectedInstanceId === "favorites" || selectedInstanceId === "groups"
+      selectedInstanceId === "favorites" ||
+      selectedInstanceId === "team" ||
+      selectedInstanceId === "groups"
         ? undefined
         : selectedInstanceId,
   });
@@ -643,6 +735,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     for (const instanceId of tabsWithLegacyRow) addRow(instanceId);
     for (const _group of routingGroups) addRow("groups");
+    for (const _row of teamRows) addRow("team");
     return Math.max(0, ...unitsByTab.values());
   })();
   const lockedDisabledInstanceIds = (() => {
@@ -713,7 +806,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   })();
 
   const legacySection = (() => {
-    if (isSearching || selectedInstanceId === "favorites" || selectedInstanceId === "groups") {
+    if (
+      isSearching ||
+      selectedInstanceId === "favorites" ||
+      selectedInstanceId === "team" ||
+      selectedInstanceId === "groups"
+    ) {
       return null;
     }
     const currentModels: ModelPickerItem[] = [];
@@ -745,7 +843,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   })();
 
   const selectedEntry =
-    selectedInstanceId === "favorites" || selectedInstanceId === "groups"
+    selectedInstanceId === "favorites" ||
+    selectedInstanceId === "team" ||
+    selectedInstanceId === "groups"
       ? undefined
       : entryByInstanceId.get(selectedInstanceId);
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -754,6 +854,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     : selectedInstanceId === "groups"
       ? routingGroups
       : [];
+  const visibleTeamRows = !isSearching && selectedInstanceId === "team" ? teamRows : [];
+  const teamRowByKey = new Map(visibleTeamRows.map((row) => [row.key, row] as const));
+  // A team row picks the team; the picker leaves the choice to `teams.onSelect`.
+  const selectTeamKey = (key: string): boolean => {
+    const row = teamRowByKey.get(key);
+    if (!row) return parseModelPickerTeamKey(key) !== null;
+    if (!row.disabled) props.teams?.onSelect(row.row);
+    return true;
+  };
   const routingGroupByKey = new Map(
     visibleRoutingGroups.map((group) => [modelPickerRoutingGroupKey(group.id), group] as const),
   );
@@ -785,6 +894,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     .slice(0, MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.length)
     .map((model) => modelPickerModelKey(model.instanceId, model.slug));
   const allItemKeys = ((): string[] => [
+    ...teamRows.map((row) => row.key),
     ...routingGroups.map((group) => modelPickerRoutingGroupKey(group.id)),
     ...flatModels.map((model) => modelPickerModelKey(model.instanceId, model.slug)),
     ...new Set(
@@ -797,7 +907,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     const modelKeys = visibleModels.map((model) =>
       modelPickerModelKey(model.instanceId, model.slug),
     );
-    const groupKeys = [...routingGroupByKey.keys()];
+    const groupKeys = [...teamRowByKey.keys(), ...routingGroupByKey.keys()];
     // The toggle trails the list, so expanding it reveals older models above it.
     return legacySection
       ? [...groupKeys, ...modelKeys, legacySection.key]
@@ -852,6 +962,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         direction: command === "modelPicker.nextProvider" ? 1 : -1,
         disabledInstanceIds: lockedDisabledInstanceIds,
         selectableUnavailableInstanceIds,
+        showTeams,
         showRoutingGroups,
       });
       setSearchQuery("");
@@ -859,9 +970,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       announce(
         next === "favorites"
           ? "Favorites"
-          : next === "groups"
-            ? routingGroupsLabel
-            : (entryByInstanceId.get(next)?.displayName ?? next),
+          : next === "team"
+            ? "Agent team"
+            : next === "groups"
+              ? routingGroupsLabel
+              : (entryByInstanceId.get(next)?.displayName ?? next),
         "model-picker",
       );
       return;
@@ -917,6 +1030,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onFocusSearch={focusSearchInput}
             instanceEntries={sidebarInstanceEntries}
             showFavorites
+            showTeams={showTeams}
             showRoutingGroups={showRoutingGroups}
             routingGroupsLabel={routingGroupsLabel}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
@@ -959,6 +1073,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             if (typeof modelKey !== "string") {
               return;
             }
+            if (selectTeamKey(modelKey)) return;
             const routingGroupId = parseModelPickerRoutingGroupKey(modelKey);
             if (routingGroupId !== null) {
               props.onRoutingGroupSelect?.(routingGroupId);
@@ -1054,6 +1169,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   (e as typeof e & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
                   e.preventDefault();
                   e.stopPropagation();
+                  if (selectTeamKey(highlightedModelKeyRef.current)) return;
                   const routingGroupId = parseModelPickerRoutingGroupKey(
                     highlightedModelKeyRef.current,
                   );
@@ -1085,6 +1201,40 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               itemKeys={filteredItemKeys}
               extraData={modelListExtraData}
               renderItem={({ item: modelKey, index }) => {
+                const teamRow = teamRowByKey.get(modelKey);
+                if (teamRow) {
+                  const TeamIcon = teamRow.icon;
+                  return (
+                    <ComboboxItem
+                      hideIndicator
+                      selectedFill={false}
+                      index={index}
+                      value={modelKey}
+                      disabled={teamRow.disabled}
+                      aria-checked={teamRow.row.kind === "setup" ? undefined : teamRow.checked}
+                      className="group relative w-full !min-w-0 max-w-full cursor-pointer"
+                    >
+                      <TeamIcon
+                        className={cn(
+                          "size-4 shrink-0",
+                          teamRow.row.kind === "setup" ? "text-muted-foreground" : "text-primary",
+                        )}
+                        aria-hidden="true"
+                      />
+                      <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <span className="min-w-0 shrink-0 truncate text-sm leading-snug">
+                          {teamRow.label}
+                        </span>
+                        {teamRow.checked ? (
+                          <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                        ) : null}
+                        <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">
+                          {teamRow.detail}
+                        </span>
+                      </div>
+                    </ComboboxItem>
+                  );
+                }
                 const routingGroup = routingGroupByKey.get(modelKey);
                 if (routingGroup) {
                   return (

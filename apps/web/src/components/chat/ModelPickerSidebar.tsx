@@ -1,7 +1,7 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef, useState } from "react";
-import { ListOrderedIcon, StarIcon } from "lucide-react";
+import { ListOrderedIcon, StarIcon, UsersIcon } from "lucide-react";
 import type { ModelPickerTab } from "./ProviderModelPicker.logic";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -36,6 +36,8 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   onFocusSearch: () => void;
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   showFavorites?: boolean;
+  /** The Agent team tab, under Favorites. */
+  showTeams?: boolean;
   showRoutingGroups?: boolean;
   /** "Routing groups", "Agent teams", or both, by what the tab lists. */
   routingGroupsLabel?: string;
@@ -69,6 +71,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
     props.instanceEntries,
     props.selectedInstanceId,
     showFavorites,
+    props.showTeams,
     props.showRoutingGroups,
   ]);
 
@@ -124,6 +127,32 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   </TooltipPopup>
                 </Tooltip>
               </div>
+              {props.showTeams ? (
+                <div className="relative w-full" data-model-picker-provider="team">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Toolbar.Button
+                          className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
+                          onClick={() => handleSelect("team")}
+                          type="button"
+                          aria-label="Agent team"
+                          aria-pressed={props.selectedInstanceId === "team"}
+                        >
+                          <UsersIcon className="size-5 shrink-0" aria-hidden />
+                        </Toolbar.Button>
+                      }
+                    />
+                    <TooltipPopup
+                      side={PICKER_TOOLTIP_SIDE}
+                      sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
+                      align="center"
+                    >
+                      Agent team
+                    </TooltipPopup>
+                  </Tooltip>
+                </div>
+              ) : null}
               {props.showRoutingGroups ? (
                 <div className="relative w-full" data-model-picker-provider="groups">
                   <Tooltip>

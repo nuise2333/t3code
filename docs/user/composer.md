@@ -221,8 +221,9 @@ the team menu:
 - **Architect & workers…** opens the team setup: pick the architect (the lead) and its workers, add lead
   guidance for this team, and limit how many tasks run at once. **Save setup**
   keeps it as **Custom setup** and turns it on; **Save as…** keeps it as a named
-  profile you can pick later, and **Use a single agent** turns the team off. You
-  can also pick a team from a new thread's model picker. The lead plans the
+  profile you can pick later, and **Use a single agent** turns the team off. The
+  model picker's **Agent team** tab, right under Favorites, offers the same
+  choices. The lead plans the
   work, delegates each task to a team model as a delegated task, checks the
   results, and answers you. It can delegate only to the team's models.
 
@@ -231,6 +232,10 @@ already running, the thread's own model leads from your next message; choose
 **No team** in the same menu to turn it off. While a thread leads a team, a strip
 above the composer shows the team, its lead and a tally of delegated tasks;
 expand it to see each task's member, status and time, and open a task's thread.
+**Workflow** on the strip opens the run beside the chat: every handover in order
+with what the lead asked for and what came back, and a way to stop a task that
+is still working. **Round 2** marks a task a member got after its earlier one
+ended, such as a fix sent back after a review.
 
 **Lead guidance** under the teams is added to every lead's instructions from its
 next turn, for example "you only lead; never edit files yourself".

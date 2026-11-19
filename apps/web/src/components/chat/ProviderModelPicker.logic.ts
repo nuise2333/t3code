@@ -17,4 +17,4 @@ export function retainedModelWhileProviderLocked(
   return entry.models.find((candidate) => candidate.slug === model) ?? { slug: model, name: model };
 }
 
-export type ModelPickerTab = ProviderInstanceId | "favorites" | "groups";
+export type ModelPickerTab = ProviderInstanceId | "favorites" | "team" | "groups";

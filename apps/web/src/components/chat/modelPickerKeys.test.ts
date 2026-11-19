@@ -5,6 +5,9 @@ import {
   modelPickerModelKey,
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
+  modelPickerTeamKey,
+  parseModelPickerTeamKey,
+  type ModelPickerTeamRow,
 } from "./modelPickerKeys";
 
 describe("model picker item keys", () => {
@@ -27,5 +30,23 @@ describe("model picker item keys", () => {
     const key = modelPickerModelKey(instanceId, slug);
 
     expect(parseModelPickerModelKey(key)).toEqual({ instanceId, slug });
+  });
+
+  it("round-trips Team tab rows and keeps them apart from models", () => {
+    const rows: ReadonlyArray<ModelPickerTeamRow> = [
+      { kind: "none" },
+      { kind: "setup" },
+      { kind: "auto", auto: "balanced" },
+      { kind: "saved", id: "auto:not-an-auto" },
+    ];
+    for (const row of rows) {
+      const key = modelPickerTeamKey(row);
+      expect(parseModelPickerTeamKey(key)).toEqual(row);
+      expect(parseModelPickerModelKey(key)).toBeNull();
+    }
+    expect(parseModelPickerTeamKey("team:auto:pricey")).toBeNull();
+    expect(
+      parseModelPickerTeamKey(modelPickerModelKey(ProviderInstanceId.make("team"), "none")),
+    ).toBeNull();
   });
 });

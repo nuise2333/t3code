@@ -66,6 +66,7 @@ import { threadAgentTeam, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
 import { councilApplies, councilStatus, councilUserMessageTimes } from "@t3tools/shared/council";
 import { councilBannerItem } from "./chat/CouncilStrip";
 import { agentTeamBannerItem } from "./chat/AgentTeamStrip";
+import type { AgentTeamView } from "./chat/AgentTeamWorkflowPanel";
 import { effortRetryBannerItem } from "./chat/ComposerEffortRetry";
 import { useCrossVendorModel } from "./chat/crossVendorModel";
 import { freshSessionBannerItem } from "./chat/ComposerFreshSession";
@@ -87,6 +88,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  NodeId,
   type PreviewAnnotationPayload,
   ProviderInstanceId,
   type ServerProvider,
@@ -2761,30 +2763,60 @@ export default function ChatView(props: ChatViewProps) {
           modelSelection: serverProjection.thread.modelSelection,
           groups: serverConfig?.settings.routingGroups ?? [],
         });
-  const agentTeamItems: ComposerBannerStackItem[] = (() => {
-    if (serverProjection === null || (autoTeam === undefined && savedTeam === null)) return [];
+  const agentTeamView: AgentTeamView | null = (() => {
+    if (serverProjection === null || (autoTeam === undefined && savedTeam === null)) return null;
     const nowMs = Date.parse(nowMinute);
     const providers = providerStatuses.map((provider) => routingProviderSource(provider, nowMs));
-    const lead = routingMemberLabel(serverProjection.thread.modelSelection, providers);
-    return [
-      agentTeamBannerItem({
-        name: autoTeam?.name ?? savedTeam?.name ?? "",
-        summary:
-          autoTeam !== undefined
-            ? `${lead} leads; T3 picks each worker (${autoTeam.description.toLowerCase()})`
-            : agentTeamSummary(savedTeam!, serverProjection.thread.modelSelection, providers),
-        progress: agentTeamProgress({
-          threadId: serverProjection.thread.id,
-          team: savedTeam,
-          subagents: serverProjection.subagents,
-          providers,
-        }),
-        expanded: agentTeamTasksExpanded,
-        onToggle: () => setAgentTeamTasksExpanded((expanded) => !expanded),
-        onOpenThread: onOpenRelatedThreadStable,
+    const lead = serverProjection.thread.modelSelection;
+    const leadLabel = routingMemberLabel(lead, providers);
+    return {
+      name: autoTeam?.name ?? savedTeam?.name ?? "",
+      summary:
+        autoTeam !== undefined
+          ? `${leadLabel} leads; T3 picks each worker (${autoTeam.description.toLowerCase()})`
+          : agentTeamSummary(savedTeam!, lead, providers),
+      leadLabel,
+      lead,
+      progress: agentTeamProgress({
+        threadId: serverProjection.thread.id,
+        team: savedTeam,
+        subagents: serverProjection.subagents,
+        providers,
+        // A run that waits is held on a request or its tasks, so the lead is not working then.
+        leadRunning: serverProjection.runs.some((run) =>
+          ["preparing", "starting", "running"].includes(run.status),
+        ),
       }),
-    ];
+    };
   })();
+  const openAgentTeamWorkflow =
+    activeThreadRef === null || embedded
+      ? undefined
+      : () => useRightPanelStore.getState().open(activeThreadRef, "agent-team");
+  const stopAgentTeamTask = async (taskId: string) => {
+    if (serverProjection === null) return;
+    const result = await interruptThreadTurn({
+      environmentId,
+      input: { threadId: serverProjection.thread.id, subagentId: NodeId.make(taskId) },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      toastManager.add({ type: "error", title: "Could not stop task" });
+    }
+  };
+  const agentTeamItems: ComposerBannerStackItem[] =
+    agentTeamView === null
+      ? []
+      : [
+          agentTeamBannerItem({
+            name: agentTeamView.name,
+            summary: agentTeamView.summary,
+            progress: agentTeamView.progress,
+            expanded: agentTeamTasksExpanded,
+            onToggle: () => setAgentTeamTasksExpanded((expanded) => !expanded),
+            onOpenThread: onOpenRelatedThreadStable,
+            onOpenWorkflow: openAgentTeamWorkflow,
+          }),
+        ];
   const councilItems: ComposerBannerStackItem[] = (() => {
     const thread = serverProjection?.thread;
     const council = thread?.council;
@@ -3468,6 +3500,12 @@ export default function ChatView(props: ChatViewProps) {
       onSendAnnotation={sendPreviewAnnotationStable}
       onCloseSurface={closeRightPanelSurface}
       sideChatParentPanel={sideChatParentPanel}
+      agentTeam={{
+        team: agentTeamView,
+        providers: providerStatuses,
+        onOpenThread: onOpenRelatedThreadStable,
+        onStopTask: stopAgentTeamTask,
+      }}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         keybindings,
