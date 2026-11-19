@@ -30,7 +30,6 @@ import {
   CrownIcon,
   ListOrderedIcon,
   ScaleIcon,
-  SettingsIcon,
   TagIcon,
   UsersIcon,
   type LucideIcon,
@@ -360,6 +359,8 @@ export interface PickerTeams {
   /** Set when no team can be picked, such as with several models selected. */
   readonly disabledReason: string | null;
   readonly onSelect: (row: ModelPickerTeamRow) => void;
+  /** Architect & workers, shown in place of the effort column while the Team tab is open. */
+  readonly setupColumn?: ReactNode;
 }
 
 const AUTO_TEAM_ICONS: Record<AutoTeamKind, LucideIcon> = {
@@ -405,14 +406,6 @@ function teamTabRows(teams: PickerTeams): ReadonlyArray<TeamTabRow> {
       checked: teams.activeId === team.id,
       disabled: blocked,
     })),
-    {
-      row: { kind: "setup" },
-      icon: SettingsIcon,
-      label: "Architect & workers…",
-      detail: blocked ? (teams.disabledReason ?? "") : "Build and edit teams",
-      checked: false,
-      disabled: blocked,
-    },
   ];
   return rows.map((row) => ({ ...row, key: modelPickerTeamKey(row.row) }));
 }
@@ -449,6 +442,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onRoutingGroupSelect?: (groupId: string) => void;
   /** The thread's agent team, as a tab under Favorites. */
   teams?: PickerTeams;
+  /** Follows the open tab, so the popup can swap its effort column for the team setup. */
+  onTabChange?: (tab: ModelPickerTab) => void;
 }) {
   const {
     searchInputRef,
@@ -532,6 +527,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     ) {
       return "groups";
     }
+    // A thread working as a team opens on its team and setup.
+    if (showTeams && props.teams?.activeId != null) return "team";
     if (
       props.lockedProvider !== null ||
       activeInstanceHasSelectableUnavailableModel ||
@@ -557,6 +554,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     });
     return hasPickableFavorite ? "favorites" : props.activeInstanceId;
   });
+  const onTabChange = props.onTabChange;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reports the open tab to the popup, which owns the column beside this list
+  useLayoutEffect(() => {
+    onTabChange?.(selectedInstanceId);
+  }, [onTabChange, selectedInstanceId]);
   const { scanning: workspaceModelsScanning } = useProviderWorkspaceSnapshotRefresh({
     environmentId: props.environmentId,
     gitCwd: props.workspaceCwd ?? null,
@@ -1211,16 +1213,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       index={index}
                       value={modelKey}
                       disabled={teamRow.disabled}
-                      aria-checked={teamRow.row.kind === "setup" ? undefined : teamRow.checked}
+                      aria-checked={teamRow.checked}
                       className="group relative w-full !min-w-0 max-w-full cursor-pointer"
                     >
-                      <TeamIcon
-                        className={cn(
-                          "size-4 shrink-0",
-                          teamRow.row.kind === "setup" ? "text-muted-foreground" : "text-primary",
-                        )}
-                        aria-hidden="true"
-                      />
+                      <TeamIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
                       <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
                         <span className="min-w-0 shrink-0 truncate text-sm leading-snug">
                           {teamRow.label}

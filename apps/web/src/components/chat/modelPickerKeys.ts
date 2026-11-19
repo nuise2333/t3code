@@ -60,18 +60,16 @@ export function parseModelPickerRoutingGroupKey(key: string): string | null {
 
 const TEAM_KEY_PREFIX = "team:";
 
-/** A row of the Team tab: no team, an automatic team, a saved team, or the setup. */
+/** A row of the Team tab: no team, an automatic team or a saved team. */
 export type ModelPickerTeamRow =
   | { readonly kind: "none" }
   | { readonly kind: "auto"; readonly auto: AutoTeamKind }
-  | { readonly kind: "saved"; readonly id: string }
-  | { readonly kind: "setup" };
+  | { readonly kind: "saved"; readonly id: string };
 
 export function modelPickerTeamKey(row: ModelPickerTeamRow): string {
   switch (row.kind) {
     case "none":
-    case "setup":
-      return `${TEAM_KEY_PREFIX}${row.kind}`;
+      return `${TEAM_KEY_PREFIX}none`;
     case "auto":
       return `${TEAM_KEY_PREFIX}auto:${row.auto}`;
     case "saved":
@@ -82,7 +80,7 @@ export function modelPickerTeamKey(row: ModelPickerTeamRow): string {
 export function parseModelPickerTeamKey(key: string): ModelPickerTeamRow | null {
   if (!key.startsWith(TEAM_KEY_PREFIX)) return null;
   const rest = key.slice(TEAM_KEY_PREFIX.length);
-  if (rest === "none" || rest === "setup") return { kind: rest };
+  if (rest === "none") return { kind: "none" };
   if (rest.startsWith("saved:")) return { kind: "saved", id: rest.slice("saved:".length) };
   if (rest.startsWith("auto:")) {
     const auto = AUTO_TEAMS.find((team) => team.kind === rest.slice("auto:".length))?.kind;

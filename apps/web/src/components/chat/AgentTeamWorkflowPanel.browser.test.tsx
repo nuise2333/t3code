@@ -61,6 +61,10 @@ it("walks a team's handovers by keyboard and opens or stops a member's task", as
           summary: "Opus leads GPT-6",
           leadLabel: "Opus",
           lead,
+          workers: [
+            { label: "GPT-6", selection: { instanceId: codex, model: "gpt-6" } },
+            { label: "Fable", selection: { instanceId: codex, model: "fable" } },
+          ],
           progress: agentTeamProgress({
             threadId,
             team: null,
@@ -82,6 +86,12 @@ it("walks a team's handovers by keyboard and opens or stops a member's task", as
       />
     </div>,
   );
+  const agents = screen.getByRole("region", { name: "Agents" });
+  await expect.element(agents.getByText("Lead")).toBeVisible();
+  await expect.element(agents.getByText("Waiting on workers")).toBeVisible();
+  await expect.element(agents.getByText(/Working · Fix the tokenizer/)).toBeVisible();
+  await expect.element(agents.getByText("1/2 done")).toBeVisible();
+  await expect.element(agents.getByText("Idle")).toBeVisible();
   const first = screen.getByRole("button", { name: /Map the parser/ });
   const second = screen.getByRole("button", { name: /Fix the tokenizer/ });
   await expect.element(second.getByText("Round 2")).toBeVisible();

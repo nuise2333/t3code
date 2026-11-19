@@ -6,14 +6,13 @@ import {
   type RoutingGroup,
 } from "@t3tools/contracts";
 import { InfoIcon, MoreHorizontalIcon, PlusIcon, XIcon } from "lucide-react";
-import { memo, useId, useState, type RefObject } from "react";
+import { memo, useId, useState } from "react";
 
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { Popover, PopoverClose, PopoverPopup } from "../ui/popover";
 import {
   Select,
   SelectGroup,
@@ -25,7 +24,6 @@ import {
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { useComposerMenuProps } from "./composerEventScope";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 
 /** The setup kept when no named profile is picked; it is a team like any other. */
@@ -143,9 +141,9 @@ function ModelField(props: {
 }
 
 /**
- * Architect & workers, opened from the Team menu: the architect leads this thread and delegates
- * to the workers; Save setup keeps it as a team and turns it on here. Mounted only while open,
- * so it starts from the team in use each time.
+ * Architect & workers, beside the model picker's Agent team tab: the architect leads this thread
+ * and delegates to the workers; Save setup keeps it as a team and turns it on here. Keyed by the
+ * team in use, so it starts from that team each time.
  */
 export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   readonly teams: ReadonlyArray<RoutingGroup>;
@@ -156,14 +154,13 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   /** The thread's model, which a new setup starts from as its architect. */
   readonly currentSelection: ModelSelection;
   readonly sharedGuidance: string;
-  readonly anchor: RefObject<HTMLElement | null>;
-  readonly onClose: () => void;
+  /** After Apply or Use a single agent, such as closing the picker. */
+  readonly onDone: () => void;
   readonly disabledReason?: string | null;
   readonly onSaveTeams: (teams: ReadonlyArray<RoutingGroup>) => void;
   readonly onApply: (team: RoutingGroup) => void;
   readonly onDisable: () => void;
 }) {
-  const floatingProps = useComposerMenuProps();
   const active = props.active;
   const initialProfile =
     active && props.teams.some((team) => team.id === active.id) ? active.id : CUSTOM_TEAM_ID;
@@ -177,9 +174,6 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   const [naming, setNaming] = useState<string | null>(null);
   const guidanceId = useId();
   const parallelId = useId();
-  const setOpen = (open: boolean) => {
-    if (!open) props.onClose();
-  };
   const profile = props.teams.find((team) => team.id === profileId);
   const named = props.teams.filter((team) => team.id !== CUSTOM_TEAM_ID);
 
@@ -233,7 +227,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
     const team = teamFrom(profile?.id ?? CUSTOM_TEAM_ID, profile?.name ?? CUSTOM_TEAM_NAME);
     props.onSaveTeams(upsert(team));
     props.onApply(team);
-    setOpen(false);
+    props.onDone();
   };
   const saveAs = () => {
     const name = naming?.trim();
@@ -256,303 +250,292 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   };
 
   return (
-    <Popover open onOpenChange={setOpen}>
-      <PopoverPopup
-        side="top"
-        align="start"
-        padding="compact"
-        className="w-96"
+    <>
+      {/* Matches the effort column's header, so one rule runs across the top of the popup. */}
+      <div className="shrink-0 px-3 pt-2.5">
+        <div className="flex h-8.25 -translate-y-px items-center gap-2 border-b border-border/70 pb-1.5 text-sm">
+          <h2 className="text-muted-foreground">Architect &amp; workers</h2>
+          <span className="ms-auto min-w-0 truncate text-muted-foreground text-xs">
+            {active?.name ?? "No team"}
+          </span>
+        </div>
+      </div>
+      <form
+        data-composer-team-setup
         aria-label="Architect & workers"
-        anchor={props.anchor}
-        {...floatingProps}
+        className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain px-3 pt-2.5 pb-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
       >
-        <form
-          data-composer-team-setup
-          className="grid max-h-[min(40rem,75dvh)] gap-4 overflow-y-auto px-1"
-          onSubmit={(event) => {
-            event.preventDefault();
-            save();
-          }}
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="font-medium text-base">Architect &amp; workers</h2>
-            <PopoverClose
-              render={<Button size="icon-xs" variant="ghost" aria-label="Close" type="button" />}
+        <section className="grid gap-1.5">
+          <span className="text-muted-foreground text-xs">Team profile</span>
+          <div className="flex items-center gap-1.5">
+            <Select
+              value={profileId}
+              onValueChange={(next) => {
+                if (typeof next === "string") load(next);
+              }}
             >
-              <XIcon />
-            </PopoverClose>
-          </div>
-
-          <section className="grid gap-1.5">
-            <span className="text-muted-foreground text-xs">Team profile</span>
-            <div className="flex items-center gap-1.5">
-              <Select
-                value={profileId}
-                onValueChange={(next) => {
-                  if (typeof next === "string") load(next);
-                }}
-              >
-                <SelectTrigger aria-label="Team profile" className="min-w-0 flex-1">
-                  <SelectValue>{profile?.name ?? CUSTOM_TEAM_NAME}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value={CUSTOM_TEAM_ID}>{CUSTOM_TEAM_NAME}</SelectItem>
-                  {named.map((team) => (
-                    <SelectItem key={team.id} value={team.id}>
-                      {team.name}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      type="button"
-                      aria-label="Manage team profile"
-                      disabled={!profile || profile.id === CUSTOM_TEAM_ID}
-                    />
-                  }
-                >
-                  <MoreHorizontalIcon />
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  <MenuItem variant="destructive" onClick={remove}>
-                    Delete profile
-                  </MenuItem>
-                </MenuPopup>
-              </Menu>
-            </div>
-            {naming === null ? (
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                className="justify-self-start"
-                onClick={() => setNaming("")}
-              >
-                <PlusIcon />
-                Save as…
-              </Button>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <Input
-                  autoFocus
-                  aria-label="Profile name"
-                  placeholder="Profile name"
-                  maxLength={64}
-                  value={naming}
-                  onChange={(event) => setNaming(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-                      event.preventDefault();
-                      saveAs();
-                    }
-                  }}
-                />
-                <Button type="button" size="sm" variant="ghost" onClick={() => setNaming(null)}>
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={!naming.trim() || problem !== null}
-                  onClick={saveAs}
-                >
-                  Save profile
-                </Button>
-              </div>
-            )}
-          </section>
-
-          <section className="grid gap-2">
-            <div className="flex items-baseline justify-between">
-              <span className="font-medium text-sm">Architect</span>
-              <span className="text-muted-foreground text-xs">Plans &amp; reviews</span>
-            </div>
-            <ModelField
-              label="Architect model"
-              value={setup.architect}
-              entries={props.entries}
-              onChange={(architect) => setSetup((current) => ({ ...current, architect }))}
-            />
-            <div className="flex items-center gap-1.5">
-              <label htmlFor={guidanceId} className="text-muted-foreground text-xs">
-                Lead guidance
-              </label>
-              <InfoMark
-                label="About lead guidance"
-                text="Extra instructions for the architect, sent with the built-in team rules. Leave it empty to use the guidance from Settings → Providers → Agent teams."
-              />
-            </div>
-            <Textarea
-              id={guidanceId}
-              rows={3}
-              maxLength={AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH}
-              placeholder={
-                props.sharedGuidance.trim() ||
-                "Extra instructions for the lead, on top of the built-in team rules."
-              }
-              value={setup.guidance}
-              onChange={(event) =>
-                setSetup((current) => ({ ...current, guidance: event.target.value }))
-              }
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="justify-self-start"
-              disabled={setup.guidance === ""}
-              onClick={() => setSetup((current) => ({ ...current, guidance: "" }))}
-            >
-              Reset to default
-            </Button>
-          </section>
-
-          <section className="grid gap-2">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">Workers</span>
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                aria-label="Add worker"
-                disabled={setup.workers.length + 1 >= MAX_ROUTING_GROUP_MEMBERS}
-                onClick={() =>
-                  setSetup((current) => ({ ...current, workers: [...current.workers, null] }))
+              <SelectTrigger aria-label="Team profile" className="min-w-0 flex-1">
+                <SelectValue>{profile?.name ?? CUSTOM_TEAM_NAME}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value={CUSTOM_TEAM_ID}>{CUSTOM_TEAM_NAME}</SelectItem>
+                {named.map((team) => (
+                  <SelectItem key={team.id} value={team.id}>
+                    {team.name}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    type="button"
+                    aria-label="Manage team profile"
+                    disabled={!profile || profile.id === CUSTOM_TEAM_ID}
+                  />
                 }
               >
-                <PlusIcon />
-                Add
-              </Button>
-            </div>
-            {setup.workers.map((worker, index) => (
-              // oxlint-disable-next-line react/no-array-index-key -- workers have no identity until saved; the index is their slot
-              <div key={index} className="grid gap-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span>
-                    <span className="me-2 text-muted-foreground tabular-nums">{index + 1}</span>
-                    Worker {index + 1}
-                  </span>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={`Remove worker ${index + 1}`}
-                    onClick={() =>
-                      setSetup((current) => ({
-                        ...current,
-                        workers: current.workers.filter((_, at) => at !== index),
-                      }))
-                    }
-                  >
-                    <XIcon />
-                  </Button>
-                </div>
-                <ModelField
-                  label={`Worker ${index + 1} model`}
-                  value={worker}
-                  entries={props.entries}
-                  onChange={(selection) =>
-                    setSetup((current) => ({
-                      ...current,
-                      workers: current.workers.map((existing, at) =>
-                        at === index ? selection : existing,
-                      ),
-                    }))
-                  }
-                />
-              </div>
-            ))}
-          </section>
-
-          <section className="flex items-center justify-between gap-2">
+                <MoreHorizontalIcon />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuItem variant="destructive" onClick={remove}>
+                  Delete profile
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </div>
+          {naming === null ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="justify-self-start"
+              onClick={() => setNaming("")}
+            >
+              <PlusIcon />
+              Save as…
+            </Button>
+          ) : (
             <div className="flex items-center gap-1.5">
-              <label htmlFor={parallelId} className="text-sm">
-                At once
-              </label>
-              <InfoMark
-                label="How parallel workers run"
-                text="Most tasks the architect keeps out at once. Independent work runs in parallel; a task over the limit waits for a result."
+              <Input
+                autoFocus
+                aria-label="Profile name"
+                placeholder="Profile name"
+                maxLength={64}
+                value={naming}
+                onChange={(event) => setNaming(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    saveAs();
+                  }
+                }}
               />
-            </div>
-            <div className="flex items-center gap-2">
-              {setup.unlimited ? null : (
-                <Input
-                  id={parallelId}
-                  type="number"
-                  min={1}
-                  max={32}
-                  className="w-16"
-                  aria-label="Workers at once"
-                  value={String(setup.parallel)}
-                  onChange={(event) =>
-                    setSetup((current) => ({
-                      ...current,
-                      parallel: Number(event.target.value) || 1,
-                    }))
-                  }
-                />
-              )}
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={setup.unlimited}
-                  aria-label="Unlimited workers"
-                  onCheckedChange={(checked) =>
-                    setSetup((current) => ({ ...current, unlimited: checked === true }))
-                  }
-                />
-                Unlimited
-              </label>
-            </div>
-          </section>
-
-          <p className="grid gap-1 text-muted-foreground text-xs">
-            <span>Workers run as delegated tasks in this thread&apos;s checkout.</span>
-            <span>
-              They keep this thread&apos;s permissions; their results come back to the architect.
-            </span>
-          </p>
-
-          {problem !== null || props.disabledReason ? (
-            <p role="alert" className="text-destructive-foreground text-xs">
-              {props.disabledReason ?? problem}
-            </p>
-          ) : null}
-
-          <div className="flex items-center justify-between gap-2 border-t pt-3">
-            {active ? (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setNaming(null)}>
+                Cancel
+              </Button>
               <Button
                 type="button"
-                variant="outline"
                 size="sm"
-                onClick={() => {
-                  props.onDisable();
-                  setOpen(false);
-                }}
+                disabled={!naming.trim() || problem !== null}
+                onClick={saveAs}
               >
-                Use a single agent
+                Save profile
               </Button>
-            ) : (
-              <span className="text-muted-foreground text-xs">
-                {props.newThread
-                  ? "Starts this thread as a team"
-                  : "Applies from your next message"}
-              </span>
-            )}
+            </div>
+          )}
+        </section>
+
+        <section className="grid gap-2">
+          <div className="flex items-baseline justify-between">
+            <span className="font-medium text-sm">Architect</span>
+            <span className="text-muted-foreground text-xs">Plans &amp; reviews</span>
+          </div>
+          <ModelField
+            label="Architect model"
+            value={setup.architect}
+            entries={props.entries}
+            onChange={(architect) => setSetup((current) => ({ ...current, architect }))}
+          />
+          <div className="flex items-center gap-1.5">
+            <label htmlFor={guidanceId} className="text-muted-foreground text-xs">
+              Lead guidance
+            </label>
+            <InfoMark
+              label="About lead guidance"
+              text="Extra instructions for the architect, sent with the built-in team rules. Leave it empty to use the guidance from Settings → Providers → Agent teams."
+            />
+          </div>
+          <Textarea
+            id={guidanceId}
+            rows={3}
+            maxLength={AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH}
+            placeholder={
+              props.sharedGuidance.trim() ||
+              "Extra instructions for the lead, on top of the built-in team rules."
+            }
+            value={setup.guidance}
+            onChange={(event) =>
+              setSetup((current) => ({ ...current, guidance: event.target.value }))
+            }
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="justify-self-start"
+            disabled={setup.guidance === ""}
+            onClick={() => setSetup((current) => ({ ...current, guidance: "" }))}
+          >
+            Reset to default
+          </Button>
+        </section>
+
+        <section className="grid gap-2">
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-sm">Workers</span>
             <Button
-              type="submit"
-              size="sm"
-              disabled={problem !== null || Boolean(props.disabledReason)}
+              type="button"
+              size="xs"
+              variant="ghost"
+              aria-label="Add worker"
+              disabled={setup.workers.length + 1 >= MAX_ROUTING_GROUP_MEMBERS}
+              onClick={() =>
+                setSetup((current) => ({ ...current, workers: [...current.workers, null] }))
+              }
             >
-              {active ? "Apply setup" : "Save setup"}
+              <PlusIcon />
+              Add
             </Button>
           </div>
-        </form>
-      </PopoverPopup>
-    </Popover>
+          {setup.workers.map((worker, index) => (
+            // oxlint-disable-next-line react/no-array-index-key -- workers have no identity until saved; the index is their slot
+            <div key={index} className="grid gap-1">
+              <div className="flex items-center justify-between text-sm">
+                <span>
+                  <span className="me-2 text-muted-foreground tabular-nums">{index + 1}</span>
+                  Worker {index + 1}
+                </span>
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Remove worker ${index + 1}`}
+                  onClick={() =>
+                    setSetup((current) => ({
+                      ...current,
+                      workers: current.workers.filter((_, at) => at !== index),
+                    }))
+                  }
+                >
+                  <XIcon />
+                </Button>
+              </div>
+              <ModelField
+                label={`Worker ${index + 1} model`}
+                value={worker}
+                entries={props.entries}
+                onChange={(selection) =>
+                  setSetup((current) => ({
+                    ...current,
+                    workers: current.workers.map((existing, at) =>
+                      at === index ? selection : existing,
+                    ),
+                  }))
+                }
+              />
+            </div>
+          ))}
+        </section>
+
+        <section className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <label htmlFor={parallelId} className="text-sm">
+              At once
+            </label>
+            <InfoMark
+              label="How parallel workers run"
+              text="Most tasks the architect keeps out at once. Independent work runs in parallel; a task over the limit waits for a result."
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            {setup.unlimited ? null : (
+              <Input
+                id={parallelId}
+                type="number"
+                min={1}
+                max={32}
+                className="w-16"
+                aria-label="Workers at once"
+                value={String(setup.parallel)}
+                onChange={(event) =>
+                  setSetup((current) => ({
+                    ...current,
+                    parallel: Number(event.target.value) || 1,
+                  }))
+                }
+              />
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={setup.unlimited}
+                aria-label="Unlimited workers"
+                onCheckedChange={(checked) =>
+                  setSetup((current) => ({ ...current, unlimited: checked === true }))
+                }
+              />
+              Unlimited
+            </label>
+          </div>
+        </section>
+
+        <p className="grid gap-1 text-muted-foreground text-xs">
+          <span>Workers run as delegated tasks in this thread&apos;s checkout.</span>
+          <span>
+            They keep this thread&apos;s permissions; their results come back to the architect.
+          </span>
+        </p>
+
+        {problem !== null || props.disabledReason ? (
+          <p role="alert" className="text-destructive-foreground text-xs">
+            {props.disabledReason ?? problem}
+          </p>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-2 border-t pt-3">
+          {active ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                props.onDisable();
+                props.onDone();
+              }}
+            >
+              Use a single agent
+            </Button>
+          ) : (
+            <span className="text-muted-foreground text-xs">
+              {props.newThread ? "Starts this thread as a team" : "Applies from your next message"}
+            </span>
+          )}
+          <Button
+            type="submit"
+            size="sm"
+            disabled={problem !== null || Boolean(props.disabledReason)}
+          >
+            {active ? "Apply setup" : "Save setup"}
+          </Button>
+        </div>
+      </form>
+    </>
   );
 });

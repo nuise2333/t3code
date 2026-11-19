@@ -35,7 +35,6 @@ describe("model picker item keys", () => {
   it("round-trips Team tab rows and keeps them apart from models", () => {
     const rows: ReadonlyArray<ModelPickerTeamRow> = [
       { kind: "none" },
-      { kind: "setup" },
       { kind: "auto", auto: "balanced" },
       { kind: "saved", id: "auto:not-an-auto" },
     ];
