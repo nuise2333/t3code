@@ -14,3 +14,16 @@ export function useSidebarMode() {
 export function setSidebarMode(mode: SidebarMode) {
   writeLocalStorageValue(SIDEBAR_MODE_KEY, mode, "threads", SidebarMode);
 }
+
+let focusBotsSearchOnMount = false;
+
+/** Switching to bots from the bar puts the cursor in the bots search; a reload does not. */
+export function requestBotsSearchFocus() {
+  focusBotsSearchOnMount = true;
+}
+
+export function takeBotsSearchFocusRequest(): boolean {
+  const requested = focusBotsSearchOnMount;
+  focusBotsSearchOnMount = false;
+  return requested;
+}

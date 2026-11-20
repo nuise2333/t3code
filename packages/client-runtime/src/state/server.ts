@@ -1817,6 +1817,12 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:bot:open-chat",
       tag: WS_METHODS.botsOpenChat,
     }),
+    setBotPaused: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot:set-paused",
+      tag: WS_METHODS.botsSetPaused,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
     addBotMemory: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:bot:memory-add",
       tag: WS_METHODS.botsMemoryAdd,

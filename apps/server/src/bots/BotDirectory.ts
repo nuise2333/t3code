@@ -26,6 +26,7 @@ export interface BotRow {
   readonly home_thread_id: string | null;
   readonly avatar: string;
   readonly color: string;
+  readonly paused: number;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -72,6 +73,7 @@ export const decodeBotRow = Effect.fn("BotDirectory.decodeBotRow")(function* (ro
     homeThreadId: row.home_thread_id,
     avatar: row.avatar,
     color: row.color,
+    paused: row.paused === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -120,7 +122,7 @@ export type BotThreadIdentity =
 export const selectBots = (sql: SqlClient.SqlClient) =>
   sql<BotRow>`
     SELECT bot_id, name, handle, title, instructions, dispatcher, model_selection_json,
-      runtime_mode, project_id, home_thread_id, avatar, color, created_at, updated_at
+      runtime_mode, project_id, home_thread_id, avatar, color, paused, created_at, updated_at
     FROM bots
     ORDER BY dispatcher DESC, created_at ASC, bot_id ASC
   `.pipe(NodeSqliteClient.readOnly);
@@ -142,7 +144,7 @@ export const identityOf = Effect.fn("BotDirectory.identityOf")(function* (
 ) {
   const home = yield* sql<BotRow>`
     SELECT bot_id, name, handle, title, instructions, dispatcher, model_selection_json,
-      runtime_mode, project_id, home_thread_id, avatar, color, created_at, updated_at
+      runtime_mode, project_id, home_thread_id, avatar, color, paused, created_at, updated_at
     FROM bots WHERE home_thread_id = ${threadId}
   `.pipe(NodeSqliteClient.readOnly);
   if (home[0] !== undefined) {
@@ -154,7 +156,7 @@ export const identityOf = Effect.fn("BotDirectory.identityOf")(function* (
     SELECT t.thread_id, t.task_id, t.bot_id, t.requester_thread_id, t.requester_bot_id, t.title,
       t.depth, t.status, t.nudged_at, t.created_at, t.updated_at,
       b.name, b.handle, b.title AS bot_title, b.instructions, b.dispatcher, b.model_selection_json,
-      b.runtime_mode, b.project_id, b.home_thread_id, b.avatar, b.color,
+      b.runtime_mode, b.project_id, b.home_thread_id, b.avatar, b.color, b.paused,
       b.created_at AS bot_created_at, b.updated_at AS bot_updated_at
     FROM bot_tasks t JOIN bots b ON b.bot_id = t.bot_id
     WHERE t.thread_id = ${threadId}
@@ -202,7 +204,12 @@ const roster = (bots: ReadonlyArray<Bot>, self: Bot, inTask: boolean): string =>
   return others
     .map((bot) => {
       const job = duty(bot);
-      return `- @${bot.handle}: ${bot.name}${job === "" ? "" : `, ${job}`}${bot.dispatcher ? " (dispatcher; a message to it gets no reply)" : ""}`;
+      const note = bot.paused
+        ? " (paused; unavailable, do not message it)"
+        : bot.dispatcher
+          ? " (dispatcher; a message to it gets no reply)"
+          : "";
+      return `- @${bot.handle}: ${bot.name}${job === "" ? "" : `, ${job}`}${note}`;
     })
     .join("\n");
 };
@@ -227,7 +234,7 @@ const roleRules = (input: {
   readonly task: { readonly requester: string; readonly depth: number } | null;
 }): string => {
   const teammates = input.bots.filter(
-    (bot) => bot.id !== input.bot.id && !(input.task !== null && bot.dispatcher),
+    (bot) => bot.id !== input.bot.id && !bot.paused && !(input.task !== null && bot.dispatcher),
   );
   const canDelegate =
     teammates.length > 0 && (input.task === null || input.task.depth < BOT_MAX_DELEGATION_DEPTH);

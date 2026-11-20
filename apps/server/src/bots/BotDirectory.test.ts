@@ -31,6 +31,7 @@ const makeBot = (id: string, overrides: Partial<Bot> = {}): Bot => ({
   homeThreadId: null,
   avatar: "",
   color: "blue",
+  paused: false,
   createdAt: at,
   updatedAt: at,
   ...overrides,
@@ -60,6 +61,13 @@ describe("botBrief", () => {
       [NO_DELEGATION],
     ],
     ["a dispatcher alone", [lead], null, [NO_DELEGATION], [DISPATCHER_TEXT]],
+    [
+      "a dispatcher whose only teammate is paused",
+      [lead, makeBot("builder", { title: "Engineer", paused: true })],
+      null,
+      ["- @builder: builder, Engineer (paused; unavailable, do not message it)", NO_DELEGATION],
+      ["bot_send_message`"],
+    ],
     [
       "a task under the depth limit",
       [lead, builder],
@@ -118,6 +126,7 @@ const insertBot = (sql: SqlClient.SqlClient, bot: Bot) =>
     home_thread_id: bot.homeThreadId,
     avatar: bot.avatar,
     color: bot.color,
+    paused: bot.paused ? 1 : 0,
     created_at: bot.createdAt,
     updated_at: bot.updatedAt,
   })}`;
@@ -132,6 +141,7 @@ describe("identityOf", () => {
         makeBot("builder", {
           title: "Engineer",
           homeThreadId: home,
+          paused: true,
           createdAt: "2026-02-01T00:00:00.000Z",
         }),
       );
@@ -162,6 +172,7 @@ describe("identityOf", () => {
       assert.equal(taskIdentity.task.title, "Fix the build");
       assert.equal(taskIdentity.bot.title, "Engineer");
       assert.equal(taskIdentity.bot.createdAt, "2026-02-01T00:00:00.000Z");
+      assert.isTrue(taskIdentity.bot.paused);
       assert.equal(taskIdentity.task.createdAt, "2026-03-01T00:00:00.000Z");
       assert.equal(taskIdentity.task.status, "waiting");
       assert.equal(taskIdentity.task.requesterBotId, "lead");

@@ -78,6 +78,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.botsUpsert]: AuthOrchestrationOperateScope,
   [WS_METHODS.botsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.botsOpenChat]: AuthOrchestrationOperateScope,
+  [WS_METHODS.botsSetPaused]: AuthOrchestrationOperateScope,
   [WS_METHODS.botsMemoryAdd]: AuthOrchestrationOperateScope,
   [WS_METHODS.botsMemoryDelete]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,

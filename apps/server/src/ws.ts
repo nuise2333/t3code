@@ -2320,6 +2320,7 @@ export const layerWsRpc = (
         [WS_METHODS.botsUpsert]: (input) => bots.upsert(input),
         [WS_METHODS.botsDelete]: (input) => bots.delete(input),
         [WS_METHODS.botsOpenChat]: (input) => bots.openChat(input),
+        [WS_METHODS.botsSetPaused]: (input) => bots.setPaused(input),
         [WS_METHODS.botsMemoryAdd]: (input) =>
           bots.addMemory(input).pipe(Effect.map(({ memory }) => ({ memory }))),
         [WS_METHODS.botsMemoryDelete]: (input) =>

@@ -257,10 +257,16 @@ teams are edited on web and desktop.
 ## Bots
 
 A bot is a named agent with its own chat, job title, instructions, model,
-permissions and memories. On web and desktop, switch the sidebar from
-**Threads** to **Bots** with the switcher at its bottom. The sidebar lists your
-bots; click one to open its own chat, or use its **…** menu to edit, delete or
-see its details. Start from the **+** button with **New bot** or a team, such as
+permissions and memories. On web and desktop, the **Bots** bar at the bottom of
+the sidebar switches it between your threads and your bots; a dot on the bar
+means a bot replied since you last opened it. Each bot shows its latest message
+and a badge when it needs your answer or approval, failed, hit a usage limit,
+is working or has unread replies. Bots waiting on you rise to **Needs you**.
+Click a bot to open its chat. Right-click it, or use its **…** menu, to pin it,
+edit, duplicate or delete it, or **Hide (pause)** it: a paused bot's running
+turns stop, its chat's schedules turn off until you **Restore** it, and other
+bots cannot hand it work. Drag bots, or press Alt+Up and Alt+Down, to reorder
+them; pins and order are kept per device. Start from the **+** button with **New bot** or a team, such as
 **Dev squad** (a dispatcher, a builder, a tester and a reviewer) or **Research
 desk**. Templates use your default model; edit any bot to change it. **Open
 bots** in the command palette opens the Bots page with every bot's memories,

@@ -408,6 +408,8 @@ import {
   BotMemoryDeleteResult,
   BotOpenChatInput,
   BotOpenChatResult,
+  BotSetPausedInput,
+  BotSetPausedResult,
   BotUpsertInput,
   BotUpsertResult,
 } from "./bot.ts";
@@ -597,6 +599,7 @@ export const WS_METHODS = {
   botsUpsert: "bots.upsert",
   botsDelete: "bots.delete",
   botsOpenChat: "bots.openChat",
+  botsSetPaused: "bots.setPaused",
   botsMemoryAdd: "bots.memoryAdd",
   botsMemoryDelete: "bots.memoryDelete",
 
@@ -2110,6 +2113,12 @@ const WsBotsOpenChatRpc = Rpc.make(WS_METHODS.botsOpenChat, {
   error: BotRpcError,
 });
 
+const WsBotsSetPausedRpc = Rpc.make(WS_METHODS.botsSetPaused, {
+  payload: BotSetPausedInput,
+  success: BotSetPausedResult,
+  error: BotRpcError,
+});
+
 const WsBotsMemoryAddRpc = Rpc.make(WS_METHODS.botsMemoryAdd, {
   payload: BotMemoryAddInput,
   success: BotMemoryAddResult,
@@ -2280,6 +2289,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsBotsUpsertRpc,
   WsBotsDeleteRpc,
   WsBotsOpenChatRpc,
+  WsBotsSetPausedRpc,
   WsBotsMemoryAddRpc,
   WsBotsMemoryDeleteRpc,
   WsScheduledTasksSetEnabledRpc,

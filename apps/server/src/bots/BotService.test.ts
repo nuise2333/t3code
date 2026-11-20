@@ -11,12 +11,14 @@ import {
   type OrchestrationV2Run,
   ProjectId,
   ProviderInstanceId,
+  ScheduledTaskId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -29,6 +31,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as BotService from "./BotService.ts";
 
@@ -55,6 +58,16 @@ describe("uniqueHandle", () => {
     ["a".repeat(32), ["a".repeat(32)], `${"a".repeat(30)}-2`],
   ] as const)("%s taken by %j -> %s", (base, taken, handle) => {
     assert.equal(BotService.uniqueHandle(base, new Set(taken)), handle);
+  });
+});
+
+describe("previewText", () => {
+  it.each([
+    ["  Fix\n\nthe   build  ", "Fix the build"],
+    ["a".repeat(140), "a".repeat(140)],
+    ["a".repeat(141), `${"a".repeat(139)}…`],
+  ])("%j", (text, preview) => {
+    assert.equal(BotService.previewText(text), preview);
   });
 });
 
@@ -125,6 +138,11 @@ const harness = Effect.gen(function* () {
   >(new Map());
   const nudged = yield* Deferred.make<ThreadManagementService.ThreadManagementSendInput>();
   const interrupted = yield* Deferred.make<ThreadId>();
+  const interrupts = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
+  const schedules = yield* Ref.make<
+    ReadonlyArray<{ id: ScheduledTaskId; threadId: ThreadId | null; enabled: boolean }>
+  >([]);
+  const scheduleToggles = yield* Ref.make<ReadonlyArray<readonly [ScheduledTaskId, boolean]>>([]);
   const deps = Layer.mergeAll(
     Layer.mock(ThreadLaunchService.ThreadLaunchService)({
       launch: () =>
@@ -155,7 +173,24 @@ const harness = Effect.gen(function* () {
         Ref.get(runs).pipe(Effect.map((map) => ({ runs: map.get(threadId) ?? [] }) as never)),
       sendToThread: (input) => Deferred.succeed(nudged, input).pipe(Effect.as({} as never)),
       interruptThread: (input) =>
-        Deferred.succeed(interrupted, input.threadId).pipe(Effect.as({} as never)),
+        Ref.update(interrupts, (all) => [...all, input.threadId]).pipe(
+          Effect.andThen(Deferred.succeed(interrupted, input.threadId)),
+          Effect.as({} as never),
+        ),
+    }),
+    Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+      list: () => Ref.get(schedules).pipe(Effect.map((tasks) => ({ tasks }) as never)),
+      setEnabled: (input) =>
+        Ref.update(scheduleToggles, (all) => [...all, [input.id, input.enabled] as const]).pipe(
+          Effect.andThen(
+            Ref.update(schedules, (all) =>
+              all.map((task) =>
+                task.id === input.id ? { ...task, enabled: input.enabled } : task,
+              ),
+            ),
+          ),
+          Effect.as({} as never),
+        ),
     }),
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
       namedProjectsRoot: "/projects",
@@ -183,7 +218,18 @@ const harness = Effect.gen(function* () {
     yield* Queue.offer(events, { event, handled });
     yield* Deferred.await(handled);
   });
-  return { service, launches, shells, emit, nudged, interrupted, runs };
+  return {
+    service,
+    launches,
+    shells,
+    emit,
+    nudged,
+    interrupted,
+    runs,
+    interrupts,
+    schedules,
+    scheduleToggles,
+  };
 });
 
 const runEvent = (threadId: ThreadId, status: OrchestrationV2Run["status"]) =>
@@ -416,6 +462,126 @@ describe("BotService", () => {
 
         yield* TestClock.adjust("25 minutes");
         assert.equal(yield* Deferred.await(interrupted), taskThread);
+      }),
+    ),
+  );
+  it.effect(
+    "pauses by stopping the chat and working tasks and its enabled schedules, and resumes only those",
+    () =>
+      withDb(
+        Effect.gen(function* () {
+          const { service, shells, interrupts, schedules, scheduleToggles } = yield* harness;
+          const bot = (yield* service.upsert(botInput())).bot;
+          assert.isFalse(bot.paused);
+          const home = (yield* service.openChat({ id: bot.id })).threadId;
+          const working = ThreadId.make("thread:working-task");
+          const finished = ThreadId.make("thread:finished-task");
+          yield* Ref.update(shells, (map) =>
+            new Map(map).set(working, { archivedAt: null }).set(finished, { archivedAt: null }),
+          );
+          yield* service.recordTask(taskInput(bot.id, working));
+          yield* service.recordTask({ ...taskInput(bot.id, finished), title: "Done already" });
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`UPDATE bot_tasks SET status = 'done' WHERE thread_id = ${finished}`;
+          const on = ScheduledTaskId.make("schedule:on");
+          const off = ScheduledTaskId.make("schedule:off");
+          const elsewhere = ScheduledTaskId.make("schedule:elsewhere");
+          yield* Ref.set(schedules, [
+            { id: on, threadId: home, enabled: true },
+            { id: off, threadId: home, enabled: false },
+            { id: elsewhere, threadId: ThreadId.make("thread:other"), enabled: true },
+          ]);
+
+          const paused = yield* service.setPaused({ id: bot.id, paused: true });
+          assert.isTrue(paused.bot.paused);
+          assert.isTrue((yield* service.list()).bots[0]?.paused);
+          assert.deepEqual(yield* Ref.get(interrupts), [home, working]);
+          assert.deepEqual(yield* Ref.get(scheduleToggles), [[on, false]]);
+          // Saving the bot keeps it paused; pausing again changes nothing.
+          assert.isTrue((yield* service.upsert(botInput({ id: bot.id }))).bot.paused);
+          yield* service.setPaused({ id: bot.id, paused: true });
+          assert.equal((yield* Ref.get(scheduleToggles)).length, 1);
+
+          const resumed = yield* service.setPaused({ id: bot.id, paused: false });
+          assert.isFalse(resumed.bot.paused);
+          assert.deepEqual(yield* Ref.get(scheduleToggles), [
+            [on, false],
+            [on, true],
+          ]);
+          yield* service.setPaused({ id: bot.id, paused: true });
+          yield* service.setPaused({ id: bot.id, paused: false });
+          assert.deepEqual((yield* Ref.get(scheduleToggles)).slice(2), [
+            [on, false],
+            [on, true],
+          ]);
+        }),
+      ),
+  );
+
+  it.effect("previews the newest message the user or the bot wrote in its chat", () =>
+    withDb(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const { service } = yield* harness;
+        const bot = (yield* service.upsert(botInput())).bot;
+        const quiet = (yield* service.upsert(botInput({ name: "Quiet" }))).bot;
+        const home = (yield* service.openChat({ id: bot.id })).threadId;
+        yield* service.openChat({ id: quiet.id });
+        const message = (
+          id: string,
+          role: string,
+          createdAt: string,
+          payload: Record<string, unknown>,
+          streaming = 0,
+        ) =>
+          sql`INSERT INTO orchestration_v2_projection_messages ${sql.insert({
+            message_id: id,
+            thread_id: home,
+            run_id: null,
+            node_id: null,
+            role,
+            streaming,
+            created_at: createdAt,
+            updated_at: createdAt,
+            payload_json: JSON.stringify(payload),
+          })}`;
+        yield* message("m1", "user", "2026-01-01T00:00:01.000Z", { text: "Fix  the\nbuild" });
+        const lastMessages = () => service.list().pipe(Effect.map((list) => list.lastMessages));
+        assert.deepEqual(yield* lastMessages(), [
+          { botId: bot.id, role: "user", text: "Fix the build", at: "2026-01-01T00:00:01.000Z" },
+        ]);
+        yield* message("m2", "assistant", "2026-01-01T00:00:02.000Z", { text: "Fixed." });
+        // Still streaming, a note from another bot, and an empty reply are not previews.
+        yield* message("m3", "assistant", "2026-01-01T00:00:03.000Z", { text: "Work" }, 1);
+        yield* message("m4", "user", "2026-01-01T00:00:04.000Z", {
+          text: "[Message from @lead]",
+          createdBy: "agent",
+        });
+        yield* message("m5", "assistant", "2026-01-01T00:00:05.000Z", { text: "" });
+        assert.deepEqual(yield* lastMessages(), [
+          { botId: bot.id, role: "assistant", text: "Fixed.", at: "2026-01-01T00:00:02.000Z" },
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("republishes the list when a turn starts or ends in a bot's chat", () =>
+    withDb(
+      Effect.gen(function* () {
+        const { service, emit } = yield* harness;
+        const bot = (yield* service.upsert(botInput())).bot;
+        const home = (yield* service.openChat({ id: bot.id })).threadId;
+        const updates = yield* Queue.unbounded<void>();
+        const fiber = yield* Stream.runForEach(service.subscribeList(), () =>
+          Queue.offer(updates, undefined),
+        ).pipe(Effect.forkChild);
+        yield* Queue.take(updates);
+        yield* emit(runEvent(home, "running"));
+        yield* emit(runEvent(ThreadId.make("thread:unrelated"), "completed"));
+        assert.equal(yield* Queue.size(updates), 0);
+        yield* emit(runEvent(home, "completed"));
+        yield* Queue.take(updates);
+        yield* Fiber.interrupt(fiber);
       }),
     ),
   );

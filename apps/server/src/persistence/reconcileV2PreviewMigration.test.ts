@@ -77,6 +77,7 @@ describe("V2 preview upgrade", () => {
         [95, "TurnItemInlineWorkOutput"],
         [96, "ScheduledTaskRoutingGroup"],
         [97, "Bots"],
+        [98, "BotPause"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -197,6 +198,7 @@ describe("V2 preview upgrade", () => {
         [95, "TurnItemInlineWorkOutput"],
         [96, "ScheduledTaskRoutingGroup"],
         [97, "Bots"],
+        [98, "BotPause"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

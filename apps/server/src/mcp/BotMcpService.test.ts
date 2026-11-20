@@ -37,6 +37,7 @@ const makeBot = (handle: string, overrides: Partial<Bot> = {}): Bot => ({
   homeThreadId: null,
   avatar: "",
   color: "blue",
+  paused: false,
   createdAt: at,
   updatedAt: at,
   ...overrides,
@@ -94,7 +95,8 @@ const builder = makeBot("builder", {
   } as Bot["modelSelection"],
 });
 const reviewer = makeBot("reviewer");
-const team = [lead, builder, reviewer];
+const sleeper = makeBot("sleeper", { paused: true });
+const team = [lead, builder, reviewer, sleeper];
 
 const scopeFor = (threadId: ThreadId): McpInvocationScope => ({
   environmentId: EnvironmentId.make("env:test"),
@@ -122,7 +124,7 @@ const harness = (identities: ReadonlyMap<ThreadId, BotThreadIdentity>) =>
           Layer.mergeAll(
             Layer.mock(BotService.BotService)({
               identityOf: (threadId) => Effect.succeed(identities.get(threadId) ?? null),
-              list: () => Effect.succeed({ bots: team, memories: [], tasks: [] }),
+              list: () => Effect.succeed({ bots: team, memories: [], tasks: [], lastMessages: [] }),
               openChat: ({ id }) =>
                 Effect.succeed({
                   threadId: ThreadId.make(`thread:${id}-home`),
@@ -172,33 +174,43 @@ const identities = new Map<ThreadId, BotThreadIdentity>([
 ]);
 
 describe("BotMcpService.sendMessage", () => {
-  it.effect("refuses self-sends, unknown teammates, deep tasks and threads that are not bots", () =>
-    Effect.gen(function* () {
-      const { service, delegated, sent } = yield* harness(identities);
-      const self = yield* Effect.flip(
-        service.sendMessage(scopeFor(reviewerHome), { to: "@reviewer", text: "hi" }),
-      );
-      assert.include(self.message, "That is you");
-      const unknown = yield* Effect.flip(
-        service.sendMessage(scopeFor(reviewerHome), { to: "@ghost", text: "hi" }),
-      );
-      assert.equal(unknown.code, "invalid_request");
-      assert.include(unknown.message, "Teammates: @lead, @builder.");
-      const deep = yield* Effect.flip(
-        service.sendMessage(scopeFor(deepTask), { to: "builder", text: "hi" }),
-      );
-      assert.include(deep.message, `${BOT_MAX_DELEGATION_DEPTH} hand-offs`);
-      const stranger = yield* Effect.flip(
-        service.sendMessage(scopeFor(ThreadId.make("thread:plain")), { to: "builder", text: "hi" }),
-      );
-      assert.equal(stranger.code, "capability_denied");
-      const toDispatcher = yield* Effect.flip(
-        service.sendMessage(scopeFor(shallowTask), { to: "@lead", text: "Done." }),
-      );
-      assert.include(toDispatcher.message, "Tasks report to whoever asked");
-      assert.deepEqual(yield* Ref.get(delegated), []);
-      assert.deepEqual(yield* Ref.get(sent), []);
-    }).pipe(Effect.scoped),
+  it.effect(
+    "refuses self-sends, unknown or paused teammates, deep tasks and threads that are not bots",
+    () =>
+      Effect.gen(function* () {
+        const { service, delegated, sent } = yield* harness(identities);
+        const self = yield* Effect.flip(
+          service.sendMessage(scopeFor(reviewerHome), { to: "@reviewer", text: "hi" }),
+        );
+        assert.include(self.message, "That is you");
+        const unknown = yield* Effect.flip(
+          service.sendMessage(scopeFor(reviewerHome), { to: "@ghost", text: "hi" }),
+        );
+        assert.equal(unknown.code, "invalid_request");
+        assert.include(unknown.message, "Teammates: @lead, @builder, @sleeper.");
+        const paused = yield* Effect.flip(
+          service.sendMessage(scopeFor(reviewerHome), { to: "@sleeper", text: "hi" }),
+        );
+        assert.equal(paused.code, "invalid_request");
+        assert.include(paused.message, "@sleeper is paused");
+        const deep = yield* Effect.flip(
+          service.sendMessage(scopeFor(deepTask), { to: "builder", text: "hi" }),
+        );
+        assert.include(deep.message, `${BOT_MAX_DELEGATION_DEPTH} hand-offs`);
+        const stranger = yield* Effect.flip(
+          service.sendMessage(scopeFor(ThreadId.make("thread:plain")), {
+            to: "builder",
+            text: "hi",
+          }),
+        );
+        assert.equal(stranger.code, "capability_denied");
+        const toDispatcher = yield* Effect.flip(
+          service.sendMessage(scopeFor(shallowTask), { to: "@lead", text: "Done." }),
+        );
+        assert.include(toDispatcher.message, "Tasks report to whoever asked");
+        assert.deepEqual(yield* Ref.get(delegated), []);
+        assert.deepEqual(yield* Ref.get(sent), []);
+      }).pipe(Effect.scoped),
   );
 
   it.effect("queues a message to the dispatcher in its own chat instead of delegating", () =>

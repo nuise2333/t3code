@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
@@ -63,10 +64,23 @@ export const Bot = Schema.Struct({
   homeThreadId: Schema.NullOr(ThreadId),
   avatar: BotAvatar,
   color: BotColor,
+  /** Hidden from the list's main groups; takes no new work until resumed. */
+  paused: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type Bot = typeof Bot.Type;
+
+export const BOT_LAST_MESSAGE_MAX_CHARS = 140;
+
+/** The newest message in a bot's own chat, flattened to one line for list previews. */
+export const BotLastMessage = Schema.Struct({
+  botId: BotId,
+  role: Schema.Literals(["user", "assistant"]),
+  text: Schema.String,
+  at: IsoDateTime,
+});
+export type BotLastMessage = typeof BotLastMessage.Type;
 
 export const BotMemorySource = Schema.Literals(["bot", "user"]);
 export type BotMemorySource = typeof BotMemorySource.Type;
@@ -105,6 +119,10 @@ export const BotListResult = Schema.Struct({
   memories: Schema.Array(BotMemory),
   /** The most recent tasks, newest first. */
   tasks: Schema.Array(BotTask),
+  /** One per bot whose chat has a message. */
+  lastMessages: Schema.Array(BotLastMessage).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
 });
 export type BotListResult = typeof BotListResult.Type;
 
@@ -132,6 +150,11 @@ export const BotDeleteInput = Schema.Struct({ id: BotId });
 export type BotDeleteInput = typeof BotDeleteInput.Type;
 export const BotDeleteResult = Schema.Struct({ id: BotId });
 export type BotDeleteResult = typeof BotDeleteResult.Type;
+
+export const BotSetPausedInput = Schema.Struct({ id: BotId, paused: Schema.Boolean });
+export type BotSetPausedInput = typeof BotSetPausedInput.Type;
+export const BotSetPausedResult = Schema.Struct({ bot: Bot });
+export type BotSetPausedResult = typeof BotSetPausedResult.Type;
 
 export const BotOpenChatInput = Schema.Struct({ id: BotId });
 export type BotOpenChatInput = typeof BotOpenChatInput.Type;

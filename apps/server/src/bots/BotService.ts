@@ -3,6 +3,7 @@ import {
   BotError,
   BotId,
   BotMemoryId,
+  BOT_LAST_MESSAGE_MAX_CHARS,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -11,6 +12,7 @@ import {
   MessageId,
   type BotDeleteInput,
   type BotDeleteResult,
+  type BotLastMessage,
   type BotListResult,
   type BotMemory,
   type BotMemoryAddInput,
@@ -20,6 +22,8 @@ import {
   type BotMemorySource,
   type BotOpenChatInput,
   type BotOpenChatResult,
+  type BotSetPausedInput,
+  type BotSetPausedResult,
   type BotTask,
   type BotTaskStatus,
   type BotUpsertInput,
@@ -27,6 +31,7 @@ import {
   type NodeId,
   type OrchestrationV2Run,
   type ProjectId,
+  ScheduledTaskId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -47,6 +52,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { forkParked } from "../serverActivation.ts";
 import {
@@ -88,6 +94,8 @@ export class BotService extends Context.Service<
     readonly subscribeList: () => Stream.Stream<BotListResult, BotError>;
     readonly upsert: (input: BotUpsertInput) => Effect.Effect<BotUpsertResult, BotError>;
     readonly delete: (input: BotDeleteInput) => Effect.Effect<BotDeleteResult, BotError>;
+    /** Pausing stops the bot's running turns and its chat's schedules; resuming restores those schedules. */
+    readonly setPaused: (input: BotSetPausedInput) => Effect.Effect<BotSetPausedResult, BotError>;
     /** The bot's own chat, started on first open. */
     readonly openChat: (input: BotOpenChatInput) => Effect.Effect<BotOpenChatResult, BotError>;
     readonly addMemory: (
@@ -134,6 +142,19 @@ export const uniqueHandle = (base: string, taken: ReadonlySet<string>): string =
     if (!taken.has(candidate)) return candidate;
   }
 };
+
+/** One line of at most BOT_LAST_MESSAGE_MAX_CHARS characters. */
+export const previewText = (text: string): string => {
+  const line = text.replace(/\s+/g, " ").trim();
+  const chars = [...line];
+  return chars.length <= BOT_LAST_MESSAGE_MAX_CHARS
+    ? line
+    : `${chars.slice(0, BOT_LAST_MESSAGE_MAX_CHARS - 1).join("")}…`;
+};
+
+const ScheduleIdsJson = Schema.fromJsonString(Schema.Array(ScheduledTaskId));
+const decodeScheduleIds = Schema.decodeUnknownEffect(ScheduleIdsJson);
+const encodeScheduleIds = Schema.encodeSync(ScheduleIdsJson);
 
 export const taskStatusForRun = (status: OrchestrationV2Run["status"]): BotTaskStatus | null => {
   switch (status) {
@@ -182,11 +203,14 @@ export const layer = Layer.effect(
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const scheduler = yield* Scheduler.Scheduler;
+    const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
     // Notifications re-emit the full list; slow subscribers need only the newest dirty signal.
     const changes = yield* PubSub.sliding<void>(1);
     const notifyChanged = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
     // Task threads the reactor follows, with the last time each showed activity.
     const lastActivity = yield* Ref.make<ReadonlyMap<ThreadId, number>>(new Map());
+    // Bots' own chats as of the last list, so a turn there can refresh its preview.
+    const homeThreads = yield* Ref.make<ReadonlySet<ThreadId>>(new Set());
     // Launches wait their turn, so two opens of one bot cannot start two chats.
     const launchLock = yield* Semaphore.make(1);
 
@@ -224,10 +248,52 @@ export const layer = Layer.effect(
         NodeSqliteClient.readOnly,
         Effect.mapError((cause) => botError("Could not load bot tasks.", { cause })),
       );
+      // A bot-to-bot or system note is not a message the user wrote, so it is skipped.
+      const latest = yield* sql<{
+        readonly bot_id: string;
+        readonly role: string;
+        readonly text: string | null;
+        readonly created_at: string;
+      }>`
+        SELECT bots.bot_id, latest.role,
+          substr(json_extract(latest.payload_json, '$.text'), 1, 600) AS text, latest.created_at
+        FROM bots
+        JOIN orchestration_v2_projection_messages AS latest ON latest.message_id = (
+          SELECT messages.message_id FROM orchestration_v2_projection_messages AS messages
+          WHERE messages.thread_id = bots.home_thread_id
+            AND messages.streaming = 0
+            AND messages.message_id NOT LIKE 'async-answer:%'
+            AND json_extract(messages.payload_json, '$.text') != ''
+            AND (
+              messages.role = 'assistant'
+              OR (
+                messages.role = 'user'
+                AND COALESCE(json_extract(messages.payload_json, '$.createdBy'), 'user') = 'user'
+              )
+            )
+          ORDER BY messages.created_at DESC, messages.message_id DESC
+          LIMIT 1
+        )
+        WHERE bots.home_thread_id IS NOT NULL
+      `.pipe(
+        NodeSqliteClient.readOnly,
+        Effect.mapError((cause) => botError("Could not load bot messages.", { cause })),
+      );
+      yield* Ref.set(
+        homeThreads,
+        new Set(bots.flatMap((bot) => (bot.homeThreadId === null ? [] : [bot.homeThreadId]))),
+      );
+      const lastMessages: Array<BotLastMessage> = latest.map((row) => ({
+        botId: BotId.make(row.bot_id),
+        role: row.role === "user" ? "user" : "assistant",
+        text: previewText(row.text ?? ""),
+        at: row.created_at,
+      }));
       return {
         bots,
         memories: memories.map(memoryFromRow),
         tasks: tasks.map(taskFromRow),
+        lastMessages,
       };
     });
 
@@ -294,6 +360,7 @@ export const layer = Layer.effect(
           homeThreadId,
           avatar: input.avatar,
           color: input.color,
+          paused: existing?.paused ?? false,
           createdAt: existing?.createdAt ?? timestamp,
           updatedAt: timestamp,
         };
@@ -355,6 +422,94 @@ export const layer = Layer.effect(
           );
         yield* notifyChanged;
         return { id: input.id };
+      },
+    );
+
+    const interruptForPause = Effect.fn("BotService.interruptForPause")(function* (
+      bot: Bot,
+      threadId: ThreadId,
+    ) {
+      const shell = yield* threadManagement
+        .getThreadShell(threadId)
+        .pipe(Effect.orElseSucceed(() => null));
+      if (shell === null) return;
+      yield* threadManagement
+        .interruptThread({
+          projectId: shell.projectId,
+          commandId: CommandId.make(`bot-pause:${yield* uuid}`),
+          threadId,
+          reason: `${bot.name} was paused.`,
+        })
+        .pipe(Effect.ignoreCause({ log: true }));
+    });
+
+    const setPaused: BotService["Service"]["setPaused"] = Effect.fn("BotService.setPaused")(
+      function* (input) {
+        const { bot } = yield* findBot(input.id);
+        if (bot.paused === input.paused) return { bot };
+        const timestamp = yield* now;
+        const saveError = (cause: unknown) =>
+          botError(`Could not ${input.paused ? "pause" : "resume"} ${bot.name}.`, {
+            botId: bot.id,
+            cause,
+          });
+        const stored = yield* sql<{ readonly paused_schedule_ids_json: string }>`
+          UPDATE bots SET paused = ${input.paused ? 1 : 0}, updated_at = ${timestamp}
+          WHERE bot_id = ${bot.id}
+          RETURNING paused_schedule_ids_json
+        `.pipe(Effect.mapError(saveError));
+        const paused: Bot = { ...bot, paused: input.paused, updatedAt: timestamp };
+        if (input.paused) {
+          const working = yield* sql<{ readonly thread_id: string }>`
+            SELECT thread_id FROM bot_tasks
+            WHERE bot_id = ${bot.id} AND status IN ('working', 'waiting')
+          `.pipe(NodeSqliteClient.readOnly, Effect.mapError(saveError));
+          const threads = [
+            ...(bot.homeThreadId === null ? [] : [bot.homeThreadId]),
+            ...working.map((row) => ThreadId.make(row.thread_id)),
+          ];
+          yield* Effect.forEach(threads, (threadId) => interruptForPause(bot, threadId), {
+            discard: true,
+          });
+          const schedules =
+            bot.homeThreadId === null
+              ? []
+              : (yield* scheduledTasks.list().pipe(Effect.mapError(saveError))).tasks.filter(
+                  (task) => task.enabled && task.threadId === bot.homeThreadId,
+                );
+          const turnedOff = yield* Effect.filter(schedules, (task) =>
+            scheduledTasks.setEnabled({ id: task.id, enabled: false }).pipe(
+              Effect.as(true),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("bots.pause-schedule-failed", { taskId: task.id, cause }).pipe(
+                  Effect.as(false),
+                ),
+              ),
+            ),
+          );
+          yield* sql`
+            UPDATE bots SET paused_schedule_ids_json = ${encodeScheduleIds(turnedOff.map((task) => task.id))}
+            WHERE bot_id = ${bot.id}
+          `.pipe(Effect.mapError(saveError));
+        } else {
+          const ids = yield* decodeScheduleIds(stored[0]?.paused_schedule_ids_json ?? "[]").pipe(
+            Effect.orElseSucceed(() => []),
+          );
+          yield* sql`UPDATE bots SET paused_schedule_ids_json = '[]' WHERE bot_id = ${bot.id}`.pipe(
+            Effect.mapError(saveError),
+          );
+          // A schedule deleted or changed meanwhile is left as it is.
+          yield* Effect.forEach(
+            ids,
+            (id) =>
+              scheduledTasks
+                .setEnabled({ id, enabled: true })
+                .pipe(Effect.ignoreCause({ log: true })),
+            { discard: true },
+          );
+        }
+        yield* notifyChanged;
+        return { bot: paused };
       },
     );
 
@@ -575,9 +730,22 @@ export const layer = Layer.effect(
       if (changed.length > 0) yield* notifyChanged;
     });
 
+    // A new turn or a finished one in a bot's own chat changes its preview.
+    const onHomeRun = Effect.fn("BotService.onHomeRun")(function* (
+      type: "run.created" | "run.updated",
+      run: OrchestrationV2Run,
+    ) {
+      if (!(yield* Ref.get(homeThreads)).has(run.threadId)) return;
+      const status = taskStatusForRun(run.status);
+      if (type === "run.created" || (status !== "working" && status !== "waiting")) {
+        yield* notifyChanged;
+      }
+    });
+
     const followEvents = Stream.runForEach(orchestrator.streamDomainEvents, (event) => {
       if (event.type === "run.updated" || event.type === "run.created") {
-        return onRunUpdated(event.payload).pipe(
+        return onHomeRun(event.type, event.payload).pipe(
+          Effect.andThen(onRunUpdated(event.payload)),
           Effect.catchCause((cause) =>
             Effect.logWarning("bots.task-status-failed", { threadId: event.threadId, cause }),
           ),
@@ -670,6 +838,7 @@ export const layer = Layer.effect(
       subscribeList,
       upsert,
       delete: deleteBot,
+      setPaused,
       openChat,
       addMemory,
       deleteMemory,

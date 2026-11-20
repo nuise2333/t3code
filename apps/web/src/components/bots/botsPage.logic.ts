@@ -290,19 +290,6 @@ export function validateBotsSearch(raw: Record<string, unknown>): { readonly bot
   return typeof raw.bot === "string" && raw.bot.trim() ? { bot: BotId.make(raw.bot.trim()) } : {};
 }
 
-/** Every word must match the name, handle or title; a leading @ matches handles. */
-export function filterBots(bots: ReadonlyArray<Bot>, query: string): ReadonlyArray<Bot> {
-  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return bots;
-  return bots.filter((bot) => {
-    const fields = [bot.name, bot.handle, bot.title].map((field) => field.toLowerCase());
-    return words.every((word) => {
-      const term = word.startsWith("@") ? word.slice(1) : word;
-      return fields.some((field) => field.includes(term));
-    });
-  });
-}
-
 /** The bot whose own chat is the open thread. */
 export function activeBotId(
   bots: ReadonlyArray<Bot>,
@@ -311,10 +298,6 @@ export function activeBotId(
 ): BotId | null {
   if (activeThreadRef === null || activeThreadRef.environmentId !== environmentId) return null;
   return bots.find((bot) => bot.homeThreadId === activeThreadRef.threadId)?.id ?? null;
-}
-
-export function workingBotIds(tasks: ReadonlyArray<BotTask>): ReadonlySet<BotId> {
-  return new Set(tasks.filter((task) => task.status === "working").map((task) => task.botId));
 }
 
 /** Keeps the input order, which the server sends newest first. */

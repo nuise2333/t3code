@@ -116,6 +116,12 @@ export const layer = Layer.effect(
       if (target.id === self.id) {
         return yield* failure("invalid_request", "That is you. Do the work yourself.");
       }
+      if (target.paused) {
+        return yield* failure(
+          "invalid_request",
+          `@${target.handle} is paused and takes no work until the user resumes it. Do this yourself or pick another teammate.`,
+        );
+      }
       if (identity.depth >= BOT_MAX_DELEGATION_DEPTH) {
         return yield* failure(
           "invalid_request",

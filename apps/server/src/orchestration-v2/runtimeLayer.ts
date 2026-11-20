@@ -320,6 +320,7 @@ const layerBotServiceProvided = BotService.layer.pipe(
       layerThreadManagementProvided,
       layerManagedProjectFoldersProvided,
       layerOrchestratorProvided,
+      layerScheduledTaskProvided,
     ),
   ),
 );

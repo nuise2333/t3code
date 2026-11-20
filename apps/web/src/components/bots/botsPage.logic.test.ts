@@ -21,7 +21,6 @@ import {
   botSchedules,
   botUpsertInputFromDraft,
   emptyBotDraft,
-  filterBots,
   resolveBotsEnvironmentId,
   tasksByBot,
   templateUpsertInputs,
@@ -171,6 +170,7 @@ function bot(id: string, name: string, handle: string, title: string, home: stri
     homeThreadId: home === null ? null : ThreadId.make(home),
     avatar: "🤖",
     color: "blue",
+    paused: false,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -178,20 +178,6 @@ function bot(id: string, name: string, handle: string, title: string, home: stri
 
 const builder = bot("b1", "Builder", "builder", "Software engineer", "home-1");
 const reviewer = bot("b2", "Reviewer", "rev", "Code reviewer", null);
-
-describe("filterBots", () => {
-  it.each([
-    ["", ["b1", "b2"]],
-    ["  ", ["b1", "b2"]],
-    ["build", ["b1"]],
-    ["@rev", ["b2"]],
-    ["CODE", ["b2"]],
-    ["engineer builder", ["b1"]],
-    ["engineer rev", []],
-  ])("query %j matches %j", (query, ids) => {
-    expect(filterBots([builder, reviewer], query).map((entry) => entry.id)).toEqual(ids);
-  });
-});
 
 describe("activeBotId", () => {
   const env = EnvironmentId.make("env-1");
