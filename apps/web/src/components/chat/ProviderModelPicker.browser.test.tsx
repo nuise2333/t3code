@@ -467,7 +467,9 @@ it("edits the team setup inside the picker without closing it", async () => {
   const setup = page.getByRole("form", { name: "Architect & workers" });
   await expect.element(setup).toBeVisible();
   await setup.getByRole("combobox", { name: "Worker 1 model" }).click();
-  await page.getByRole("option", { name: "Beta model" }).click();
+  await page.getByRole("combobox", { name: "Search models" }).fill("bet");
+  await expect.element(page.getByRole("option", { name: /Alpha model/ })).not.toBeInTheDocument();
+  await page.getByRole("option", { name: /Beta model/ }).click();
   await setup.getByRole("textbox").fill("Plan first");
   const efforts = setup.element().querySelectorAll("[data-team-member-effort] button");
   expect(efforts).toHaveLength(2);

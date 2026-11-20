@@ -558,7 +558,9 @@ export const TraitsPicker = memo(function TraitsPicker({
           ) : (
             <>
               <ComposerControlIcon icon={GaugeIcon} size={size} />
-              <span data-composer-control-label>{triggerLabel}</span>
+              <span data-composer-control-label className="min-w-0 truncate">
+                {triggerLabel}
+              </span>
             </>
           )}
         </TooltipTrigger>

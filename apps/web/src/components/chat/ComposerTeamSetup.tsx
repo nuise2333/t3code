@@ -6,7 +6,7 @@ import {
   type RoutingGroup,
 } from "@t3tools/contracts";
 import { InfoIcon, MoreHorizontalIcon, PlusIcon, XIcon } from "lucide-react";
-import { memo, useId, useState } from "react";
+import { Fragment, memo, useId, useState } from "react";
 
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { Button } from "../ui/button";
@@ -14,9 +14,17 @@ import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxSearchInput,
+  ComboboxTrigger,
+} from "../ui/combobox";
+import {
   Select,
-  SelectGroup,
-  SelectGroupLabel,
+  SelectButton,
   SelectItem,
   SelectPopup,
   SelectTrigger,
@@ -24,6 +32,7 @@ import {
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { rankModelPickerSearch } from "@t3tools/client-runtime/model-search";
 import { createModelSelection } from "@t3tools/shared/model";
 import { selectsPlanAgent } from "../../modelSelection";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
@@ -114,7 +123,7 @@ function MemberEffort(props: {
         modelOptions={value.options ?? []}
         allowPromptInjectedEffort={false}
         includePlanAgent={selectsPlanAgent(value.options)}
-        triggerClassName="max-w-28"
+        triggerClassName="min-w-0 max-w-28 overflow-hidden"
         onModelOptionsChange={(options) =>
           props.onChange(createModelSelection(value.instanceId, value.model, options))
         }
@@ -129,6 +138,8 @@ function ModelSelect(props: {
   readonly entries: ReadonlyArray<ProviderInstanceEntry>;
   readonly onChange: (selection: ModelSelection) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const options = props.entries.filter((entry) => entry.enabled && entry.models.length > 0);
   const value = props.value;
   const entry = value
@@ -137,56 +148,109 @@ function ModelSelect(props: {
   const modelName = value
     ? (entry?.models.find((model) => model.slug === value.model)?.name ?? value.model)
     : null;
+
+  const choices = open
+    ? options.flatMap((option) =>
+        option.models.map((model) => ({
+          key: keyOf({ instanceId: option.instanceId, model: model.slug }),
+          entry: option,
+          model,
+        })),
+      )
+    : [];
+  const searching = query.trim().length > 0;
+  const visible = searching
+    ? rankModelPickerSearch(choices, query, (choice) => ({
+        name: choice.model.name,
+        ...(choice.model.shortName ? { shortName: choice.model.shortName } : {}),
+        ...(choice.model.subProvider ? { subProvider: choice.model.subProvider } : {}),
+        driverKind: choice.entry.driverKind,
+        providerDisplayName: choice.entry.displayName,
+      }))
+    : choices;
+  const keys = visible.map((choice) => choice.key);
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setQuery("");
+  };
+
   return (
-    <Select
-      value={value ? keyOf(value) : ""}
+    <Combobox
+      items={keys}
+      filteredItems={keys}
+      filter={null}
+      autoHighlight
+      open={open}
+      onOpenChange={handleOpenChange}
+      value={value ? keyOf(value) : null}
       onValueChange={(next) => {
+        handleOpenChange(false);
         if (typeof next !== "string" || next === "") return;
-        const [instanceId, model] = next.split("\u0000");
-        const picked = options.find((candidate) => candidate.instanceId === instanceId);
-        if (!picked || !model) return;
         // Re-picking the current model keeps its saved options, such as effort.
         if (value && keyOf(value) === next) return;
-        props.onChange({ instanceId: picked.instanceId, model });
+        const picked = visible.find((choice) => choice.key === next);
+        if (picked)
+          props.onChange({ instanceId: picked.entry.instanceId, model: picked.model.slug });
       }}
     >
-      <SelectTrigger aria-label={props.label} className="w-full">
-        <SelectValue>
-          {value ? (
-            <span className="flex min-w-0 items-center gap-2">
-              {entry ? (
-                <ProviderInstanceIcon
-                  driverKind={entry.driverKind}
-                  displayName={entry.displayName}
-                  accentColor={entry.accentColor}
-                  acpRegistryAgentId={entry.acpRegistryAgentId}
-                  acpRegistryIconUrl={entry.acpRegistryIconUrl}
-                  size="compact"
-                />
-              ) : null}
-              <span className="truncate">{modelName}</span>
-            </span>
-          ) : (
-            <span className="text-muted-foreground">Choose a model</span>
-          )}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectPopup className="max-h-80">
-        {options.map((option) => (
-          <SelectGroup key={option.instanceId}>
-            <SelectGroupLabel>{option.displayName}</SelectGroupLabel>
-            {option.models.map((model) => (
-              <SelectItem
-                key={model.slug}
-                value={keyOf({ instanceId: option.instanceId, model: model.slug })}
-              >
-                {model.name}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        ))}
-      </SelectPopup>
-    </Select>
+      <ComboboxTrigger aria-label={props.label} render={<SelectButton className="w-full" />}>
+        {value ? (
+          <span className="flex min-w-0 items-center gap-2">
+            {entry ? <EntryIcon entry={entry} /> : null}
+            <span className="truncate">{modelName}</span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">Choose a model</span>
+        )}
+      </ComboboxTrigger>
+      <ComboboxPopup align="start" className="w-72">
+        <ComboboxSearchInput
+          aria-label="Search models"
+          placeholder="Search models..."
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <ComboboxEmpty>No models found.</ComboboxEmpty>
+        <ComboboxList className="max-h-64">
+          {visible.map((choice, index) => {
+            const groupStart =
+              !searching && visible[index - 1]?.entry.instanceId !== choice.entry.instanceId;
+            return (
+              <Fragment key={choice.key}>
+                {groupStart ? (
+                  <div className="px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs first:pt-1">
+                    {choice.entry.displayName}
+                  </div>
+                ) : null}
+                <ComboboxItem index={index} value={choice.key}>
+                  {searching ? <EntryIcon entry={choice.entry} /> : null}
+                  <span className="min-w-0 flex-1 truncate">{choice.model.name}</span>
+                  {searching ? (
+                    <span className="shrink-0 truncate text-muted-foreground text-xs">
+                      {choice.entry.displayName}
+                    </span>
+                  ) : null}
+                </ComboboxItem>
+              </Fragment>
+            );
+          })}
+        </ComboboxList>
+      </ComboboxPopup>
+    </Combobox>
+  );
+}
+
+function EntryIcon(props: { readonly entry: ProviderInstanceEntry }) {
+  return (
+    <ProviderInstanceIcon
+      driverKind={props.entry.driverKind}
+      displayName={props.entry.displayName}
+      accentColor={props.entry.accentColor}
+      acpRegistryAgentId={props.entry.acpRegistryAgentId}
+      acpRegistryIconUrl={props.entry.acpRegistryIconUrl}
+      size="compact"
+    />
   );
 }
 
