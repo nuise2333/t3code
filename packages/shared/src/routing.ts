@@ -215,6 +215,8 @@ export function routeFor(input: {
   readonly taskClass?: RoutingTaskClass | undefined;
   /** The lowest level to pick; a missing level then rises, still never past high. */
   readonly minEffort?: RoutingEffort | undefined;
+  /** A team worker: any agent, using the same model's row on another agent when its own has none. */
+  readonly anyAgent?: boolean | undefined;
 }): { readonly selection: ModelSelection; readonly decision: RouteDecision } {
   const { table, selection } = input;
   const classified =
@@ -233,7 +235,7 @@ export function routeFor(input: {
   });
 
   // ACP Registry agents publish arbitrary reasoning levels, so no table row can speak for them.
-  if (input.driver === "acpRegistry") return unchanged("no_row");
+  if (input.driver === "acpRegistry" && input.anyAgent !== true) return unchanged("no_row");
   if (
     effortSetOutsidePicker({
       descriptors: input.descriptors,
@@ -243,7 +245,10 @@ export function routeFor(input: {
   ) {
     return unchanged("user_choice");
   }
-  const exactRow = modelRow(table, input.driver, [input.modelSlug ?? selection.model]);
+  const ids = [input.modelSlug ?? selection.model];
+  const exactRow =
+    modelRow(table, input.driver, ids) ??
+    (input.anyAgent === true ? keyedRow(table, ids, () => true) : undefined);
   const row =
     exactRow ?? table.rows.find((row) => row.driver === input.driver && row.model === "*");
   if (row === undefined) return unchanged("no_row");
@@ -511,7 +516,6 @@ const isTierRow = (row: RoutingTable["rows"][number]) =>
   row.verified === true &&
   row.relativeCost !== undefined &&
   row.model !== "*" &&
-  !UNROUTED_DRIVERS.has(row.driver) &&
   !isOpaqueRouter(row.driver, row.model);
 
 type RoutingRow = RoutingTable["rows"][number];
@@ -547,6 +551,78 @@ type ProviderModel = Pick<ServerProvider["models"][number], "slug" | "aliases">;
 
 const tierRowFor = (table: RoutingTable, driver: string, model: ProviderModel) =>
   modelRow(table, driver, [model.slug, ...(model.aliases ?? [])], true);
+
+/**
+ * A model id as any agent spells it: no auth suffix (`qwen4-max(openai)`), JSON wrapping, or
+ * gateway path (`magpie/auto/<slug>`), with dots as dashes (`claude-opus-5.5`).
+ */
+function modelKey(id: string): string {
+  let bare = id;
+  if (bare.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(bare);
+      const last: unknown = Array.isArray(parsed) ? parsed.at(-1) : undefined;
+      if (typeof last === "string") bare = last;
+    } catch {
+      // Not a JSON id.
+    }
+  }
+  bare = bare.replace(/\([^()]*\)$/, "");
+  return bare
+    .slice(bare.lastIndexOf("/") + 1)
+    .toLowerCase()
+    .replaceAll(".", "-");
+}
+
+/** Any agent's row for these ids, matched by model key. */
+const keyedRow = (
+  table: RoutingTable,
+  ids: ReadonlyArray<string>,
+  accept: (row: RoutingRow) => boolean,
+) => {
+  const keys = new Set(ids.map(modelKey));
+  return table.rows.find(
+    (row) => row.model !== "*" && accept(row) && keys.has(modelKey(row.model)),
+  );
+};
+
+/** Teams reach every agent: its own row first, else the row of the same model on another agent. */
+function teamRowFor(table: RoutingTable, driver: string, model: ProviderModel) {
+  const own = tierRowFor(table, driver, model);
+  if (own !== undefined && isCandidateRow(own)) return own;
+  if (isOpaqueRouter(driver, model.slug) || model.slug === "auto" || model.slug === "default") {
+    return undefined;
+  }
+  return keyedRow(table, [model.slug, ...(model.aliases ?? [])], isCandidateRow);
+}
+
+/** A gateway route first, then a group that may mix models; a bare id can be a personal key. */
+const routeRank = (id: string) => (id.includes("auto/") ? 0 : id.includes("group/") ? 1 : 2);
+
+/** Options that keep a launch off pricier defaults; null when the level is set outside the picker. */
+type OptionValue = { readonly id: string; readonly value: string | boolean };
+
+function economyOptions(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+): Array<OptionValue> | null {
+  if (effortSetOutsidePicker({ descriptors, selection: null, ultrathinkPrompt: false }))
+    return null;
+  return descriptors.flatMap((descriptor): Array<OptionValue> => {
+    if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
+      return getProviderOptionCurrentValue(descriptor) === true
+        ? [{ id: descriptor.id, value: false }]
+        : [];
+    }
+    if (descriptor.id === "contextWindow" && descriptor.type === "select") {
+      const value = getProviderOptionCurrentValue(descriptor);
+      const smallest = descriptor.options[0]?.id;
+      return value !== undefined && smallest !== undefined && value !== smallest
+        ? [{ id: descriptor.id, value: smallest }]
+        : [];
+    }
+    return [];
+  });
+}
 
 /** Every Auto launch has someone waiting on it, so background-only rows are no candidates yet. */
 const isCandidateRow = (row: RoutingTable["rows"][number]) =>
@@ -755,6 +831,7 @@ export function chooseAutoModel(input: {
     const tier = row.tierByClass?.[input.taskClass];
     if (!isCandidateRow(row) || tier === undefined || row.relativeCost === undefined) continue;
     for (const provider of input.providers) {
+      if (UNROUTED_DRIVERS.has(provider.driver)) continue;
       if (input.scope === "instance" && provider.instanceId !== current.instanceId) continue;
       const resolves = (candidate: ProviderModel) =>
         tierRowFor(input.table, provider.driver, candidate) === row;
@@ -890,17 +967,17 @@ export function chooseTeamWorkerModel(input: {
     readonly slug: string;
     readonly tier: RoutingTier;
     readonly relativeCost: number;
+    readonly own: boolean;
+    readonly route: number;
+    readonly options: ReadonlyArray<OptionValue>;
   }> = [];
-  for (const row of input.table.rows) {
-    const tier = row.tierByClass?.[input.taskClass];
-    if (!isCandidateRow(row) || tier === undefined || row.relativeCost === undefined) continue;
-    for (const provider of input.providers) {
-      const resolves = (candidate: ProviderModel) =>
-        tierRowFor(input.table, provider.driver, candidate) === row;
-      const exact = findModel(provider, row.model);
-      const model = exact !== undefined && resolves(exact) ? exact : provider.models.find(resolves);
-      if (model === undefined) continue;
-      if (premiumByDefault(model.capabilities?.optionDescriptors ?? [])) continue;
+  for (const provider of input.providers) {
+    for (const model of provider.models) {
+      const row = teamRowFor(input.table, provider.driver, model);
+      const tier = row?.tierByClass?.[input.taskClass];
+      if (row === undefined || tier === undefined || row.relativeCost === undefined) continue;
+      const options = economyOptions(model.capabilities?.optionDescriptors ?? []);
+      if (options === null) continue;
       const reason = memberSkipReason({
         ...input,
         member: { instanceId: provider.instanceId, model: model.slug },
@@ -908,7 +985,15 @@ export function chooseTeamWorkerModel(input: {
         runnableInstanceIds: input.runnableInstanceIds,
       });
       if (reason !== null) continue;
-      candidates.push({ provider, slug: model.slug, tier, relativeCost: row.relativeCost });
+      candidates.push({
+        provider,
+        slug: model.slug,
+        tier,
+        relativeCost: row.relativeCost,
+        own: row.driver === provider.driver,
+        route: routeRank(model.slug),
+        options,
+      });
     }
   }
   if (candidates.length === 0) return null;
@@ -937,15 +1022,271 @@ export function chooseTeamWorkerModel(input: {
       (a, b) =>
         (input.kind === "best" ? -1 : 1) * (a.candidate.relativeCost - b.candidate.relativeCost) ||
         rank(b.candidate.tier) - rank(a.candidate.tier) ||
+        Number(b.candidate.own) - Number(a.candidate.own) ||
+        a.candidate.route - b.candidate.route ||
         a.bucket - b.bucket ||
         b.score - a.score,
     )[0]?.candidate;
   return chosen === undefined
     ? null
     : {
-        selection: { instanceId: chosen.provider.instanceId, model: chosen.slug },
+        selection: {
+          instanceId: chosen.provider.instanceId,
+          model: chosen.slug,
+          ...(chosen.options.length === 0 ? {} : { options: [...chosen.options] }),
+        },
         tier: chosen.tier,
       };
+}
+
+/**
+ * Keeps a usable team target, or falls back to the same model on another agent, then the next
+ * capability level down across agents. Null when no usable model exists across any agent.
+ */
+export function chooseTeamFallbackModel(input: {
+  readonly target: {
+    readonly instanceId?: ProviderInstanceId | undefined;
+    readonly driverKind?: ProviderDriverKind | undefined;
+    readonly model: string;
+    readonly options?:
+      | ReadonlyArray<{ readonly id: string; readonly value: string | boolean }>
+      | undefined;
+  };
+  readonly table: RoutingTable;
+  readonly taskClass: RoutingTaskClass;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
+  readonly projectId: ProjectId | null;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId> | undefined;
+  readonly now: number;
+}): {
+  readonly selection: ModelSelection;
+  readonly tier: RoutingTier | null;
+  readonly switched: "none" | "same_model" | "lower_tier";
+} | null {
+  const { target } = input;
+  const targetProvider =
+    target.instanceId !== undefined
+      ? input.providers.find((provider) => provider.instanceId === target.instanceId)
+      : (input.providers.find(
+          (provider) =>
+            (target.driverKind === undefined || provider.driver === target.driverKind) &&
+            findModel(provider, target.model) !== undefined &&
+            memberSkipReason({
+              ...input,
+              member: { instanceId: provider.instanceId, model: target.model },
+              provider,
+              runnableInstanceIds: input.runnableInstanceIds,
+            }) === null,
+        ) ??
+        input.providers.find(
+          (provider) =>
+            (target.driverKind === undefined || provider.driver === target.driverKind) &&
+            findModel(provider, target.model) !== undefined,
+        ));
+  const targetModel =
+    targetProvider === undefined ? undefined : findModel(targetProvider, target.model);
+  const targetRow =
+    targetProvider !== undefined && targetModel !== undefined
+      ? teamRowFor(input.table, targetProvider.driver, targetModel)
+      : keyedRow(input.table, [target.model], isCandidateRow);
+  const targetTier = targetRow?.tierByClass?.[input.taskClass] ?? null;
+
+  if (targetProvider !== undefined) {
+    const member: ModelSelection = {
+      instanceId: targetProvider.instanceId,
+      model: targetModel?.slug ?? target.model,
+      ...(target.options === undefined ? {} : { options: [...target.options] }),
+    };
+    const reason = memberSkipReason({
+      ...input,
+      member,
+      provider: targetProvider,
+      runnableInstanceIds: input.runnableInstanceIds,
+    });
+    if (reason === null) {
+      return {
+        selection: acceptedOptions(member, targetModel?.capabilities?.optionDescriptors),
+        tier: targetTier,
+        switched: "none",
+      };
+    }
+  }
+
+  const targetKeys = new Set<string>([
+    modelKey(target.model),
+    ...(targetModel === undefined
+      ? []
+      : [modelKey(targetModel.slug), ...(targetModel.aliases ?? []).map(modelKey)]),
+    ...(targetRow === undefined ? [] : [modelKey(targetRow.model)]),
+  ]);
+
+  // 1. Same model on another usable agent.
+  const sameModelCandidates: Array<{
+    readonly provider: ServerProvider;
+    readonly model: ServerProvider["models"][number];
+    readonly row: RoutingRow | undefined;
+    readonly own: boolean;
+    readonly route: number;
+    readonly options: ReadonlyArray<OptionValue>;
+  }> = [];
+  for (const provider of input.providers) {
+    for (const model of provider.models) {
+      const row = teamRowFor(input.table, provider.driver, model);
+      const keys = [
+        modelKey(model.slug),
+        ...(model.aliases ?? []).map(modelKey),
+        ...(row === undefined ? [] : [modelKey(row.model)]),
+      ];
+      if (!keys.some((key) => targetKeys.has(key))) continue;
+      const options = economyOptions(model.capabilities?.optionDescriptors ?? []);
+      if (options === null) continue;
+      const reason = memberSkipReason({
+        ...input,
+        member: { instanceId: provider.instanceId, model: model.slug },
+        provider,
+        runnableInstanceIds: input.runnableInstanceIds,
+      });
+      if (reason !== null) continue;
+      sameModelCandidates.push({
+        provider,
+        model,
+        row,
+        own: row !== undefined && row.driver === provider.driver,
+        route: routeRank(model.slug),
+        options,
+      });
+    }
+  }
+  const sameChosen = sameModelCandidates
+    .map((candidate) => ({
+      candidate,
+      ...quotaRank(candidate.provider, candidate.model.slug, input.now),
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.candidate.own) - Number(a.candidate.own) ||
+        a.candidate.route - b.candidate.route ||
+        a.bucket - b.bucket ||
+        b.score - a.score,
+    )[0]?.candidate;
+  if (sameChosen !== undefined) {
+    const merged = acceptedOptions(
+      {
+        instanceId: sameChosen.provider.instanceId,
+        model: sameChosen.model.slug,
+        ...(target.options !== undefined
+          ? { options: [...target.options] }
+          : sameChosen.options.length === 0
+            ? {}
+            : { options: [...sameChosen.options] }),
+      },
+      sameChosen.model.capabilities?.optionDescriptors,
+    );
+    return {
+      selection: merged,
+      tier: sameChosen.row?.tierByClass?.[input.taskClass] ?? targetTier,
+      switched: "same_model",
+    };
+  }
+
+  // 2. Next capability level down across agents (以此类推).
+  const rank = (tier: RoutingTier) => TIER_ORDER.indexOf(tier);
+  const ceilingTierRank = targetTier !== null ? rank(targetTier) : rank("S");
+  const ceilingCost = targetRow?.relativeCost ?? Number.POSITIVE_INFINITY;
+  const fallbackCandidates: Array<{
+    readonly provider: ServerProvider;
+    readonly model: ServerProvider["models"][number];
+    readonly tier: RoutingTier;
+    readonly tierRank: number;
+    readonly relativeCost: number;
+    readonly own: boolean;
+    readonly route: number;
+    readonly options: ReadonlyArray<OptionValue>;
+  }> = [];
+  for (const provider of input.providers) {
+    for (const model of provider.models) {
+      const row = teamRowFor(input.table, provider.driver, model);
+      const tier = row?.tierByClass?.[input.taskClass];
+      if (row === undefined || tier === undefined || row.relativeCost === undefined) continue;
+      const options = economyOptions(model.capabilities?.optionDescriptors ?? []);
+      if (options === null) continue;
+      const reason = memberSkipReason({
+        ...input,
+        member: { instanceId: provider.instanceId, model: model.slug },
+        provider,
+        runnableInstanceIds: input.runnableInstanceIds,
+      });
+      if (reason !== null) continue;
+      fallbackCandidates.push({
+        provider,
+        model,
+        tier,
+        tierRank: rank(tier),
+        relativeCost: row.relativeCost,
+        own: row.driver === provider.driver,
+        route: routeRank(model.slug),
+        options,
+      });
+    }
+  }
+  if (fallbackCandidates.length === 0) return null;
+
+  // Step to the next capability level down: same-tier models with lower cost first, then lower tiers.
+  const strictlyBelowCapability = fallbackCandidates.filter(
+    (candidate) =>
+      candidate.tierRank < ceilingTierRank ||
+      (targetTier === null
+        ? candidate.tierRank <= ceilingTierRank
+        : candidate.tierRank === ceilingTierRank && candidate.relativeCost < ceilingCost),
+  );
+  const atOrBelow = fallbackCandidates.filter(
+    (candidate) =>
+      candidate.tierRank < ceilingTierRank ||
+      (candidate.tierRank === ceilingTierRank && candidate.relativeCost <= ceilingCost),
+  );
+  const strictlyLowerTier = fallbackCandidates.filter(
+    (candidate) => candidate.tierRank < ceilingTierRank,
+  );
+  const pool =
+    strictlyBelowCapability.length > 0
+      ? strictlyBelowCapability
+      : strictlyLowerTier.length > 0
+        ? strictlyLowerTier
+        : atOrBelow.length > 0
+          ? atOrBelow
+          : fallbackCandidates;
+
+  const chosen = pool
+    .map((candidate) => ({
+      candidate,
+      ...quotaRank(candidate.provider, candidate.model.slug, input.now),
+    }))
+    .sort(
+      (a, b) =>
+        b.candidate.tierRank - a.candidate.tierRank ||
+        b.candidate.relativeCost - a.candidate.relativeCost ||
+        Number(b.candidate.own) - Number(a.candidate.own) ||
+        a.candidate.route - b.candidate.route ||
+        a.bucket - b.bucket ||
+        b.score - a.score,
+    )[0]?.candidate;
+  if (chosen === undefined) return null;
+  const merged = acceptedOptions(
+    {
+      instanceId: chosen.provider.instanceId,
+      model: chosen.model.slug,
+      ...(chosen.options.length === 0 ? {} : { options: [...chosen.options] }),
+    },
+    chosen.model.capabilities?.optionDescriptors,
+  );
+  return {
+    selection: merged,
+    tier: chosen.tier,
+    switched: "lower_tier",
+  };
 }
 
 /**

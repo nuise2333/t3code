@@ -3605,7 +3605,11 @@ describe("OrchestratorMcpService provider resolution", () => {
       const layer = OrchestratorMcpService.layer.pipe(
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
         Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
+        Layer.provide(
+          Layer.mock(RoutingPolicy.RoutingPolicy)({
+            routeTeamMember: () => Effect.succeed(null),
+          }),
+        ),
         Layer.provide(layerDependencies),
       );
 
@@ -3641,6 +3645,108 @@ describe("OrchestratorMcpService provider resolution", () => {
         });
       }).pipe(Effect.provide(layer));
     }),
+  );
+
+  it.effect(
+    "a team lead falls back to another agent when a member is out of quota or unavailable",
+    () =>
+      Effect.gen(function* () {
+        const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        const claudeInstanceId = ProviderInstanceId.make("claude_fake");
+        const backupInstanceId = ProviderInstanceId.make("claude_backup");
+        const lead = { instanceId: codexInstanceId, model: "gpt-5.4" };
+        const member = { instanceId: claudeInstanceId, model: "claude-fake-1" };
+        const routing = {
+          taskClass: "implement",
+          effort: null,
+          applied: false,
+          reasons: [],
+          group: {
+            id: "crew",
+            name: "Crew",
+            via: "picker",
+            team: true,
+            chosen: 0,
+            member: lead,
+            skipped: [],
+          },
+        };
+        const parent = parentProjection([], lead);
+        const teamParent = {
+          ...parent,
+          thread: { ...parent.thread, routing },
+        } as unknown as OrchestrationV2ThreadProjection;
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.succeed(false),
+            assertProviderInstanceEnabled: () => Effect.void,
+            isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+            getThreadRecords: (threadId) =>
+              Effect.succeed(threadId === parentThreadId ? teamParent : childProjection),
+            dispatch: (command) =>
+              Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                Effect.andThen(Effect.fail(new Error("stop after dispatch") as never)),
+              ),
+          }),
+          ServerSettings.layerTest({
+            routingGroups: [
+              { id: "crew", name: "Crew", members: [lead, member], strategy: "order", team: true },
+            ],
+          }),
+          providerRegistryLayer([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+            {
+              ...providerSnapshot({
+                instanceId: claudeInstanceId,
+                driver: ProviderDriverKind.make("claudeAgent"),
+                model: "claude-fake-1",
+              }),
+              status: "error",
+            },
+            providerSnapshot({
+              instanceId: backupInstanceId,
+              driver: ProviderDriverKind.make("claudeAgent"),
+              model: "claude-fake-1",
+            }),
+          ]),
+          adapterRegistryLayer([codexInstanceId, claudeInstanceId, backupInstanceId]),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        const layer = OrchestratorMcpService.layer.pipe(
+          Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+          Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+          Layer.provide(
+            Layer.mock(RoutingPolicy.RoutingPolicy)({
+              routeTeamMember: () =>
+                Effect.succeed({ instanceId: backupInstanceId, model: "claude-fake-1" }),
+            }),
+          ),
+          Layer.provide(layerDependencies),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          yield* service
+            .delegateTask(scope, { task: "Review.", target: { model: "claude-fake-1" } })
+            .pipe(Effect.flip);
+          const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+            readonly modelSelection: { readonly instanceId: string; readonly model: string };
+          }>;
+          assert.include(commands[0]?.modelSelection, {
+            instanceId: backupInstanceId,
+            model: "claude-fake-1",
+          });
+        }).pipe(Effect.provide(layer));
+      }),
   );
 
   it.effect("seats a Council reviewer only while Council is on", () =>
@@ -3698,7 +3804,11 @@ describe("OrchestratorMcpService provider resolution", () => {
       const layer = OrchestratorMcpService.layer.pipe(
         Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
         Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-        Layer.provide(Layer.mock(RoutingPolicy.RoutingPolicy)({})),
+        Layer.provide(
+          Layer.mock(RoutingPolicy.RoutingPolicy)({
+            routeTeamMember: () => Effect.succeed(null),
+          }),
+        ),
         Layer.provide(layerDependencies),
       );
 
@@ -3864,8 +3974,8 @@ describe("OrchestratorMcpService provider resolution", () => {
         autoRouting: auto(false),
         parentEffort: "xhigh",
         input: { role: "research" },
-        modelSelection: sol("low"),
-        routing: { role: "research", effort: "low", switched: "none" },
+        modelSelection: sol("medium"),
+        routing: { role: "research", effort: "medium", switched: "none" },
       },
       {
         name: "a target model wins over the role",

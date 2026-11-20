@@ -289,16 +289,20 @@ describe("resolveRoutingTable", () => {
     assert.isFalse(table.rows.some((row) => row.driver === "acpRegistry"));
   });
 
-  it("bundles verified tiers only for models in the bundled catalog", () => {
+  it("bundles verified tiers only for models in the bundled catalog of drivers that have one", () => {
     const verified = ModelManifest.BUNDLED_ROUTING_TABLE.rows.filter((row) => row.verified);
     assert.isAbove(verified.length, 0);
     for (const row of verified) {
       assert.isNotEmpty(Object.keys(row.tierByClass ?? {}), `${row.driver}/${row.model}`);
       assert.isDefined(row.relativeCost, `${row.driver}/${row.model}`);
-      const slugs = ModelManifest.BUNDLED_MODEL_MANIFEST.providers?.[row.driver]?.models.map(
-        (model) => model.slug,
+      // Drivers without a bundled catalog list their models live, such as ACP agents and Cursor.
+      const catalog = ModelManifest.BUNDLED_MODEL_MANIFEST.providers?.[row.driver];
+      if (catalog === undefined) continue;
+      assert.include(
+        catalog.models.map((model) => model.slug),
+        row.model,
+        `${row.driver}/${row.model}`,
       );
-      assert.include(slugs ?? [], row.model, `${row.driver}/${row.model}`);
     }
   });
 

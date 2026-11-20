@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-15T18:00:00Z",
+  "updatedAt": "2026-11-20T04:00:00Z",
   "routing": {
     "version": 1,
-    "updatedAt": "2026-11-15T18:00:00Z",
+    "updatedAt": "2026-11-20T04:00:00Z",
     "sources": {
       "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
       "aa-coding": {
@@ -55,7 +55,15 @@
         "url": "https://www.youtube.com/watch?v=OBNVzWYMKbE",
         "dataDate": "2026-11-11"
       },
-      "v2ex-gemini-4-latency": { "url": "https://www.v2ex.com/t/1257050", "dataDate": "2026-11-14" }
+      "v2ex-gemini-4-latency": {
+        "url": "https://www.v2ex.com/t/1257050",
+        "dataDate": "2026-11-14"
+      },
+      "openrouter": { "url": "https://openrouter.ai/api/v1/models", "dataDate": "2026-11-20" },
+      "bilibili-arena": {
+        "url": "https://www.bilibili.com/blackboard/era/aiarena.html?page=home#topics",
+        "dataDate": "2026-11-20"
+      }
     },
     "defaultEffortByClass": {
       "readonly": "low",
@@ -67,7 +75,41 @@
       { "driver": "codex", "model": "*", "sourceIds": ["tb41", "aa-coding"] },
       {
         "driver": "codex",
+        "model": "gpt-6.2-astra",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
+        "tierByClass": { "readonly": "A", "quick_edit": "B", "implement": "S", "hard": "S" },
+        "relativeCost": 5,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "frontier-code-2", "openrouter", "aa-coding"]
+      },
+      {
+        "driver": "codex",
+        "model": "gpt-6.2-sol",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "A" },
+        "relativeCost": 3,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "frontier-code-2", "openrouter", "aa-coding"]
+      },
+      {
+        "driver": "codex",
         "model": "gpt-6.1-sol",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
         "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "A", "hard": "B" },
         "relativeCost": 2,
         "verified": true,
@@ -83,10 +125,17 @@
       {
         "driver": "codex",
         "model": "gpt-6-astra",
-        "tierByClass": { "readonly": "A", "quick_edit": "B", "implement": "A", "hard": "A" },
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "medium",
+          "hard": "high"
+        },
+        "tierByClass": { "readonly": "A", "quick_edit": "B", "implement": "S", "hard": "A" },
         "relativeCost": 5,
         "verified": true,
         "sourceIds": [
+          "bilibili-arena",
           "aa-coding",
           "tb41",
           "frontier-code-2",
@@ -106,18 +155,32 @@
         "tierByClass": { "readonly": "C", "quick_edit": "B", "implement": "C", "hard": "C" },
         "relativeCost": 0,
         "verified": true,
-        "sourceIds": ["codex-docs", "aa-index", "aa-coding", "frontier-code-2"]
+        "sourceIds": [
+          "bilibili-arena",
+          "vals-tb4",
+          "scale-swe-atlas",
+          "codex-docs",
+          "aa-index",
+          "aa-coding",
+          "frontier-code-2"
+        ]
       },
       { "driver": "claudeAgent", "model": "*", "sourceIds": ["tb41", "aa-index", "claude-effort"] },
       {
         "driver": "claudeAgent",
         "model": "claude-opus-5-5",
-        "effortByClass": { "readonly": "medium" },
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
         "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
         "relativeCost": 4,
         "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
         "verified": true,
         "sourceIds": [
+          "bilibili-arena",
           "vals-tb4",
           "aa-coding",
           "tb41",
@@ -131,11 +194,18 @@
       {
         "driver": "claudeAgent",
         "model": "claude-fable-5-2",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
         "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
         "relativeCost": 6,
         "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
         "verified": true,
         "sourceIds": [
+          "bilibili-arena",
           "aa-coding",
           "aa-index",
           "frontier-code-2",
@@ -147,7 +217,12 @@
       {
         "driver": "claudeAgent",
         "model": "claude-sonnet-5-5",
-        "effortByClass": { "implement": "high" },
+        "effortByClass": {
+          "readonly": "high",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
         "tierByClass": { "readonly": "A", "quick_edit": "A", "hard": "B" },
         "relativeCost": 3,
         "effortChangeKeepsCache": { "direct": true, "bedrock": false, "customEndpoint": false },
@@ -210,6 +285,74 @@
           "theo-gemini-4",
           "v2ex-gemini-4-latency"
         ]
+      },
+      {
+        "driver": "cursor",
+        "model": "gemini-4-neon",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "S", "hard": "S" },
+        "relativeCost": 5,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "frontier-code-2", "vals-tb4", "openrouter"]
+      },
+      {
+        "driver": "cursor",
+        "model": "gemini-4-hydrogen",
+        "effortByClass": {
+          "readonly": "medium",
+          "quick_edit": "medium",
+          "implement": "high",
+          "hard": "high"
+        },
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "A", "hard": "B" },
+        "relativeCost": 4,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "frontier-code-2", "vals-tb4", "openrouter"]
+      },
+      {
+        "driver": "antigravity",
+        "model": "gemini-4-argon",
+        "tierByClass": { "readonly": "B", "quick_edit": "B", "implement": "B", "hard": "B" },
+        "relativeCost": 6,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "frontier-code-2", "vals-tb4", "openrouter"]
+      },
+      {
+        "driver": "grok",
+        "model": "grok-4.7",
+        "tierByClass": { "readonly": "B", "quick_edit": "B", "implement": "B", "hard": "C" },
+        "relativeCost": 7,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "frontier-code-2", "vals-tb4", "openrouter"]
+      },
+      {
+        "driver": "opencode",
+        "model": "qwen4-max",
+        "tierByClass": { "readonly": "A", "quick_edit": "A", "implement": "A", "hard": "B" },
+        "relativeCost": 3,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "vals-tb4", "openrouter"]
+      },
+      {
+        "driver": "opencode",
+        "model": "k3.1-pro",
+        "tierByClass": { "readonly": "B", "quick_edit": "B", "implement": "B", "hard": "C" },
+        "relativeCost": 4,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "frontier-code-2", "vals-tb4", "openrouter"]
+      },
+      {
+        "driver": "opencode",
+        "model": "deepseek-v4.1-flash-1017",
+        "tierByClass": { "readonly": "B", "quick_edit": "B", "implement": "B", "hard": "C" },
+        "relativeCost": 1,
+        "verified": true,
+        "sourceIds": ["bilibili-arena", "frontier-code-2", "vals-tb4", "openrouter"]
       },
       { "driver": "opencode", "model": "*", "sourceIds": ["aa-index"] },
       { "driver": "cursor", "model": "*", "sourceIds": ["aa-index"] },
@@ -349,6 +492,8 @@
   ],
   "currentModels": {
     "codex": [
+      "gpt-6.2-sol",
+      "gpt-6.2-astra",
       "gpt-6-astra",
       "gpt-6.1-sol",
       "gpt-6-luna",
@@ -369,6 +514,18 @@
     "codex": {
       "profiles": {},
       "models": [
+        {
+          "slug": "gpt-6.2-sol",
+          "name": "GPT-6.2 Sol",
+          "status": "current",
+          "adapter": { "codex": { "minVersion": "0.169.0" } }
+        },
+        {
+          "slug": "gpt-6.2-astra",
+          "name": "GPT-6.2 Astra",
+          "status": "current",
+          "adapter": { "codex": { "minVersion": "0.169.0" } }
+        },
         {
           "slug": "gpt-6.1-sol",
           "name": "GPT-6.1 Sol",

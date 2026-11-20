@@ -6,10 +6,11 @@ import * as NodeModule from "node:module";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeChildProcess from "node:child_process";
 
+const SUPPORTED_DSH_VERSIONS = new Set(["0.2.2-rc.1", "0.2.2-rc.5"]);
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
   process.stdout.write(
-    "T3 DeepSeek Harness ACP preset bridge\nUsage: node scripts/dsh-acp.mjs [dsh launcher options]\nRequires installed @deepseek-ai/dsh 0.2.2-rc.1.\n",
+    "T3 DeepSeek Harness ACP preset bridge\nUsage: node scripts/dsh-acp.mjs [dsh launcher options]\nRequires installed @deepseek-ai/dsh 0.2.2-rc.1 or 0.2.2-rc.5.\n",
   );
   process.exit(0);
 }
@@ -36,8 +37,10 @@ const require = NodeModule.createRequire(runtimeAnchor);
 const bridgeManifest = JSON.parse(
   await NodeFSP.readFile(require.resolve("@deepseek-ai/dsh-acp/package.json"), "utf8"),
 );
-if (bridgeManifest.version !== "0.2.2-rc.1")
-  throw new Error(`Unsupported DSH ACP version: ${bridgeManifest.version}. Expected 0.2.2-rc.1.`);
+if (!SUPPORTED_DSH_VERSIONS.has(bridgeManifest.version))
+  throw new Error(
+    `Unsupported DSH ACP version: ${bridgeManifest.version}. Expected 0.2.2-rc.1 or 0.2.2-rc.5.`,
+  );
 const webRoot = NodePath.dirname(require.resolve("@deepseek-ai/dsh-web-app/package.json"));
 const webPatch = await NodeFSP.readFile(NodePath.join(webRoot, "cordis.patch.yml"), "utf8");
 const marker = "- id: tool-plugin-manager\n";

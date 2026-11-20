@@ -20,6 +20,7 @@ import { isReasoningSelect } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   chooseAutoModel,
+  chooseTeamFallbackModel,
   chooseTeamWorkerModel,
   classifyTask,
   crossVendorModel,
@@ -129,6 +130,22 @@ export interface RoutingTeamWorkerInput {
   readonly runnableInstanceIds: ReadonlySet<ProviderInstanceId>;
 }
 
+export interface RoutingTeamMemberInput {
+  readonly target: {
+    readonly instanceId?: ProviderInstanceId | undefined;
+    readonly driverKind?: ProviderDriverKind | undefined;
+    readonly model: string;
+    readonly options?:
+      | ReadonlyArray<{ readonly id: string; readonly value: string | boolean }>
+      | undefined;
+  };
+  readonly prompt: string;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly runtimeMode: RuntimeMode;
+  readonly projectId: ProjectId | null;
+  readonly runnableInstanceIds: ReadonlySet<ProviderInstanceId>;
+}
+
 export interface RoutedSelection {
   readonly selection: ModelSelection;
   readonly decision: RouteDecision;
@@ -151,6 +168,13 @@ export class RoutingPolicy extends Context.Service<
     /** An automatic team's worker for this task; null when no model qualifies or it fails. */
     readonly routeTeamWorker: (
       input: RoutingTeamWorkerInput,
+    ) => Effect.Effect<ModelSelection | null>;
+    /**
+     * Resolves a team member target, falling back to the same model on another agent or the next
+     * capability level down when the requested member is out of quota or inaccessible.
+     */
+    readonly routeTeamMember?: (
+      input: RoutingTeamMemberInput,
     ) => Effect.Effect<ModelSelection | null>;
     /** A user's own ask, so Auto's switches do not apply; null when nothing qualifies or it fails. */
     readonly crossVendorModel: (
@@ -175,6 +199,7 @@ const make = Effect.gen(function* () {
       readonly keepExplicitEffort: boolean;
       readonly taskClass?: RoutingTaskClass | undefined;
       readonly minEffort?: RoutingEffort | undefined;
+      readonly anyAgent?: boolean | undefined;
     }) {
       const providers = yield* providerRegistry.getProviders;
       const provider = providers.find(
@@ -231,6 +256,7 @@ const make = Effect.gen(function* () {
         apply: input.apply,
         taskClass: input.taskClass,
         minEffort: input.minEffort,
+        anyAgent: input.anyAgent,
       });
     },
     Effect.catchCause((cause) =>
@@ -522,11 +548,13 @@ const make = Effect.gen(function* () {
   const routeTeamWorker = Effect.fn("RoutingPolicy.routeTeamWorker")(
     function* (input: RoutingTeamWorkerInput) {
       const settings = yield* serverSettings.getSettings;
+      const taskClass = classifyTask(input).taskClass;
+      const providers = yield* providerRegistry.getProviders;
       const chosen = chooseTeamWorkerModel({
         kind: input.kind,
         table: ModelManifest.resolveRoutingTable(yield* manifest.current),
-        taskClass: classifyTask(input).taskClass,
-        providers: yield* providerRegistry.getProviders,
+        taskClass,
+        providers,
         settings,
         projectId: input.projectId,
         runtimeMode: input.runtimeMode,
@@ -534,10 +562,79 @@ const make = Effect.gen(function* () {
         runnableInstanceIds: input.runnableInstanceIds,
         now: DateTime.toEpochMillis(yield* DateTime.now),
       });
-      return chosen?.selection ?? null;
+      if (chosen === null) return null;
+      // A model's own default effort can be far below what the task needs (Codex starts at low).
+      const routed = yield* routeEffort({
+        selection: chosen.selection,
+        prompt: input.prompt,
+        interactionMode: input.interactionMode,
+        apply: true,
+        keepExplicitEffort: false,
+        taskClass,
+        anyAgent: true,
+      });
+      const selection = routed?.selection ?? chosen.selection;
+      if (input.kind !== "best" || taskClass !== "hard") return selection;
+      // Best goes past Auto's high cap on hard tasks only: xhigh still gains there, max costs far more.
+      const reasoning = providers
+        .find((provider) => provider.instanceId === selection.instanceId)
+        ?.models.find((model) => model.slug === selection.model)
+        ?.capabilities?.optionDescriptors?.find(isReasoningSelect);
+      if (
+        reasoning === undefined ||
+        reasoning.promptInjectedValues?.includes("xhigh") === true ||
+        !reasoning.options.some((option) => option.id === "xhigh")
+      ) {
+        return selection;
+      }
+      const xhigh = { id: reasoning.id, value: "xhigh" };
+      return {
+        ...selection,
+        options: [
+          ...(selection.options ?? []).filter((option) => option.id !== reasoning.id),
+          xhigh,
+        ],
+      };
     },
     Effect.catchCause((cause) =>
       Effect.logWarning("Team worker routing failed; the lead names a model.", cause).pipe(
+        Effect.as(null),
+      ),
+    ),
+  );
+
+  const routeTeamMember = Effect.fn("RoutingPolicy.routeTeamMember")(
+    function* (input: RoutingTeamMemberInput) {
+      const settings = yield* serverSettings.getSettings;
+      const taskClass = classifyTask(input).taskClass;
+      const providers = yield* providerRegistry.getProviders;
+      const chosen = chooseTeamFallbackModel({
+        target: input.target,
+        table: ModelManifest.resolveRoutingTable(yield* manifest.current),
+        taskClass,
+        providers,
+        settings,
+        projectId: input.projectId,
+        runtimeMode: input.runtimeMode,
+        interactionMode: input.interactionMode,
+        runnableInstanceIds: input.runnableInstanceIds,
+        now: DateTime.toEpochMillis(yield* DateTime.now),
+      });
+      if (chosen === null) return null;
+      if (chosen.switched === "none") return chosen.selection;
+      const routed = yield* routeEffort({
+        selection: chosen.selection,
+        prompt: input.prompt,
+        interactionMode: input.interactionMode,
+        apply: true,
+        keepExplicitEffort: chosen.switched === "same_model",
+        taskClass,
+        anyAgent: true,
+      });
+      return routed?.selection ?? chosen.selection;
+    },
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Team member fallback routing failed; keeping target.", cause).pipe(
         Effect.as(null),
       ),
     ),
@@ -548,6 +645,7 @@ const make = Effect.gen(function* () {
     resolveGroup,
     routeDelegation,
     routeTeamWorker,
+    routeTeamMember,
     crossVendorModel: crossVendor,
   });
 });

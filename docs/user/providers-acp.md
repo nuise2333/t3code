@@ -44,7 +44,7 @@ without expanding shell expressions.
 When running T3 Code from a checkout on macOS or Linux, the optional
 `scripts/dsh-acp.mjs` launcher adds Standard, PTC, Minimal, Creator, and
 DeepSeek Stack presets to DeepSeek Harness's ACP configuration. It requires
-an installed DSH `0.2.2-rc.1` on the server's PATH. Add a Local ACP command
+an installed DSH `0.2.2-rc.1` or `0.2.2-rc.5` on the server's PATH. Add a Local ACP command
 whose executable is the absolute path to `scripts/bin/dsh` in that checkout,
 with no arguments; the `dsh` name keeps the DeepSeek Harness icon. The checkout must remain available
 while using this provider.

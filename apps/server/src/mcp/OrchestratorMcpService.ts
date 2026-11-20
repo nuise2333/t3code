@@ -1394,8 +1394,35 @@ const make = Effect.gen(function* () {
     }
     if (team.kind === "auto") {
       // The lead named a model, as the user may ask; otherwise T3 picks one for the task.
-      if (input.target?.model !== undefined || input.target?.environmentId !== undefined) {
+      if (input.target?.environmentId !== undefined) {
         return input;
+      }
+      if (input.target?.model !== undefined) {
+        if (routingPolicy.routeTeamMember === undefined) return input;
+        const fallback = yield* routingPolicy.routeTeamMember({
+          target: {
+            instanceId: input.target.providerInstanceId,
+            driverKind: input.target.driverKind,
+            model: input.target.model,
+            options: input.target.options,
+          },
+          prompt: input.task,
+          interactionMode: parent.thread.interactionMode,
+          runtimeMode: parent.thread.runtimeMode,
+          projectId: parent.thread.projectId,
+          runnableInstanceIds: yield* loadOrchestrationCapableInstanceIds(),
+        });
+        if (fallback === null) return input;
+        const { driverKind: _driverKind, ...restTarget } = input.target;
+        return {
+          ...input,
+          target: {
+            ...restTarget,
+            providerInstanceId: fallback.instanceId,
+            model: fallback.model,
+            ...(fallback.options === undefined ? {} : { options: [...fallback.options] }),
+          },
+        };
       }
       const picked = yield* routingPolicy.routeTeamWorker({
         kind: team.auto,
@@ -1413,6 +1440,7 @@ const make = Effect.gen(function* () {
               ...input.target,
               providerInstanceId: picked.instanceId,
               model: picked.model,
+              ...(picked.options === undefined ? {} : { options: [...picked.options] }),
             },
           };
     }
@@ -1435,6 +1463,31 @@ const make = Effect.gen(function* () {
           "invalid_request",
           `The agent team "${teamName}" runs at most ${limit} ${limit === 1 ? "task" : "tasks"} at once, and ${out} ${out === 1 ? "is" : "are"} still running. End your turn; a finished task's result wakes you to delegate the next.`,
         );
+      }
+    }
+    if (fitted.target.model !== undefined && routingPolicy.routeTeamMember !== undefined) {
+      const fallback = yield* routingPolicy.routeTeamMember({
+        target: {
+          instanceId: fitted.target.providerInstanceId,
+          model: fitted.target.model,
+          options: fitted.target.options,
+        },
+        prompt: input.task,
+        interactionMode: parent.thread.interactionMode,
+        runtimeMode: parent.thread.runtimeMode,
+        projectId: parent.thread.projectId,
+        runnableInstanceIds: yield* loadOrchestrationCapableInstanceIds(),
+      });
+      if (fallback !== null) {
+        return {
+          ...input,
+          target: {
+            ...fitted.target,
+            providerInstanceId: fallback.instanceId,
+            model: fallback.model,
+            ...(fallback.options === undefined ? {} : { options: [...fallback.options] }),
+          },
+        };
       }
     }
     return { ...input, target: fitted.target };

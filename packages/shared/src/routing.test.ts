@@ -19,6 +19,7 @@ import {
 
 import {
   chooseAutoModel,
+  chooseTeamFallbackModel,
   chooseTeamWorkerModel,
   crossVendorModel,
   classifyTask,
@@ -2238,6 +2239,146 @@ describe("chooseAutoModel", () => {
         now: NOW,
       })?.selection,
     ).toStrictEqual({ instanceId: codexId, model: "model-sol" });
+  });
+
+  it.each<{
+    readonly name: string;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly rows: RoutingTable["rows"];
+    readonly picks: ModelSelection;
+  }>([
+    {
+      name: "another agent's spelling of a model takes that model's row",
+      providers: [provider(acpId, "acpRegistry", ["claude-opus-5.5"])],
+      rows: [row("claudeAgent", "claude-opus-5-5", every("S"), 4)],
+      picks: { instanceId: acpId, model: "claude-opus-5.5" },
+    },
+    {
+      name: "the model's own agent beats another serving it",
+      providers: [
+        provider(acpId, "acpRegistry", ["claude-opus-5.5"]),
+        provider(claudeId, "claudeAgent", ["claude-opus-5-5"]),
+      ],
+      rows: [row("claudeAgent", "claude-opus-5-5", every("S"), 4)],
+      picks: { instanceId: claudeId, model: "claude-opus-5-5" },
+    },
+    {
+      name: "a gateway route beats a bare id, which can be a personal key",
+      providers: [provider(acpId, "acpRegistry", ["qwen4-max(openai)", "group/qwen4-max(openai)"])],
+      rows: [row("acpRegistry", "qwen4-max", every("A"), 2)],
+      picks: { instanceId: acpId, model: "group/qwen4-max(openai)" },
+    },
+    {
+      name: "a model premium by default runs on its cheaper options",
+      providers: [
+        provider(kiroId, "cursor", ["model-neon"], {}, [
+          effort,
+          { id: "fastMode", label: "Fast", type: "boolean", currentValue: true },
+          {
+            id: "contextWindow",
+            label: "Context",
+            type: "select",
+            options: [
+              { id: "300k", label: "300k" },
+              { id: "1m", label: "1M", isDefault: true },
+            ],
+          },
+        ]),
+      ],
+      rows: [row("cursor", "model-neon", every("S"), 4)],
+      picks: {
+        instanceId: kiroId,
+        model: "model-neon",
+        options: [
+          { id: "fastMode", value: false },
+          { id: "contextWindow", value: "300k" },
+        ],
+      },
+    },
+  ])("automatic team workers: $name", ({ providers, rows, picks }) => {
+    expect(
+      chooseTeamWorkerModel({
+        kind: "best",
+        table: tableOf(rows),
+        taskClass: "implement",
+        providers,
+        settings: settingsFor(providers),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection,
+    ).toStrictEqual(picks);
+  });
+
+  it("falls back to the same model on another agent, then the next capability level down", () => {
+    const gatewayId = ProviderInstanceId.make("gateway_fake");
+    const runFallback = (
+      target: Parameters<typeof chooseTeamFallbackModel>[0]["target"],
+      providers: ReadonlyArray<ServerProvider>,
+    ) =>
+      chooseTeamFallbackModel({
+        target,
+        table: tableOf(ROWS),
+        taskClass: "implement",
+        providers,
+        settings: settingsFor(providers),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      });
+
+    // 1. Healthy member stays on its own agent.
+    expect(runFallback({ instanceId: claudeId, model: "model-opus" }, [claude(), codex()])).toEqual(
+      {
+        selection: on(claudeId, "model-opus"),
+        tier: "S",
+        switched: "none",
+      },
+    );
+
+    // 2. Exhausted or inaccessible member routes to the same model on another agent (including ACP/gateway spelling).
+    expect(
+      runFallback({ instanceId: claudeId, model: "model-opus" }, [
+        claude(quota(100, hoursFromNow(1))),
+        provider(gatewayId, "acpRegistry", ["auto/model-opus"]),
+        codex(),
+      ]),
+    ).toEqual({
+      selection: on(gatewayId, "auto/model-opus"),
+      tier: "S",
+      switched: "same_model",
+    });
+
+    // 3. Same model unavailable everywhere -> routes to the next capability level down across agents (S -> A -> C).
+    expect(
+      runFallback({ instanceId: claudeId, model: "model-opus" }, [
+        provider(claudeId, "claudeAgent", ["model-opus"], { status: "error" }),
+        provider(codexId, "codex", ["model-sol", "model-luna"]),
+      ]),
+    ).toEqual({
+      selection: on(codexId, "model-sol"),
+      tier: "A",
+      switched: "lower_tier",
+    });
+
+    // 4. When both S and A are exhausted across all agents, steps down further to the next available capability level.
+    expect(
+      runFallback({ instanceId: claudeId, model: "model-opus" }, [
+        provider(
+          claudeId,
+          "claudeAgent",
+          ["model-opus", "model-sonnet"],
+          quota(100, hoursFromNow(1)),
+        ),
+        provider(codexId, "codex", ["model-luna"]),
+      ]),
+    ).toEqual({
+      selection: on(codexId, "model-luna"),
+      tier: "C",
+      switched: "lower_tier",
+    });
   });
 
   it("drops the old selection's options and keeps them when it stays", () => {

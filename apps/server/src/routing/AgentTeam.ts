@@ -80,7 +80,7 @@ export function agentTeamLeadPrompt(team: RoutingGroup, sharedGuidance: string):
   const limit = team.maxParallel ?? 0;
   return [
     `<t3_code_agent_team name="${escapeAttribute(team.name)}">`,
-    `You lead the agent team "${team.name}" the user picked for this thread. Plan the work, split it into self-contained tasks, and hand each to a member with \`delegate_task\`: set \`target.providerInstanceId\` and \`target.model\` to a member below and leave \`target.options\` out to use its saved settings. Independent tasks run in parallel. Check each result, then answer the user yourself. Delegate only to these members; do small steps yourself.`,
+    `You lead the agent team "${team.name}" the user picked for this thread. Plan the work, split it into self-contained tasks, and hand each to a member with \`delegate_task\`: set \`target.providerInstanceId\` and \`target.model\` to a member below and leave \`target.options\` out to use its saved settings. Independent tasks run in parallel. Check each result, then answer the user yourself. Delegate only to these members; do small steps yourself. If a member's model is out of quota or inaccessible, T3 automatically routes the task to the same model on another agent, or to the next capability level down across agents.`,
     "Members:",
     ...team.members.map(memberLabel),
     ...(limit > 0
