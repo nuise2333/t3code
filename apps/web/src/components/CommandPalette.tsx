@@ -290,6 +290,7 @@ import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindin
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
 import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { setSidebarMode } from "./sidebar/sidebarMode";
 import { suggestAppAccessForRemote } from "./sourceControlAppAccessToast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
@@ -1806,6 +1807,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Open bots",
       icon: <BotIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
+        setSidebarMode("bots");
         await navigate({ to: "/bots" });
       },
     });

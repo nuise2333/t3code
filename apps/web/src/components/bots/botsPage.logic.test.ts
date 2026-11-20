@@ -1,21 +1,28 @@
 import {
   BotId,
+  EnvironmentId,
   MAX_BOTS,
   NodeId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  type Bot,
   type BotTask,
   type ScheduledTask,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+
 import {
   BOT_TEAM_TEMPLATES,
+  activeBotId,
   botDraftErrors,
   botSchedules,
   botUpsertInputFromDraft,
   emptyBotDraft,
+  filterBots,
+  resolveBotsEnvironmentId,
   tasksByBot,
   templateUpsertInputs,
 } from "./botsPage.logic";
@@ -147,5 +154,71 @@ describe("botSchedules", () => {
 
   it("has none before the bot's chat exists", () => {
     expect(botSchedules(scheduled, { homeThreadId: null })).toEqual([]);
+  });
+});
+
+function bot(id: string, name: string, handle: string, title: string, home: string | null): Bot {
+  return {
+    id: BotId.make(id),
+    name,
+    handle,
+    title,
+    instructions: "",
+    dispatcher: false,
+    modelSelection: model,
+    runtimeMode: "full-access",
+    projectId: ProjectId.make("project-1"),
+    homeThreadId: home === null ? null : ThreadId.make(home),
+    avatar: "🤖",
+    color: "blue",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+const builder = bot("b1", "Builder", "builder", "Software engineer", "home-1");
+const reviewer = bot("b2", "Reviewer", "rev", "Code reviewer", null);
+
+describe("filterBots", () => {
+  it.each([
+    ["", ["b1", "b2"]],
+    ["  ", ["b1", "b2"]],
+    ["build", ["b1"]],
+    ["@rev", ["b2"]],
+    ["CODE", ["b2"]],
+    ["engineer builder", ["b1"]],
+    ["engineer rev", []],
+  ])("query %j matches %j", (query, ids) => {
+    expect(filterBots([builder, reviewer], query).map((entry) => entry.id)).toEqual(ids);
+  });
+});
+
+describe("activeBotId", () => {
+  const env = EnvironmentId.make("env-1");
+
+  it("finds the bot whose chat is open in the same environment", () => {
+    const bots = [builder, reviewer];
+    expect(activeBotId(bots, env, scopeThreadRef(env, ThreadId.make("home-1")))).toBe("b1");
+    expect(activeBotId(bots, env, scopeThreadRef(env, ThreadId.make("other")))).toBeNull();
+    const elsewhere = scopeThreadRef(EnvironmentId.make("env-2"), ThreadId.make("home-1"));
+    expect(activeBotId(bots, env, elsewhere)).toBeNull();
+    expect(activeBotId(bots, env, null)).toBeNull();
+  });
+});
+
+describe("resolveBotsEnvironmentId", () => {
+  const [a, b, c] = ["a", "b", "c"].map((id) => EnvironmentId.make(id)) as [
+    EnvironmentId,
+    EnvironmentId,
+    EnvironmentId,
+  ];
+
+  it.each([
+    [b, a, [a, b], b],
+    [c, a, [a, b], a],
+    [null, c, [a, b], a],
+    [null, null, [], null],
+  ] as const)("picked %j, primary %j, connected %j gives %j", (picked, primary, connected, id) => {
+    expect(resolveBotsEnvironmentId(picked, primary, connected)).toBe(id);
   });
 });

@@ -257,11 +257,14 @@ teams are edited on web and desktop.
 ## Bots
 
 A bot is a named agent with its own chat, job title, instructions, model,
-permissions and memories. Open **Bots** from the sidebar's bottom menu or the
-command palette on web and desktop. Start with **Add a team**, such as **Dev
-squad** (a dispatcher, a builder, a tester and a reviewer) or **Research desk**,
-or create one with **New bot**. Templates use your default model; edit any bot
-to change it. **Open chat** opens the bot's own chat thread.
+permissions and memories. On web and desktop, switch the sidebar from
+**Threads** to **Bots** with the switcher at its bottom. The sidebar lists your
+bots; click one to open its own chat, or use its **…** menu to edit, delete or
+see its details. Start from the **+** button with **New bot** or a team, such as
+**Dev squad** (a dispatcher, a builder, a tester and a reviewer) or **Research
+desk**. Templates use your default model; edit any bot to change it. **Open
+bots** in the command palette opens the Bots page with every bot's memories,
+tasks and schedules.
 
 Bots hand each other work by `@handle`. Each piece of work becomes a task with
 its own thread, listed under the bot with its status. A task runs in the project

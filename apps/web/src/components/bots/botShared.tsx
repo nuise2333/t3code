@@ -1,0 +1,171 @@
+import { useAtomValue } from "@effect/atom-react";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  AuthOrchestrationOperateScope,
+  type Bot,
+  type BotColor,
+  type EnvironmentId,
+  type ModelSelection,
+  type ProjectId,
+} from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+
+import { requestConfirmDialog } from "../../confirmDialog";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { providerInstanceEntriesFor } from "../../providerInstances";
+import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../../state/environments";
+import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
+import { readEnvironmentScope } from "../../state/session";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { buildThreadRouteParams } from "../../threadRoutes";
+import { scheduledTaskDefaultModel } from "../settings/scheduledTasksSettings.logic";
+import { stackedThreadToast, toastManager } from "../ui/toast";
+import {
+  resolveBotsEnvironmentId,
+  templateUpsertInputs,
+  type BotTeamTemplate,
+} from "./botsPage.logic";
+
+const COLOR_CLASS: Record<BotColor, string> = {
+  slate: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
+  red: "bg-red-500/15 text-red-700 dark:text-red-300",
+  orange: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
+  amber: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  green: "bg-green-500/15 text-green-700 dark:text-green-300",
+  teal: "bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  blue: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+  violet: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+  pink: "bg-pink-500/15 text-pink-700 dark:text-pink-300",
+};
+
+export function reportBotFailure(title: string, error: unknown) {
+  toastManager.add(
+    stackedThreadToast({
+      type: "error",
+      title,
+      description: error instanceof Error ? error.message : String(error),
+    }),
+  );
+}
+
+export function BotAvatar({
+  bot,
+  size = "sm",
+}: {
+  readonly bot: Bot;
+  readonly size?: "sm" | "lg";
+}) {
+  return (
+    <span
+      aria-hidden
+      className={`flex shrink-0 items-center justify-center rounded-full ${COLOR_CLASS[bot.color]} ${
+        size === "lg" ? "size-10 text-xl" : "size-7 text-sm"
+      }`}
+    >
+      {bot.avatar || "🤖"}
+    </span>
+  );
+}
+
+/** The environment bots are shown for when the viewer has not picked one. */
+export function useDefaultBotsEnvironmentId(picked: EnvironmentId | null = null) {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const connectedIds = useConnectedEnvironmentIds();
+  return resolveBotsEnvironmentId(picked, primaryEnvironmentId, connectedIds);
+}
+
+export function useBotModelContext(environmentId: EnvironmentId, projectId: ProjectId | null) {
+  const settings = useEnvironmentSettings(environmentId);
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  const entries = providerInstanceEntriesFor(providers, settings, projectId);
+  return {
+    settings,
+    providers,
+    entries,
+    defaultModel: scheduledTaskDefaultModel(settings, null, entries),
+  };
+}
+
+/** Opening a bot's chat and deleting a bot, shared by the Bots page and the sidebar. */
+export function useBotActions(environmentId: EnvironmentId) {
+  const navigate = useNavigate();
+  const openChat = useAtomCommand(serverEnvironment.openBotChat, { label: "bot open chat" });
+  const deleteBot = useAtomCommand(serverEnvironment.deleteBot, { label: "bot delete" });
+  const [busy, setBusy] = useState(false);
+
+  const openBotChat = async (bot: Bot) => {
+    if (busy || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+    setBusy(true);
+    const result = await openChat({ environmentId, input: { id: bot.id } });
+    setBusy(false);
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        reportBotFailure(`Could not open ${bot.name}'s chat`, squashAtomCommandFailure(result));
+      }
+      return;
+    }
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(environmentId, result.value.threadId)),
+    });
+  };
+
+  const removeBot = async (bot: Bot) => {
+    if (busy || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+    const message = `Delete ${bot.name}?\nIts memories and task list go with it. Its chat and task threads stay as ordinary threads, and schedules made in its chat keep running there.`;
+    const confirmed =
+      (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
+    if (!confirmed) return;
+    setBusy(true);
+    const result = await deleteBot({ environmentId, input: { id: bot.id } });
+    setBusy(false);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      reportBotFailure(`Could not delete ${bot.name}`, squashAtomCommandFailure(result));
+    }
+  };
+
+  return { busy, openBotChat, removeBot };
+}
+
+export function useAddBotTeam(
+  environmentId: EnvironmentId,
+  bots: ReadonlyArray<Bot>,
+  defaultModel: ModelSelection | null,
+) {
+  const upsertBot = useAtomCommand(serverEnvironment.upsertBot, { label: "bot upsert" });
+  const [addingTeam, setAddingTeam] = useState(false);
+  const dispatcher = bots.find((bot) => bot.dispatcher) ?? null;
+
+  const addTeam = async (template: BotTeamTemplate) => {
+    if (addingTeam || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+    const result = templateUpsertInputs(template, defaultModel, bots.length);
+    if (!result.ok) {
+      reportBotFailure(`Could not add ${template.name}`, result.error);
+      return;
+    }
+    if (dispatcher !== null) {
+      const message = `Add ${template.name}?\nIts dispatcher replaces ${dispatcher.name} as the dispatcher.`;
+      const confirmed = (await requestConfirmDialog(message)) ?? window.confirm(message);
+      if (!confirmed) return;
+    }
+    setAddingTeam(true);
+    for (const input of result.inputs) {
+      const saved = await upsertBot({ environmentId, input });
+      if (saved._tag === "Failure") {
+        if (!isAtomCommandInterrupted(saved)) {
+          reportBotFailure(`Could not add ${input.name}`, squashAtomCommandFailure(saved));
+        }
+        break;
+      }
+    }
+    setAddingTeam(false);
+  };
+
+  return { addTeam, addingTeam };
+}
