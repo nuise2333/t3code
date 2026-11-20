@@ -398,6 +398,18 @@ import {
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
 import {
+  BotChannelAckResult,
+  BotChannelArchiveInput,
+  BotChannelContinueInput,
+  BotChannelCreateInput,
+  BotChannelDetail,
+  BotChannelPostInput,
+  BotChannelPostResult,
+  BotChannelReassignInput,
+  BotChannelResult,
+  BotChannelStopInput,
+  BotChannelSubscribeInput,
+  BotChannelUpdateInput,
   BotDeleteInput,
   BotDeleteResult,
   BotError,
@@ -602,6 +614,14 @@ export const WS_METHODS = {
   botsSetPaused: "bots.setPaused",
   botsMemoryAdd: "bots.memoryAdd",
   botsMemoryDelete: "bots.memoryDelete",
+  botsSubscribeChannel: "bots.subscribeChannel",
+  botsChannelCreate: "bots.channelCreate",
+  botsChannelUpdate: "bots.channelUpdate",
+  botsChannelArchive: "bots.channelArchive",
+  botsChannelPost: "bots.channelPost",
+  botsChannelStop: "bots.channelStop",
+  botsChannelContinue: "bots.channelContinue",
+  botsChannelReassign: "bots.channelReassign",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -2131,6 +2151,55 @@ const WsBotsMemoryDeleteRpc = Rpc.make(WS_METHODS.botsMemoryDelete, {
   error: BotRpcError,
 });
 
+const WsBotsSubscribeChannelRpc = Rpc.make(WS_METHODS.botsSubscribeChannel, {
+  payload: BotChannelSubscribeInput,
+  success: BotChannelDetail,
+  error: BotRpcError,
+  stream: true,
+});
+
+const WsBotsChannelCreateRpc = Rpc.make(WS_METHODS.botsChannelCreate, {
+  payload: BotChannelCreateInput,
+  success: BotChannelResult,
+  error: BotRpcError,
+});
+
+const WsBotsChannelUpdateRpc = Rpc.make(WS_METHODS.botsChannelUpdate, {
+  payload: BotChannelUpdateInput,
+  success: BotChannelResult,
+  error: BotRpcError,
+});
+
+const WsBotsChannelArchiveRpc = Rpc.make(WS_METHODS.botsChannelArchive, {
+  payload: BotChannelArchiveInput,
+  success: BotChannelResult,
+  error: BotRpcError,
+});
+
+const WsBotsChannelPostRpc = Rpc.make(WS_METHODS.botsChannelPost, {
+  payload: BotChannelPostInput,
+  success: BotChannelPostResult,
+  error: BotRpcError,
+});
+
+const WsBotsChannelStopRpc = Rpc.make(WS_METHODS.botsChannelStop, {
+  payload: BotChannelStopInput,
+  success: BotChannelAckResult,
+  error: BotRpcError,
+});
+
+const WsBotsChannelContinueRpc = Rpc.make(WS_METHODS.botsChannelContinue, {
+  payload: BotChannelContinueInput,
+  success: BotChannelAckResult,
+  error: BotRpcError,
+});
+
+const WsBotsChannelReassignRpc = Rpc.make(WS_METHODS.botsChannelReassign, {
+  payload: BotChannelReassignInput,
+  success: BotChannelAckResult,
+  error: BotRpcError,
+});
+
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2292,6 +2361,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsBotsSetPausedRpc,
   WsBotsMemoryAddRpc,
   WsBotsMemoryDeleteRpc,
+  WsBotsSubscribeChannelRpc,
+  WsBotsChannelCreateRpc,
+  WsBotsChannelUpdateRpc,
+  WsBotsChannelArchiveRpc,
+  WsBotsChannelPostRpc,
+  WsBotsChannelStopRpc,
+  WsBotsChannelContinueRpc,
+  WsBotsChannelReassignRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
   WsScheduledTasksRunNowRpc,

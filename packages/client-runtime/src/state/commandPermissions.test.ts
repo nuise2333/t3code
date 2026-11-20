@@ -206,6 +206,8 @@ describe("command permissions", () => {
   it.effect.each([
     WS_METHODS.scheduledTasksDelete,
     WS_METHODS.botsSetPaused,
+    WS_METHODS.botsChannelPost,
+    WS_METHODS.botsChannelStop,
     ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
   ])("uses the target grant for both availability and execution of %s", (method) =>
     Effect.gen(function* () {

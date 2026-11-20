@@ -1,19 +1,26 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import {
+  AuthOrchestrationOperateScope,
   MAX_BOTS,
   type Bot,
+  type BotChannel,
   type BotLastMessage,
   type ContextMenuItem,
   type EnvironmentId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   AlertTriangleIcon,
   CheckIcon,
   ChevronRightIcon,
   ClockIcon,
   EllipsisIcon,
+  HashIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -27,9 +34,15 @@ import { cn } from "~/lib/utils";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { readLocalApi } from "../../localApi";
 import { serverEnvironment } from "../../state/server";
+import { readEnvironmentScope } from "../../state/session";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { BotChannelDialog } from "../bots/BotChannelDialog";
 import { BotEditorDialog } from "../bots/BotEditorDialog";
+import { filterChannels } from "../bots/botChannels.logic";
 import {
   BotAvatar,
+  BotFaceCluster,
+  reportBotFailure,
   useAddBotTeam,
   useBotActions,
   useBotModelContext,
@@ -73,6 +86,8 @@ import {
 } from "./useSidebarBotsModel";
 
 type BotMenuAction = "pin" | "edit" | "duplicate" | "details" | "hide" | "delete";
+type ChannelMenuAction = "edit" | "delete" | "restore";
+const NO_CHANNELS: ReadonlyArray<BotChannel> = [];
 
 const SKELETON_ROWS = 3;
 
@@ -126,6 +141,15 @@ function SidebarBotsEnvironment({
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [editor, setEditor] = useState<{ readonly bot: Bot | null } | null>(null);
+  const [channelEditor, setChannelEditor] = useState<{
+    readonly channel: BotChannel | null;
+  } | null>(null);
+  const archiveChannel = useAtomCommand(serverEnvironment.archiveBotChannel, {
+    label: "bot channel archive",
+  });
+  const routeParams = useParams({ strict: false });
+  const openChannelId =
+    routeParams.environmentId === environmentId ? (routeParams.channelId ?? null) : null;
   const [dragging, setDragging] = useState<{ id: string; group: BotGroup } | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -143,6 +167,10 @@ function SidebarBotsEnvironment({
   const ordered = orderBots(bots, order, (bot) => botRecentAt(bot, lastMessageOf(bot)));
   const shown = filterBots(ordered, query, (bot) => lastMessageOf(bot)?.text ?? "");
   const groups = groupBots(shown, pinSet, (bot) => signals.get(bot.id)?.waiting != null);
+  const channels = data?.channels ?? NO_CHANNELS;
+  const shownChannels = filterChannels(channels, query);
+  const activeChannels = shownChannels.filter((channel) => !channel.archived);
+  const deletedChannels = shownChannels.filter((channel) => channel.archived);
   const showHidden = hiddenOpen || groups.hidden.some((bot) => bot.id === openBotId);
   const orderedIds = ordered.map((bot) => bot.id);
 
@@ -150,10 +178,69 @@ function SidebarBotsEnvironment({
     if (isMobile) setOpenMobile(false);
   };
 
-  // Phase 2 adds "New channel" here.
   const createEntries: ReadonlyArray<CreateMenuEntry> = [
     { id: "bot", label: "New bot", icon: <PlusIcon />, run: () => setEditor({ bot: null }) },
+    {
+      id: "channel",
+      label: "New channel",
+      icon: <HashIcon />,
+      run: () => setChannelEditor({ channel: null }),
+    },
   ];
+
+  const openChannel = (channel: Pick<BotChannel, "id">) => {
+    closeMobileSidebar();
+    void navigate({
+      to: "/bots/channels/$environmentId/$channelId",
+      params: { environmentId, channelId: channel.id },
+    });
+  };
+
+  const setChannelArchived = async (channel: BotChannel, archived: boolean) => {
+    if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+    const result = await archiveChannel({ environmentId, input: { id: channel.id, archived } });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      reportBotFailure(
+        `Could not ${archived ? "delete" : "restore"} #${channel.name}`,
+        squashAtomCommandFailure(result),
+      );
+    }
+  };
+
+  const showChannelMenu = (channel: BotChannel, position: { x: number; y: number }) => {
+    const api = readLocalApi();
+    if (!api) return;
+    const items: ContextMenuItem<ChannelMenuAction>[] = channel.archived
+      ? [{ id: "restore", label: "Restore", icon: "refresh-cw", disabled: !canOperate }]
+      : [
+          { id: "edit", label: "Edit", icon: "pencil", disabled: !canOperate },
+          {
+            id: "delete",
+            label: "Delete",
+            icon: "trash",
+            destructive: true,
+            disabled: !canOperate,
+          },
+        ];
+    void api.contextMenu.show(items, position).then((action) => {
+      if (action === "edit") setChannelEditor({ channel });
+      else if (action === "delete" || action === "restore") {
+        void setChannelArchived(channel, action === "delete");
+      }
+    });
+  };
+
+  const renderChannelRows = (list: ReadonlyArray<BotChannel>) =>
+    list.map((channel) => (
+      <SidebarChannelRow
+        key={channel.id}
+        channel={channel}
+        bots={bots}
+        active={channel.id === openChannelId}
+        onOpen={() => openChannel(channel)}
+        onMenu={(position) => showChannelMenu(channel, position)}
+      />
+    ));
 
   const setPinned = (bot: Bot, pinned: boolean) =>
     setPins((current) => [...current.filter((id) => id !== bot.id), ...(pinned ? [bot.id] : [])]);
@@ -332,7 +419,7 @@ function SidebarBotsEnvironment({
                     }
                   }}
                   placeholder="Search"
-                  aria-label="Search bots"
+                  aria-label="Search bots and channels"
                   className="min-w-0 flex-1"
                 />
                 {query !== "" ? (
@@ -410,7 +497,7 @@ function SidebarBotsEnvironment({
                 </span>
               ))}
             </div>
-          ) : bots.length === 0 ? (
+          ) : bots.length === 0 && channels.length === 0 ? (
             <div className="flex flex-col items-center gap-2.5 px-2 py-6 text-sm text-sidebar-muted-foreground">
               <p>No bots yet</p>
               <Button
@@ -423,8 +510,10 @@ function SidebarBotsEnvironment({
                 New bot or channel
               </Button>
             </div>
-          ) : shown.length === 0 ? (
-            <p className="px-2 py-1.5 text-sm text-sidebar-muted-foreground">No bots match.</p>
+          ) : shown.length === 0 && shownChannels.length === 0 ? (
+            <p className="px-2 py-1.5 text-sm text-sidebar-muted-foreground">
+              No bots or channels match.
+            </p>
           ) : (
             <div className="flex flex-col gap-1.5">
               {groups.needsYou.length > 0 ? (
@@ -458,6 +547,16 @@ function SidebarBotsEnvironment({
                   ) : null}
                 </div>
               ) : null}
+              {activeChannels.length > 0 ? (
+                <BotsGroup label="Channels" showLabel>
+                  {renderChannelRows(activeChannels)}
+                </BotsGroup>
+              ) : null}
+              {deletedChannels.length > 0 ? (
+                <BotsGroup label="Deleted channels" showLabel>
+                  {renderChannelRows(deletedChannels)}
+                </BotsGroup>
+              ) : null}
             </div>
           )}
           <span className="sr-only" aria-live="polite">
@@ -474,7 +573,71 @@ function SidebarBotsEnvironment({
           onClose={() => setEditor(null)}
         />
       ) : null}
+      {channelEditor !== null ? (
+        <BotChannelDialog
+          key={channelEditor.channel?.id ?? "new"}
+          environmentId={environmentId}
+          bots={bots}
+          channel={channelEditor.channel}
+          onClose={() => setChannelEditor(null)}
+          onCreated={openChannel}
+        />
+      ) : null}
     </>
+  );
+}
+
+function SidebarChannelRow({
+  channel,
+  bots,
+  active,
+  onOpen,
+  onMenu,
+}: {
+  channel: BotChannel;
+  bots: ReadonlyArray<Bot>;
+  active: boolean;
+  onOpen: () => void;
+  onMenu: (position: { x: number; y: number }) => void;
+}) {
+  return (
+    <li className="group/channel-row relative list-none rounded-md">
+      <button
+        type="button"
+        aria-current={active ? "page" : undefined}
+        aria-label={`#${channel.name}`}
+        onClick={(event) => {
+          if (event.button === 0) onOpen();
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onMenu({ x: event.clientX, y: event.clientY });
+        }}
+        className={cn(
+          "flex h-9 w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-md ps-2 pe-8 text-left text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          active
+            ? "bg-sidebar-row-active text-sidebar-foreground light:ring-1 light:ring-inset light:ring-sidebar-border/70"
+            : "text-sidebar-foreground hover:bg-sidebar-row-hover",
+          channel.archived && "text-sidebar-muted-foreground",
+        )}
+      >
+        <BotFaceCluster memberIds={channel.memberIds} bots={bots} />
+        <span className="min-w-0 truncate">#{channel.name}</span>
+      </button>
+      <span className="absolute top-1/2 right-1.5 flex -translate-y-1/2 opacity-0 group-hover/channel-row:opacity-100 group-focus-within/channel-row:opacity-100 pointer-coarse:opacity-100">
+        <Button
+          size="icon-xs"
+          variant="ghost-muted"
+          aria-label={`Actions for #${channel.name}`}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            onMenu({ x: rect.left, y: rect.bottom });
+          }}
+        >
+          <EllipsisIcon />
+        </Button>
+      </span>
+    </li>
   );
 }
 

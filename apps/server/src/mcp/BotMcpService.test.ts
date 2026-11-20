@@ -124,7 +124,14 @@ const harness = (identities: ReadonlyMap<ThreadId, BotThreadIdentity>) =>
           Layer.mergeAll(
             Layer.mock(BotService.BotService)({
               identityOf: (threadId) => Effect.succeed(identities.get(threadId) ?? null),
-              list: () => Effect.succeed({ bots: team, memories: [], tasks: [], lastMessages: [] }),
+              list: () =>
+                Effect.succeed({
+                  bots: team,
+                  memories: [],
+                  tasks: [],
+                  lastMessages: [],
+                  channels: [],
+                }),
               openChat: ({ id }) =>
                 Effect.succeed({
                   threadId: ThreadId.make(`thread:${id}-home`),

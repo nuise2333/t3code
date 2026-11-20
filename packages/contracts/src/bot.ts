@@ -2,6 +2,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
+  BotChannelId,
+  BotChannelMessageId,
   BotId,
   BotMemoryId,
   IsoDateTime,
@@ -114,6 +116,126 @@ export const BotTask = Schema.Struct({
 });
 export type BotTask = typeof BotTask.Type;
 
+export const BOT_CHANNEL_NAME_MAX_CHARS = 48;
+export const BOT_CHANNEL_TEXT_MAX_CHARS = 16_384;
+const BOT_CHANNEL_MAX_MEMBERS = 64;
+/** A post routes to at most this many mentioned members, who work in parallel. */
+export const BOT_CHANNEL_MAX_RECIPIENTS = 2;
+export const BOT_CHANNEL_HISTORY_PAGE = 100;
+
+/** A group conversation between bots, such as `#launch`; the lead takes posts with no mention. */
+export const BotChannel = Schema.Struct({
+  id: BotChannelId,
+  name: Schema.String,
+  /** In order; the first is the default lead. */
+  memberIds: Schema.Array(BotId),
+  leadBotId: Schema.NullOr(BotId),
+  /** Deleted channels keep their history, read only, until restored. */
+  archived: Schema.Boolean,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type BotChannel = typeof BotChannel.Type;
+
+export const BotChannelWorkStatus = Schema.Literals([
+  "queued",
+  "in_progress",
+  "completed",
+  "failed",
+  "stopped",
+]);
+export type BotChannelWorkStatus = typeof BotChannelWorkStatus.Type;
+
+/** A user post, a member's reply, or one assignment of a post to a member. */
+export const BotChannelMessage = Schema.Struct({
+  id: BotChannelMessageId,
+  kind: Schema.Literals(["user", "reply", "assigned"]),
+  authorBotId: Schema.NullOr(BotId),
+  text: Schema.String,
+  /** Posts: aggregated from their assignments. Assignments: their own. Replies: null. */
+  status: Schema.NullOr(BotChannelWorkStatus),
+  createdAt: IsoDateTime,
+});
+export type BotChannelMessage = typeof BotChannelMessage.Type;
+
+export const BotChannelDetail = Schema.Struct({
+  channel: BotChannel,
+  /** The latest `limit` rows, oldest first. */
+  messages: Schema.Array(BotChannelMessage),
+  /** Older rows exist beyond `limit`. */
+  hasMore: Schema.Boolean,
+  /** Members running a turn for this channel now. */
+  activeBotIds: Schema.Array(BotId),
+  /** Members with unfinished work here, running or waiting in their queue. */
+  busyBotIds: Schema.Array(BotId),
+});
+export type BotChannelDetail = typeof BotChannelDetail.Type;
+
+// One over the limit, so a leading `#` the server drops still fits.
+const BotChannelName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(BOT_CHANNEL_NAME_MAX_CHARS + 1),
+);
+const BotChannelMemberIds = Schema.Array(BotId).check(Schema.isMaxLength(BOT_CHANNEL_MAX_MEMBERS));
+
+export const BotChannelSubscribeInput = Schema.Struct({
+  id: BotChannelId,
+  /** Default BOT_CHANNEL_HISTORY_PAGE; grows by a page for Show earlier messages. */
+  limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10_000 }))),
+});
+export type BotChannelSubscribeInput = typeof BotChannelSubscribeInput.Type;
+
+export const BotChannelCreateInput = Schema.Struct({
+  name: BotChannelName,
+  memberIds: BotChannelMemberIds,
+});
+export type BotChannelCreateInput = typeof BotChannelCreateInput.Type;
+
+export const BotChannelUpdateInput = Schema.Struct({
+  id: BotChannelId,
+  name: BotChannelName,
+  memberIds: BotChannelMemberIds,
+  /** Null picks the first member. */
+  leadBotId: Schema.NullOr(BotId),
+});
+export type BotChannelUpdateInput = typeof BotChannelUpdateInput.Type;
+
+export const BotChannelArchiveInput = Schema.Struct({ id: BotChannelId, archived: Schema.Boolean });
+export type BotChannelArchiveInput = typeof BotChannelArchiveInput.Type;
+
+export const BotChannelResult = Schema.Struct({ channel: BotChannel });
+export type BotChannelResult = typeof BotChannelResult.Type;
+
+export const BotChannelPostInput = Schema.Struct({
+  id: BotChannelId,
+  text: TrimmedNonEmptyString.check(Schema.isMaxLength(BOT_CHANNEL_TEXT_MAX_CHARS)),
+  /** Mentioned members; empty goes to the lead. */
+  recipientIds: BotChannelMemberIds,
+});
+export type BotChannelPostInput = typeof BotChannelPostInput.Type;
+export const BotChannelPostResult = Schema.Struct({ messageId: BotChannelMessageId });
+export type BotChannelPostResult = typeof BotChannelPostResult.Type;
+
+export const BotChannelStopInput = Schema.Struct({ id: BotChannelId });
+export type BotChannelStopInput = typeof BotChannelStopInput.Type;
+
+/** Runs a stopped or failed post again with the lead. */
+export const BotChannelContinueInput = Schema.Struct({
+  id: BotChannelId,
+  messageId: BotChannelMessageId,
+});
+export type BotChannelContinueInput = typeof BotChannelContinueInput.Type;
+
+/** Runs a stopped or failed post again with the chosen member. */
+export const BotChannelReassignInput = Schema.Struct({
+  id: BotChannelId,
+  messageId: BotChannelMessageId,
+  botId: BotId,
+});
+export type BotChannelReassignInput = typeof BotChannelReassignInput.Type;
+
+export const BotChannelAckResult = Schema.Struct({ id: BotChannelId });
+export type BotChannelAckResult = typeof BotChannelAckResult.Type;
+
 export const BotListResult = Schema.Struct({
   bots: Schema.Array(Bot),
   memories: Schema.Array(BotMemory),
@@ -123,6 +245,8 @@ export const BotListResult = Schema.Struct({
   lastMessages: Schema.Array(BotLastMessage).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
   ),
+  /** Shared channels, archived ones included. */
+  channels: Schema.Array(BotChannel).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 });
 export type BotListResult = typeof BotListResult.Type;
 
@@ -174,6 +298,7 @@ export type BotMemoryDeleteResult = typeof BotMemoryDeleteResult.Type;
 export class BotError extends Schema.TaggedError<BotError>()("BotError", {
   message: Schema.String,
   botId: Schema.optional(BotId),
+  channelId: Schema.optional(BotChannelId),
   cause: Schema.optional(Schema.Defect()),
 }) {}
 

@@ -1507,6 +1507,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:bots:live",
       tag: WS_METHODS.botsSubscribe,
     }),
+    botChannelLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:bots:channel-live",
+      tag: WS_METHODS.botsSubscribeChannel,
+    }),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan. With
     // nothing to show yet, the server's last scan answers first, then a plain
@@ -1834,6 +1838,41 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.botsMemoryDelete,
       scheduler: configScheduler,
       concurrency: configConcurrency,
+    }),
+    createBotChannel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot-channel:create",
+      tag: WS_METHODS.botsChannelCreate,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    updateBotChannel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot-channel:update",
+      tag: WS_METHODS.botsChannelUpdate,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    archiveBotChannel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot-channel:archive",
+      tag: WS_METHODS.botsChannelArchive,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    // Channel work is off the config lane: a post opens chats and queues turns.
+    postToBotChannel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot-channel:post",
+      tag: WS_METHODS.botsChannelPost,
+    }),
+    stopBotChannel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot-channel:stop",
+      tag: WS_METHODS.botsChannelStop,
+    }),
+    continueBotChannelPost: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot-channel:continue",
+      tag: WS_METHODS.botsChannelContinue,
+    }),
+    reassignBotChannelPost: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot-channel:reassign",
+      tag: WS_METHODS.botsChannelReassign,
     }),
     createGuestShare: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:guest-share:create",

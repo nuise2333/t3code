@@ -81,6 +81,13 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.botsSetPaused]: AuthOrchestrationOperateScope,
   [WS_METHODS.botsMemoryAdd]: AuthOrchestrationOperateScope,
   [WS_METHODS.botsMemoryDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.botsChannelCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.botsChannelUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.botsChannelArchive]: AuthOrchestrationOperateScope,
+  [WS_METHODS.botsChannelPost]: AuthOrchestrationOperateScope,
+  [WS_METHODS.botsChannelStop]: AuthOrchestrationOperateScope,
+  [WS_METHODS.botsChannelContinue]: AuthOrchestrationOperateScope,
+  [WS_METHODS.botsChannelReassign]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
   // Force stop kills agent processes, as Stop on a terminal does.
   [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: AuthOrchestrationOperateScope,

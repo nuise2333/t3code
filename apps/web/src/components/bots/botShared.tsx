@@ -8,6 +8,7 @@ import {
   AuthOrchestrationOperateScope,
   type Bot,
   type BotColor,
+  type BotId,
   type EnvironmentId,
   type ModelSelection,
   type ProjectId,
@@ -25,6 +26,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { scheduledTaskDefaultModel } from "../settings/scheduledTasksSettings.logic";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { channelFaces } from "./botChannels.logic";
 import {
   resolveBotsEnvironmentId,
   templateUpsertInputs,
@@ -44,6 +46,7 @@ const COLOR_CLASS: Record<BotColor, string> = {
 };
 
 const AVATAR_SIZE_CLASS = {
+  xs: "size-5 text-xs",
   sm: "size-7 text-sm",
   md: "size-9 text-lg",
   lg: "size-10 text-xl",
@@ -64,7 +67,7 @@ export function BotAvatar({
   size = "sm",
 }: {
   readonly bot: Bot;
-  readonly size?: "sm" | "md" | "lg";
+  readonly size?: keyof typeof AVATAR_SIZE_CLASS;
 }) {
   return (
     <span
@@ -72,6 +75,45 @@ export function BotAvatar({
       className={`flex shrink-0 items-center justify-center rounded-full ${COLOR_CLASS[bot.color]} ${AVATAR_SIZE_CLASS[size]}`}
     >
       {bot.avatar || "🤖"}
+    </span>
+  );
+}
+
+/** A channel's members as overlapping faces: up to four, or three and a "+N". */
+export function BotFaceCluster({
+  memberIds,
+  bots,
+  size = "xs",
+}: {
+  readonly memberIds: ReadonlyArray<BotId>;
+  readonly bots: ReadonlyArray<Bot>;
+  readonly size?: "xs" | "sm";
+}) {
+  const { shown, extra } = channelFaces(memberIds, bots);
+  if (shown.length === 0) {
+    return (
+      <span
+        aria-hidden
+        className={`flex shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground ${AVATAR_SIZE_CLASS[size]}`}
+      >
+        #
+      </span>
+    );
+  }
+  return (
+    <span aria-hidden className="flex shrink-0 items-center -space-x-1.5">
+      {shown.map((bot) => (
+        <span key={bot.id} className="rounded-full ring-2 ring-background">
+          <BotAvatar bot={bot} size={size} />
+        </span>
+      ))}
+      {extra > 0 ? (
+        <span
+          className={`flex items-center justify-center rounded-full bg-muted font-medium text-muted-foreground ring-2 ring-background ${AVATAR_SIZE_CLASS[size]}`}
+        >
+          +{extra}
+        </span>
+      ) : null}
     </span>
   );
 }

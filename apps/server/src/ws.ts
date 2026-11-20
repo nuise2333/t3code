@@ -2325,6 +2325,14 @@ export const layerWsRpc = (
           bots.addMemory(input).pipe(Effect.map(({ memory }) => ({ memory }))),
         [WS_METHODS.botsMemoryDelete]: (input) =>
           bots.deleteMemory(input).pipe(Effect.map(({ id }) => ({ id }))),
+        [WS_METHODS.botsSubscribeChannel]: (input) => bots.subscribeChannel(input),
+        [WS_METHODS.botsChannelCreate]: (input) => bots.createChannel(input),
+        [WS_METHODS.botsChannelUpdate]: (input) => bots.updateChannel(input),
+        [WS_METHODS.botsChannelArchive]: (input) => bots.archiveChannel(input),
+        [WS_METHODS.botsChannelPost]: (input) => bots.postToChannel(input),
+        [WS_METHODS.botsChannelStop]: (input) => bots.stopChannel(input),
+        [WS_METHODS.botsChannelContinue]: (input) => bots.continueChannelPost(input),
+        [WS_METHODS.botsChannelReassign]: (input) => bots.reassignChannelPost(input),
         [WS_METHODS.scheduledTasksSetEnabled]: (input) =>
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.setEnabled(input)),

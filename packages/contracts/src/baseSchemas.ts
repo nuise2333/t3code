@@ -317,6 +317,10 @@ export const BotId = makeEntityId("BotId");
 export type BotId = typeof BotId.Type;
 export const BotMemoryId = makeEntityId("BotMemoryId");
 export type BotMemoryId = typeof BotMemoryId.Type;
+export const BotChannelId = makeEntityId("BotChannelId");
+export type BotChannelId = typeof BotChannelId.Type;
+export const BotChannelMessageId = makeEntityId("BotChannelMessageId");
+export type BotChannelMessageId = typeof BotChannelMessageId.Type;
 /** A one-use handle to a secret the user entered for an agent; the agent never sees the value. */
 export const SecretRef = makeEntityId("SecretRef");
 export type SecretRef = typeof SecretRef.Type;

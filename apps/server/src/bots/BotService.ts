@@ -1,5 +1,17 @@
 import {
   Bot,
+  type BotChannelArchiveInput,
+  type BotChannelAckResult,
+  type BotChannelContinueInput,
+  type BotChannelCreateInput,
+  type BotChannelDetail,
+  type BotChannelPostInput,
+  type BotChannelPostResult,
+  type BotChannelReassignInput,
+  type BotChannelResult,
+  type BotChannelStopInput,
+  type BotChannelSubscribeInput,
+  type BotChannelUpdateInput,
   BotError,
   BotId,
   BotMemoryId,
@@ -55,6 +67,7 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { forkParked } from "../serverActivation.ts";
+import { makeBotChannels } from "./BotChannels.ts";
 import {
   type BotMemoryRow,
   type BotTaskRow,
@@ -106,6 +119,35 @@ export class BotService extends Context.Service<
     ) => Effect.Effect<BotMemoryDeleteResult & { readonly count: number }, BotError>;
     readonly identityOf: (threadId: ThreadId) => Effect.Effect<BotThreadIdentity | null, BotError>;
     readonly recordTask: (input: BotTaskRecordInput) => Effect.Effect<void, BotError>;
+    /** A shared channel with its latest history, re-sent whenever it changes. */
+    readonly subscribeChannel: (
+      input: BotChannelSubscribeInput,
+    ) => Stream.Stream<BotChannelDetail, BotError>;
+    readonly createChannel: (
+      input: BotChannelCreateInput,
+    ) => Effect.Effect<BotChannelResult, BotError>;
+    /** Removing a member stops its pending work in the channel. */
+    readonly updateChannel: (
+      input: BotChannelUpdateInput,
+    ) => Effect.Effect<BotChannelResult, BotError>;
+    /** Deleting archives the channel and stops its pending work; restoring reopens it. */
+    readonly archiveChannel: (
+      input: BotChannelArchiveInput,
+    ) => Effect.Effect<BotChannelResult, BotError>;
+    /** Assigns the post to the lead, or to the one or two members it mentions. */
+    readonly postToChannel: (
+      input: BotChannelPostInput,
+    ) => Effect.Effect<BotChannelPostResult, BotError>;
+    readonly stopChannel: (
+      input: BotChannelStopInput,
+    ) => Effect.Effect<BotChannelAckResult, BotError>;
+    /** Runs a stopped or failed post again with the lead, as a new attempt. */
+    readonly continueChannelPost: (
+      input: BotChannelContinueInput,
+    ) => Effect.Effect<BotChannelAckResult, BotError>;
+    readonly reassignChannelPost: (
+      input: BotChannelReassignInput,
+    ) => Effect.Effect<BotChannelAckResult, BotError>;
   }
 >()("t3/bots/BotService") {}
 
@@ -294,6 +336,7 @@ export const layer = Layer.effect(
         memories: memories.map(memoryFromRow),
         tasks: tasks.map(taskFromRow),
         lastMessages,
+        channels: yield* botChannels.list(),
       };
     });
 
@@ -407,6 +450,7 @@ export const layer = Layer.effect(
 
     const deleteBot: BotService["Service"]["delete"] = Effect.fn("BotService.delete")(
       function* (input) {
+        yield* botChannels.removeBot(input.id);
         // Its chat and task threads stay; they are ordinary threads once the bot is gone.
         yield* sql
           .withTransaction(
@@ -460,6 +504,7 @@ export const layer = Layer.effect(
         `.pipe(Effect.mapError(saveError));
         const paused: Bot = { ...bot, paused: input.paused, updatedAt: timestamp };
         if (input.paused) {
+          yield* botChannels.stopBot(bot.id);
           const working = yield* sql<{ readonly thread_id: string }>`
             SELECT thread_id FROM bot_tasks
             WHERE bot_id = ${bot.id} AND status IN ('working', 'waiting')
@@ -570,6 +615,12 @@ export const layer = Layer.effect(
         );
       },
     );
+
+    const botChannels = yield* makeBotChannels({
+      loadBots,
+      openChat,
+      listChanged: notifyChanged,
+    });
 
     const countMemories = (botId: BotId) =>
       sql<{
@@ -749,6 +800,7 @@ export const layer = Layer.effect(
           Effect.catchCause((cause) =>
             Effect.logWarning("bots.task-status-failed", { threadId: event.threadId, cause }),
           ),
+          Effect.andThen(botChannels.onRun(event.payload)),
         );
       }
       // Any other event on a followed task counts as activity; it stays in memory.
@@ -759,12 +811,14 @@ export const layer = Layer.effect(
     });
     // Startup recovery settles runs before activation, so restored rows are checked once the
     // follower is running rather than waiting for events that already passed.
+    const restoredDeliveries = yield* botChannels.openDeliveries;
     yield* forkParked(
       Effect.gen(function* () {
         const follower = yield* Effect.forkChild(followEvents);
         yield* Effect.forEach(restored, (row) =>
           reconcileTask(ThreadId.make(row.thread_id)).pipe(Effect.ignoreCause({ log: true })),
         );
+        yield* botChannels.reconcile(restoredDeliveries);
         yield* Fiber.join(follower);
       }),
     );
@@ -850,6 +904,14 @@ export const layer = Layer.effect(
         ),
       ),
       recordTask,
+      subscribeChannel: botChannels.subscribe,
+      createChannel: botChannels.create,
+      updateChannel: botChannels.update,
+      archiveChannel: botChannels.archive,
+      postToChannel: botChannels.post,
+      stopChannel: botChannels.stop,
+      continueChannelPost: botChannels.continuePost,
+      reassignChannelPost: botChannels.reassign,
     });
   }),
 );

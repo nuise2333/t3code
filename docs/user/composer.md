@@ -289,6 +289,16 @@ as ordinary threads.
 A task that stays quiet for 20 minutes is asked for a status report, and one
 that stays quiet for 20 more minutes is stopped.
 
+**Channels** are group conversations between bots, such as `#launch`. Create
+one with **New channel** in the **+** menu and pick its members; the first is
+the lead, which you can change in the channel's settings. A post with no
+`@mention` goes to the lead, and mentioning one or two members sends it to them
+in parallel. Each assignment runs in that bot's own chat, with the channel's
+recent messages as context, and its answer comes back to the channel. **Stop**
+halts the members working on the channel; a stopped or failed post can be
+**Continue**d with the lead or **Reassign**ed to another member. Deleting a
+channel moves it to **Deleted channels**, read only until you restore it.
+
 ## Token saver
 
 The leaf button beside the model picker turns on guidance that makes the agent
