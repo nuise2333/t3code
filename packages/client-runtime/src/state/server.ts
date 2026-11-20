@@ -9,6 +9,7 @@ import {
   type ServerSelfUpdateProgressEvent,
   type ServerSelfUpdateResult,
   shouldRecommendDatabaseCompaction,
+  type ThreadId,
   type UsageSummary,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -837,6 +838,8 @@ export function recordFetchedWorkspaceSnapshot(
   );
 }
 
+const NO_BOT_HOME_THREADS: ReadonlySet<ThreadId> = new Set();
+
 export function createServerEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<
     EnvironmentRegistry.EnvironmentRegistry | Persistence.EnvironmentCacheStore | R,
@@ -1363,6 +1366,27 @@ export function createServerEnvironmentAtoms<R, E>(
     scheduler: configScheduler,
     concurrency: configConcurrency,
   });
+  const botsLive = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:server:bots:live",
+    tag: WS_METHODS.botsSubscribe,
+  });
+  // Bot chats live on the Bots side, so thread lists leave these out.
+  const botHomeThreadIdsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get): ReadonlySet<ThreadId> => {
+      const bots = AsyncResult.getOrElse(
+        get(botsLive({ environmentId, input: {} })),
+        () => null,
+      )?.bots;
+      if (bots === undefined || bots.length === 0) return NO_BOT_HOME_THREADS;
+      return new Set(bots.flatMap((bot) => (bot.homeThreadId === null ? [] : [bot.homeThreadId])));
+    }).pipe(
+      Atom.withEquality(
+        (a: ReadonlySet<ThreadId>, b: ReadonlySet<ThreadId>) =>
+          a === b || (a.size === b.size && [...a].every((id) => b.has(id))),
+      ),
+      Atom.withLabel(`environment-data:server:bot-home-threads:${environmentId}`),
+    ),
+  );
 
   return {
     configValueAtom,
@@ -1503,10 +1527,8 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
-    botsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
-      label: "environment-data:server:bots:live",
-      tag: WS_METHODS.botsSubscribe,
-    }),
+    botsLive,
+    botHomeThreadIdsAtom,
     botChannelLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:bots:channel-live",
       tag: WS_METHODS.botsSubscribeChannel,

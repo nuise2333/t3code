@@ -69,6 +69,26 @@ export function isShownUnderParent(
   return !isListedThreadLineage(lineage) || delegatedUnderParent.has(threadKey(ref));
 }
 
+/**
+ * Whether a thread belongs to the Bots side: a bot's own chat, or a task or subagent under one
+ * (they share its lineage root). A fork of a bot chat is the user's own thread.
+ */
+export function isBotThread(
+  ref: ScopedThreadRef,
+  lineage: OrchestrationV2ThreadShell["lineage"] | null,
+  botHomeThreadKeys: ReadonlySet<string>,
+): boolean {
+  if (botHomeThreadKeys.size === 0) return false;
+  if (botHomeThreadKeys.has(threadKey(ref))) return true;
+  return (
+    lineage !== null &&
+    !isListedThreadLineage(lineage) &&
+    botHomeThreadKeys.has(
+      threadKey({ environmentId: ref.environmentId, threadId: lineage.rootThreadId }),
+    )
+  );
+}
+
 /** Provider-native
     subagents ask on their parent, so they are skipped. */
 function subagentRequest(thread: OrchestrationV2ThreadShell): PendingSubagentRequest | null {
@@ -216,6 +236,10 @@ export function createEnvironmentThreadShellAtoms(input: {
   readonly hiddenThreadTagsAtom: (
     environmentId: EnvironmentId,
   ) => Atom.Atom<ReadonlyArray<string> | null>;
+  /** Bots' own chats, which only the Bots side lists; absent where the client has no Bots side. */
+  readonly botHomeThreadIdsAtom?: (
+    environmentId: EnvironmentId,
+  ) => Atom.Atom<ReadonlySet<ThreadId>>;
 }) {
   // Point reads and aggregate lists share values without keeping an atom alive
   // for every listed thread. Replaced source objects can be collected.
@@ -637,22 +661,43 @@ export function createEnvironmentThreadShellAtoms(input: {
     return next;
   }).pipe(Atom.withLabel("environment-hidden-thread-keys"));
 
+  let previousBotHomeThreadKeys: ReadonlySet<string> = NO_HIDDEN_THREADS;
+  const botHomeThreadKeysAtom = Atom.make((get) => {
+    const botHomeThreadIdsAtom = input.botHomeThreadIdsAtom;
+    if (botHomeThreadIdsAtom === undefined) return NO_HIDDEN_THREADS;
+    const next = new Set<string>();
+    for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
+      for (const threadId of get(botHomeThreadIdsAtom(environmentId))) {
+        next.add(threadKey({ environmentId, threadId }));
+      }
+    }
+    if (
+      next.size === previousBotHomeThreadKeys.size &&
+      [...next].every((key) => previousBotHomeThreadKeys.has(key))
+    ) {
+      return previousBotHomeThreadKeys;
+    }
+    previousBotHomeThreadKeys = next.size === 0 ? NO_HIDDEN_THREADS : next;
+    return previousBotHomeThreadKeys;
+  }).pipe(Atom.withLabel("environment-bot-home-thread-keys"));
+
   const anyEnvironmentHidingAtom = Atom.make((get) =>
     Array.from(enabledEnvironmentIds(get(input.catalogValueAtom))).some(
       (environmentId) => get(input.hiddenThreadTagsAtom(environmentId)) !== null,
     ),
   ).pipe(Atom.withLabel("environment-any-hiding-thread-tags"));
 
-  /** threadShellsAtom without the threads the tag filter hides, for pickers and palettes. */
+  /** threadShellsAtom without tag-hidden threads and bots' chats, for pickers and palettes. */
   let previousVisibleThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const visibleThreadShellsAtom = Atom.make((get) => {
     const threads = get(threadShellsAtom);
     const hidden = get(hiddenThreadKeysAtom);
-    if (hidden.size === 0) return threads;
-    const next = threads.filter(
-      (thread) =>
-        !hidden.has(threadKey({ environmentId: thread.environmentId, threadId: thread.id })),
-    );
+    const botHomes = get(botHomeThreadKeysAtom);
+    if (hidden.size === 0 && botHomes.size === 0) return threads;
+    const next = threads.filter((thread) => {
+      const key = threadKey({ environmentId: thread.environmentId, threadId: thread.id });
+      return !hidden.has(key) && !botHomes.has(key);
+    });
     if (arrayElementsEqual(previousVisibleThreadShells, next)) return previousVisibleThreadShells;
     previousVisibleThreadShells = next;
     return next;
@@ -664,15 +709,30 @@ export function createEnvironmentThreadShellAtoms(input: {
   const quietThreadShellsAtom = Atom.make((get) => {
     const next: EnvironmentThreadShell[] = [];
     const hidden = get(hiddenThreadKeysAtom);
+    const botHomes = get(botHomeThreadKeysAtom);
     for (const ref of get(threadRefsAtom)) {
-      if (hidden.has(threadKey(ref))) continue;
-      const shell = get(quietThreadShellAtomFamily(threadKey(ref)));
+      const key = threadKey(ref);
+      if (hidden.has(key) || botHomes.has(key)) continue;
+      const shell = get(quietThreadShellAtomFamily(key));
       if (shell !== null) next.push(shell);
     }
     if (arrayElementsEqual(previousQuietThreadShells, next)) return previousQuietThreadShells;
     previousQuietThreadShells = next;
     return next;
   }).pipe(Atom.withLabel("environment-quiet-thread-shell-list"));
+
+  /** The bots' own chats that quietThreadShellsAtom leaves out, for the Bots side. */
+  let previousQuietBotHomeShells: ReadonlyArray<EnvironmentThreadShell> = [];
+  const quietBotHomeThreadShellsAtom = Atom.make((get) => {
+    const next: EnvironmentThreadShell[] = [];
+    for (const key of get(botHomeThreadKeysAtom)) {
+      const shell = get(quietThreadShellAtomFamily(key));
+      if (shell !== null) next.push(shell);
+    }
+    if (arrayElementsEqual(previousQuietBotHomeShells, next)) return previousQuietBotHomeShells;
+    previousQuietBotHomeShells = next;
+    return next;
+  }).pipe(Atom.withLabel("environment-quiet-bot-home-thread-shells"));
 
   let previousDelegatedUnderParent: ReadonlySet<string> = new Set();
   const delegatedUnderParentAtom = Atom.make((get) => {
@@ -707,13 +767,16 @@ export function createEnvironmentThreadShellAtoms(input: {
     const next: EnvironmentThreadShell[] = [];
     const underParent = get(delegatedUnderParentAtom);
     const hidden = get(hiddenThreadKeysAtom);
+    const botHomes = get(botHomeThreadKeysAtom);
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const subagentRequests = get(pendingSubagentRequestsAtom(environmentId));
       for (const thread of get(environmentThreadsAtom(environmentId))) {
+        const key = threadKey({ environmentId, threadId: thread.id });
         if (
           thread.archivedAt !== null ||
           isShownUnderParent({ environmentId, threadId: thread.id }, thread.lineage, underParent) ||
-          hidden.has(threadKey({ environmentId, threadId: thread.id }))
+          hidden.has(key) ||
+          botHomes.has(key)
         ) {
           continue;
         }
@@ -734,8 +797,10 @@ export function createEnvironmentThreadShellAtoms(input: {
     threadShellsAtom,
     visibleThreadShellsAtom,
     hiddenThreadKeysAtom,
+    botHomeThreadKeysAtom,
     anyEnvironmentHidingAtom,
     quietThreadShellsAtom,
+    quietBotHomeThreadShellsAtom,
     navigationThreadShellsAtom,
     delegatedUnderParentAtom,
     pendingSubagentRequestsAtom,

@@ -573,6 +573,10 @@ type MessagesTimelineRowContent =
       createdAt: string;
       runId: RunId;
       label: string;
+      /** What a bot chat shows instead of `label`, such as "4 steps · 12s". */
+      stepsLabel?: string;
+      /** Hidden tool calls that failed, flagged beside a bot chat's steps. */
+      failedSteps?: number;
       expanded: boolean;
     }
   | {
@@ -620,6 +624,8 @@ type MessagesTimelineRowContent =
       dayDividerAt?: number;
       /** Bot chats: the first reply since the chat was last read. */
       unreadDivider?: boolean;
+      /** Bot chats: a reply that heads its group with the bot's face and name. */
+      botGroupStart?: boolean;
     }
   | {
       kind: "assistant-meta";
@@ -751,6 +757,9 @@ interface TurnFold {
   /** Every entry in the segment, including the cards a fold never hides. */
   entryIds: ReadonlySet<string>;
   label: string;
+  /** Bot chats' "4 steps · 12s", when the fold hides tool calls and was not stopped. */
+  stepsLabel?: string;
+  failedSteps: number;
 }
 
 interface SupersededAttemptFold {
@@ -1228,6 +1237,22 @@ function deriveTurnFolds(input: {
         ? `Worked for ${duration}`
         : "Worked";
 
+    const steps = (entries: ReadonlyArray<TimelineEntry>, durationText: string | null) => {
+      let count = 0;
+      let failed = 0;
+      for (const entry of entries) {
+        if (entry.kind !== "work" || !hiddenEntryIds.has(entry.id)) continue;
+        if (entry.entry.tone !== "tool" && entry.entry.tone !== "error") continue;
+        count += 1;
+        if (workEntryDisplayIndicatesToolFailure(entry.entry)) failed += 1;
+      }
+      const stepsLabel =
+        count === 0 || isLatestInterruptedTurn
+          ? undefined
+          : `${count} ${count === 1 ? "step" : "steps"}${durationText ? ` · ${durationText}` : ""}`;
+      return { ...(stepsLabel === undefined ? {} : { stepsLabel }), failedSteps: failed };
+    };
+
     // The top row keeps the whole turn's time, steers included. Work after a
     // steer folds under its own row below that steer, keyed apart from the run
     // so each segment opens on its own.
@@ -1241,6 +1266,7 @@ function deriveTurnFolds(input: {
       hiddenEntryIds: segmentHiddenIds(firstSegment),
       entryIds: new Set(firstSegment.map((entry) => entry.id)),
       label,
+      ...steps(firstSegment, duration),
     });
     for (const [index, { startIndex, steer }] of group.steerSegments.entries()) {
       const entries = group.entries.slice(startIndex, group.steerSegments[index + 1]?.startIndex);
@@ -1258,6 +1284,7 @@ function deriveTurnFolds(input: {
         hiddenEntryIds: segmentHiddenIds(entries),
         entryIds: new Set(entries.map((entry) => entry.id)),
         label: segmentMs !== null ? `Continued for ${formatDuration(segmentMs)}` : "Continued",
+        ...steps(entries, segmentMs !== null ? formatDuration(segmentMs) : null),
       });
     }
   }
@@ -1917,6 +1944,8 @@ export function deriveMessagesTimelineRows(input: {
         createdAt: turnFold.createdAt,
         runId: turnFold.runId,
         label: turnFold.label,
+        ...(turnFold.stepsLabel === undefined ? {} : { stepsLabel: turnFold.stepsLabel }),
+        ...(turnFold.failedSteps > 0 ? { failedSteps: turnFold.failedSteps } : {}),
         expanded: input.expandedRunIds?.has(turnFold.runId) ?? false,
       });
     }
@@ -2740,6 +2769,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return (
         a.createdAt === bf.createdAt &&
         a.label === bf.label &&
+        (a.kind !== "turn-fold" || a.failedSteps === (bf as typeof a).failedSteps) &&
         a.expanded === bf.expanded &&
         anchors.length === nextAnchors.length &&
         anchors.every((id, index) => id === nextAnchors[index])
@@ -2849,7 +2879,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.groupedWithPrevious === bm.groupedWithPrevious &&
         a.continuesSteer === bm.continuesSteer &&
         a.dayDividerAt === bm.dayDividerAt &&
-        a.unreadDivider === bm.unreadDivider
+        a.unreadDivider === bm.unreadDivider &&
+        a.botGroupStart === bm.botGroupStart
       );
     }
   }

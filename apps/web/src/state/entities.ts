@@ -168,6 +168,16 @@ export function useQuietThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(environmentThreadShells.quietThreadShellsAtom);
 }
 
+/** Bots' own chats, which the thread lists leave out. */
+export function useQuietBotHomeThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(environmentThreadShells.quietBotHomeThreadShellsAtom);
+}
+
+/** Keys of bots' own chats, by `threadKey`. */
+export function useBotHomeThreadKeys(): ReadonlySet<string> {
+  return useAtomValue(environmentThreadShells.botHomeThreadKeysAtom);
+}
+
 export function useChildThreadInputs(ref: ScopedThreadRef | null) {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_SHELLS_ATOM : environmentThreadShells.childThreadInputsAtom(ref),
@@ -383,6 +393,10 @@ export function readEnvironmentThreadRefs(
 
 export function readThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return appAtomRegistry.get(environmentThreadShells.threadShellsAtom);
+}
+
+export function readBotHomeThreadKeys(): ReadonlySet<string> {
+  return appAtomRegistry.get(environmentThreadShells.botHomeThreadKeysAtom);
 }
 
 export function readDelegatedUnderParent(): ReadonlySet<string> {

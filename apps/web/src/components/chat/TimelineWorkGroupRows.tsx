@@ -40,6 +40,7 @@ import {
   type TimelineWorkEntry,
   type TimelineRow,
 } from "./timelineRowContext";
+import { BotAvatar } from "../bots/BotAvatar";
 import { TimelineRowTimestamp, ActivityShimmerOverlay } from "./TimelineRowParts";
 import {
   failedToolIconClassName,
@@ -347,8 +348,26 @@ const workEntryKey = (entry: TimelineWorkEntry) => entry.id;
 export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
   const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup } =
     use(TimelineRowActivityCtx);
+  const { bot } = use(TimelineRowCtx);
   const compacting = row.compacting === true || isCompacting;
   const shimmer = isPreparingWorktree || compacting;
+  if (bot !== null && !shimmer) {
+    return (
+      <div className="flex min-w-0 items-center gap-2 px-1 pb-2 pt-1 text-sm text-muted-foreground tabular-nums">
+        <BotAvatar bot={bot} size="sm" />
+        <span>Working…</span>
+        {row.createdAt ? (
+          <span className="text-xs text-muted-foreground/70">
+            <WorkingTimer createdAt={row.createdAt} />
+          </span>
+        ) : null}
+        <span className="sr-only">{bot.name} is working</span>
+        {backgroundWorktreeSetup ? (
+          <BackgroundWorktreeSetupChip snapshot={backgroundWorktreeSetup} />
+        ) : null}
+      </div>
+    );
+  }
   const label = isPreparingWorktree ? (
     "Setting up worktree…"
   ) : compacting ? (

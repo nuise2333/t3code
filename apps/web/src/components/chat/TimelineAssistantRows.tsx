@@ -31,7 +31,13 @@ import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../times
 import { readThreadTurnItems } from "../../state/entities";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
-import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
+import { isMostlyMedia } from "../bots/botConversation.logic";
+import {
+  BotReplyHeading,
+  BotReplyIndent,
+  MESSAGE_HEADING_LEVEL,
+  MessageAuthorHeading,
+} from "./TimelineRowParts";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { vcsEnvironment } from "../../state/vcs";
@@ -48,61 +54,75 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const text = liveText ?? row.message.text;
   const messageText =
     text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
+  const bot = ctx.bot;
 
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
-        <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
-        <div data-thread-find-text="true">
-          <AssistantCitationSource
-            messageId={row.message.id}
-            {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
-            itemKey={row.id}
-            request={ctx.citationRequest}
-            listRef={ctx.listRef}
+        {bot === null ? (
+          <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+        ) : (
+          <BotReplyHeading bot={bot} groupStart={row.botGroupStart === true} />
+        )}
+        <BotReplyIndent bot={bot}>
+          <div
+            data-thread-find-text="true"
+            className={
+              bot !== null && !isMostlyMedia(messageText)
+                ? "w-fit max-w-full rounded-2xl rounded-tl-sm bg-muted/60 px-3.5 py-2"
+                : undefined
+            }
           >
-            <ChatMarkdown
-              text={messageText}
-              renderInsights
-              cwd={ctx.markdownCwd}
-              agentDirectories={() =>
-                ctx.threadRef && row.projectedItem
-                  ? agentWorkingDirectories(readThreadTurnItems(ctx.threadRef), row.projectedItem)
-                  : []
-              }
-              threadRef={ctx.threadRef ?? undefined}
-              isStreaming={Boolean(row.message.streaming)}
-              lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-              skills={ctx.skills}
-              headingLevelOffset={MESSAGE_HEADING_LEVEL}
-              onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-              onRunShellCommand={ctx.onRunShellCommand}
-              onImageExpand={ctx.onImageExpand}
-            />
-          </AssistantCitationSource>
-        </div>
-        {ctx.onOpenTurnDiff ? (
-          <AssistantChangedFilesSection
-            turnSummary={row.assistantTurnDiffSummary}
-            routeThreadKey={ctx.routeThreadKey}
-            resolvedTheme={ctx.resolvedTheme}
-            onOpenTurnDiff={ctx.onOpenTurnDiff}
-          />
-        ) : null}
-        {!row.showAssistantMeta && row.projectedItem?.item.status === "interrupted" ? (
-          <div className="mt-1.5 flex">
-            <AssistantStatusBadge status="interrupted" />
+            <AssistantCitationSource
+              messageId={row.message.id}
+              {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
+              itemKey={row.id}
+              request={ctx.citationRequest}
+              listRef={ctx.listRef}
+            >
+              <ChatMarkdown
+                text={messageText}
+                renderInsights
+                cwd={ctx.markdownCwd}
+                agentDirectories={() =>
+                  ctx.threadRef && row.projectedItem
+                    ? agentWorkingDirectories(readThreadTurnItems(ctx.threadRef), row.projectedItem)
+                    : []
+                }
+                threadRef={ctx.threadRef ?? undefined}
+                isStreaming={Boolean(row.message.streaming)}
+                lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+                skills={ctx.skills}
+                headingLevelOffset={MESSAGE_HEADING_LEVEL}
+                onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+                onRunShellCommand={ctx.onRunShellCommand}
+                onImageExpand={ctx.onImageExpand}
+              />
+            </AssistantCitationSource>
           </div>
-        ) : null}
-        {row.showAssistantMeta ? (
-          <AssistantMessageMeta
-            className="mt-1.5"
-            projectedItem={row.projectedItem}
-            message={row.message}
-            showCopyButton={row.showAssistantCopyButton}
-            copyStreaming={row.assistantCopyStreaming}
-          />
-        ) : null}
+          {ctx.onOpenTurnDiff ? (
+            <AssistantChangedFilesSection
+              turnSummary={row.assistantTurnDiffSummary}
+              routeThreadKey={ctx.routeThreadKey}
+              resolvedTheme={ctx.resolvedTheme}
+              onOpenTurnDiff={ctx.onOpenTurnDiff}
+            />
+          ) : null}
+          {!row.showAssistantMeta && row.projectedItem?.item.status === "interrupted" ? (
+            <div className="mt-1.5 flex">
+              <AssistantStatusBadge status="interrupted" />
+            </div>
+          ) : null}
+          {row.showAssistantMeta ? (
+            <AssistantMessageMeta
+              className="mt-1.5"
+              projectedItem={row.projectedItem}
+              message={row.message}
+              showCopyButton={row.showAssistantCopyButton}
+              copyStreaming={row.assistantCopyStreaming}
+            />
+          ) : null}
+        </BotReplyIndent>
       </div>
     </>
   );
@@ -195,16 +215,19 @@ export function AssistantMetaTimelineRow({
 }: {
   row: Extract<TimelineRow, { kind: "assistant-meta" }>;
 }) {
+  const ctx = use(TimelineRowCtx);
   return (
     <div className="px-1">
-      <AssistantMessageMeta
-        className="mt-0.5"
-        projectedItem={row.projectedItem}
-        message={row.message}
-        showCopyButton={row.showAssistantCopyButton}
-        copyStreaming={row.assistantCopyStreaming}
-        alwaysVisible
-      />
+      <BotReplyIndent bot={ctx.bot}>
+        <AssistantMessageMeta
+          className="mt-0.5"
+          projectedItem={row.projectedItem}
+          message={row.message}
+          showCopyButton={row.showAssistantCopyButton}
+          copyStreaming={row.assistantCopyStreaming}
+          alwaysVisible
+        />
+      </BotReplyIndent>
     </div>
   );
 }

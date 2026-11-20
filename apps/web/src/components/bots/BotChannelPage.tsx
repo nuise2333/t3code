@@ -41,7 +41,8 @@ import {
   retryablePost,
   scrollTopAfterPrepend,
 } from "./botChannels.logic";
-import { BotAvatar, BotFaceCluster, reportBotFailure } from "./botShared";
+import { BotAvatar } from "./BotAvatar";
+import { BotFaceCluster, reportBotFailure } from "./botShared";
 
 // Unsent text per channel, for this window's lifetime.
 const drafts = new Map<string, string>();

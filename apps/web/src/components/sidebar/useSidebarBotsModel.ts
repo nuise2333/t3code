@@ -9,7 +9,7 @@ import type {
 import * as Schema from "effect/Schema";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { useQuietThreadShells } from "../../state/entities";
+import { useQuietBotHomeThreadShells, useQuietThreadShells } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import type { SidebarThreadSummary } from "../../types";
@@ -60,6 +60,7 @@ export function useSidebarBotsModel(
 ) {
   const botsQuery = useEnvironmentQuery(serverEnvironment.botsLive({ environmentId, input: {} }));
   const shells = useQuietThreadShells();
+  const homeShells = useQuietBotHomeThreadShells();
   const [seen, setSeen] = useBotSeen();
   const data = botsQuery.data;
   const bots = data?.bots ?? NO_BOTS;
@@ -76,7 +77,7 @@ export function useSidebarBotsModel(
     for (const threadId of runningTasks.get(bot.id) ?? []) wanted.add(threadId);
   }
   const shellById = new Map<ThreadId, SidebarThreadSummary>();
-  for (const shell of shells) {
+  for (const shell of [...homeShells, ...shells]) {
     if (shell.environmentId === environmentId && wanted.has(shell.id)) {
       shellById.set(shell.id, shell);
     }

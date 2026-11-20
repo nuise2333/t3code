@@ -3677,7 +3677,7 @@ export default function ChatView(props: ChatViewProps) {
                 ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
                 : {})}
               {...(threadFindEnabled ? { onFindInThread: openThreadFindStable } : {})}
-              threadBot={threadBot}
+              threadBot={threadBot?.kind === "home" ? threadBot : null}
             />
           </header>
         )}
@@ -3823,15 +3823,19 @@ export default function ChatView(props: ChatViewProps) {
                   {...(threadBot === null
                     ? {}
                     : {
-                        botChat: true,
+                        bot: threadBot.timelineBot,
                         unreadAfter: threadBot.unreadAfter,
-                        emptyPlaceholder: (
-                          <BotWelcome
-                            environmentId={activeThread.environmentId}
-                            threadBot={threadBot}
-                            onSuggest={insertBotSuggestion}
-                          />
-                        ),
+                        ...(threadBot.kind === "home"
+                          ? {
+                              emptyPlaceholder: (
+                                <BotWelcome
+                                  environmentId={activeThread.environmentId}
+                                  threadBot={threadBot}
+                                  onSuggest={insertBotSuggestion}
+                                />
+                              ),
+                            }
+                          : {}),
                       })}
                   topFadeEnabled={!hasTimelineTopBanner}
                   {...(threadHistoryControls === undefined

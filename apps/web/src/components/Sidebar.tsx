@@ -251,7 +251,7 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarBots } from "./sidebar/SidebarBots";
-import { useSidebarMode } from "./sidebar/sidebarMode";
+import { useSidebarBotsOpen } from "./sidebar/sidebarMode";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { TooltipProvider } from "./ui/tooltip";
 import {
@@ -1036,7 +1036,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const threadListRef = useRef<HTMLUListElement | null>(null);
   const searchResultsListRef = useRef<HTMLUListElement | null>(null);
   const sidebarContentRef = useRef<HTMLDivElement | null>(null);
-  const [sidebarMode] = useSidebarMode();
+  const [botsOpen] = useSidebarBotsOpen();
   const dragLabelOffsetRef = useRef(0);
   const listMotionRef = useRef<ReturnType<typeof createSidebarListMotion> | null>(null);
   const shiftGuardRef = useRef<ReturnType<typeof createSidebarShiftGuard> | null>(null);
@@ -2958,7 +2958,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       ? shortcutLabelForCommand(keybindings, "chat.newLocal")
       : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
-  if (sidebarMode === "bots") {
+  if (botsOpen) {
     return (
       <SidebarFolderDrop>
         <SidebarChromeHeader isElectron={isElectron} />

@@ -39,8 +39,8 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { BotChannelDialog } from "../bots/BotChannelDialog";
 import { BotEditorDialog } from "../bots/BotEditorDialog";
 import { filterChannels } from "../bots/botChannels.logic";
+import { BotAvatar } from "../bots/BotAvatar";
 import {
-  BotAvatar,
   BotFaceCluster,
   reportBotFailure,
   useAddBotTeam,

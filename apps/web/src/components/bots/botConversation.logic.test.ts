@@ -2,7 +2,12 @@ import { MessageId, RunId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { MessagesTimelineRow } from "../chat/MessagesTimeline.logic";
-import { botDayLabel, botSuggestions, decorateBotTimelineRows } from "./botConversation.logic";
+import {
+  botDayLabel,
+  botSuggestions,
+  decorateBotTimelineRows,
+  isMostlyMedia,
+} from "./botConversation.logic";
 
 const at = (day: number, hour: number, minute = 0) =>
   new Date(2026, 10, day, hour, minute).getTime();
@@ -34,12 +39,13 @@ function message(
   };
 }
 
-const work = (id: string): MessagesTimelineRow => ({
+const work = (id: string, stepsLabel?: string): MessagesTimelineRow => ({
   kind: "turn-fold",
   id,
   createdAt: "",
   runId: RunId.make("run"),
-  label: "Worked",
+  label: "Worked for 12s",
+  ...(stepsLabel === undefined ? {} : { stepsLabel }),
   expanded: false,
 });
 
@@ -50,12 +56,15 @@ function summary(rows: ReadonlyArray<MessagesTimelineRow>) {
           row.id,
           row.dayDividerAt === undefined ? "" : "day",
           row.unreadDivider === true ? "new" : "",
+          row.botGroupStart === true ? "head" : "",
           row.groupedWithPrevious === true ? "prev" : "",
           row.groupedWithNext === true ? "next" : "",
         ]
           .filter(Boolean)
           .join(" ")
-      : row.id,
+      : row.kind === "turn-fold"
+        ? `${row.id}: ${row.label}`
+        : row.id,
   );
 }
 
@@ -103,10 +112,10 @@ describe("decorateBotTimelineRows", () => {
     ];
     expect(summary(decorateBotTimelineRows(rows, at(20, 9, 0)))).toEqual([
       "u1 day",
-      "fold",
-      "a1",
+      "fold: Worked for 12s",
+      "a1 head",
       "u2 day",
-      "a2 new",
+      "a2 new head",
       "a3",
     ]);
     expect(summary(decorateBotTimelineRows(rows, null))).not.toContain("a2 new");
@@ -127,10 +136,48 @@ describe("decorateBotTimelineRows", () => {
     ]);
   });
 
+  it("heads each run of the bot's replies, starting again after five minutes", () => {
+    const rows = [
+      message("a1", "assistant", at(20, 9)),
+      work("fold", "4 steps · 12s"),
+      message("a2", "assistant", at(20, 9, 3)),
+      message("a3", "assistant", at(20, 9, 9)),
+      message("u1", "user", at(20, 9, 10)),
+      message("a4", "assistant", at(20, 9, 11)),
+    ];
+    expect(summary(decorateBotTimelineRows(rows, null))).toEqual([
+      "a1 day head",
+      "fold: 4 steps · 12s",
+      "a2",
+      "a3 head",
+      "u1",
+      "a4 head",
+    ]);
+  });
+
   it("keeps rows that need no change", () => {
-    const rows = [message("u1", "user", at(20, 9)), message("a1", "assistant", at(20, 9, 1))];
+    const rows = [
+      message("u1", "user", at(20, 9)),
+      message("a1", "assistant", at(20, 9, 1)),
+      message("a2", "assistant", at(20, 9, 2)),
+      work("fold"),
+    ];
     const decorated = decorateBotTimelineRows(rows, null);
     expect(decorated[0]).not.toBe(rows[0]);
-    expect(decorated[1]).toBe(rows[1]);
+    expect(decorated[1]).not.toBe(rows[1]);
+    expect(decorated[2]).toBe(rows[2]);
+    expect(decorated[3]).toBe(rows[3]);
+  });
+});
+
+describe("isMostlyMedia", () => {
+  it.each([
+    ["Here is the fix.", false],
+    ["```ts\nconst a = 1;\nconst b = 2;\n```", true],
+    ["Done:\n```ts\nconst answer = compute(everything);\n```", true],
+    ["![chart](chart.png)", true],
+    ["", false],
+  ])("%j → %s", (text, expected) => {
+    expect(isMostlyMedia(text)).toBe(expected);
   });
 });

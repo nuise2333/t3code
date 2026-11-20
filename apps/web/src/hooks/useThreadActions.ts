@@ -4,6 +4,7 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
+import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
@@ -38,6 +39,7 @@ import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { announce } from "../lib/announce";
 import { readLocalApi } from "../localApi";
 import {
+  readBotHomeThreadKeys,
   readDelegatedUnderParent,
   readEnvironmentServerConfigLoaded,
   readEnvironmentSupportsAutoSettleOptOut,
@@ -588,8 +590,17 @@ export function useThreadActions() {
     const shouldNavigateToFallback =
       currentRouteThreadRef?.threadId === threadRef.threadId &&
       currentRouteThreadRef.environmentId === threadRef.environmentId;
+    const botHomes = readBotHomeThreadKeys();
     const fallbackThreadId = getFallbackThreadIdAfterDelete({
-      threads,
+      threads:
+        botHomes.size === 0
+          ? threads
+          : threads.filter(
+              (shell) =>
+                !botHomes.has(
+                  threadKey({ environmentId: threadRef.environmentId, threadId: shell.id }),
+                ),
+            ),
       deletedThreadId: threadRef.threadId,
       deletedThreadIds,
       sortOrder: sidebarThreadSortOrder,

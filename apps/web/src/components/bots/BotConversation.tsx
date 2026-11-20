@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   type Bot,
+  type BotTask,
   type EnvironmentId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -15,51 +16,71 @@ import {
 } from "lucide-react";
 import { useState, type ReactElement, type ReactNode } from "react";
 
+import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
 import { useBotSeen } from "../sidebar/useSidebarBotsModel";
+import type { TimelineBot } from "../chat/timelineRowContext";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { BotAvatar, useBotActions } from "./botShared";
+import { BotAvatar } from "./BotAvatar";
+import { useBotActions } from "./botShared";
 import { botSuggestions } from "./botConversation.logic";
 import { BotEditorDialog } from "./BotEditorDialog";
-import { activeBotId } from "./botsPage.logic";
+import { threadBotOf } from "./botsPage.logic";
 
 const NO_BOTS: ReadonlyArray<Bot> = [];
+const NO_TASKS: ReadonlyArray<BotTask> = [];
 
 export interface ThreadBot {
   readonly bot: Bot;
+  /** "task": work the bot was handed, or a subagent under its chat. */
+  readonly kind: "home" | "task";
   readonly dispatcher: Bot | null;
-  /** When the chat was last read before this visit; null on a first visit. */
+  /** The bot's face and name for the timeline, stable while its other fields change. */
+  readonly timelineBot: TimelineBot;
+  /** When the chat was last read before this visit; null on a first visit or in a task. */
   readonly unreadAfter: number | null;
 }
 
-/** The bot whose own chat this thread is, or null for any other thread. */
+/** The bot whose chat or task this thread is, or null for any other thread. */
 export function useThreadBot(threadRef: ScopedThreadRef | null): ThreadBot | null {
   const environmentId = threadRef?.environmentId ?? null;
   const botsQuery = useEnvironmentQuery(
     environmentId === null ? null : serverEnvironment.botsLive({ environmentId, input: {} }),
   );
+  const lineage = useQuietThreadShell(threadRef)?.lineage ?? null;
   const bots = botsQuery.data?.bots ?? NO_BOTS;
-  const botId = environmentId === null ? null : activeBotId(bots, environmentId, threadRef);
-  const bot = botId === null ? null : (bots.find((candidate) => candidate.id === botId) ?? null);
+  const owner =
+    threadRef === null
+      ? null
+      : threadBotOf(bots, botsQuery.data?.tasks ?? NO_TASKS, threadRef.threadId, lineage);
+  const bot = owner?.bot ?? null;
   const [seen] = useBotSeen();
   // The sidebar marks the open chat read right away, so keep the mark from when it opened.
   const visitKey =
-    bot === null || threadRef === null ? null : `${threadRef.environmentId}\0${bot.id}`;
+    owner?.kind !== "home" || threadRef === null
+      ? null
+      : `${threadRef.environmentId}\0${owner.bot.id}`;
   const [visit, setVisit] = useState<{
     readonly key: string | null;
     readonly unreadAfter: number | null;
   }>({ key: null, unreadAfter: null });
   let unreadAfter = visit.unreadAfter;
   if (visit.key !== visitKey) {
-    unreadAfter = bot === null ? null : (seen[bot.id] ?? null);
+    unreadAfter = bot === null || visitKey === null ? null : (seen[bot.id] ?? null);
     setVisit({ key: visitKey, unreadAfter });
   }
-  if (bot === null) return null;
+  const name = bot?.name ?? "";
+  const avatar = bot?.avatar ?? "";
+  const color = bot?.color ?? "blue";
+  const timelineBot = { name, avatar, color };
+  if (owner === null || bot === null) return null;
   return {
     bot,
+    kind: owner.kind,
+    timelineBot,
     dispatcher: bots.find((candidate) => candidate.dispatcher) ?? null,
     unreadAfter,
   };

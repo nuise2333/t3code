@@ -24,6 +24,7 @@ import {
   resolveBotsEnvironmentId,
   tasksByBot,
   templateUpsertInputs,
+  threadBotOf,
 } from "./botsPage.logic";
 
 const model = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.5" };
@@ -206,5 +207,36 @@ describe("resolveBotsEnvironmentId", () => {
     [null, null, [], null],
   ] as const)("picked %j, primary %j, connected %j gives %j", (picked, primary, connected, id) => {
     expect(resolveBotsEnvironmentId(picked, primary, connected)).toBe(id);
+  });
+});
+
+describe("threadBotOf", () => {
+  const bots = [builder, reviewer];
+  const tasks = [task("b2", "task-1")];
+  const lineage = (relationshipToParent: "fork" | "subagent" | null, rootThreadId: string) => ({
+    parentThreadId: relationshipToParent === null ? null : ThreadId.make(rootThreadId),
+    relationshipToParent,
+    rootThreadId: ThreadId.make(rootThreadId),
+  });
+
+  it("finds the bot's own chat, the bot a task was handed to, and a subagent's chat owner", () => {
+    expect(threadBotOf(bots, tasks, ThreadId.make("home-1"), lineage(null, "home-1"))).toEqual({
+      bot: builder,
+      kind: "home",
+    });
+    // The task runs under the builder's chat but is the reviewer's work.
+    expect(
+      threadBotOf(bots, tasks, ThreadId.make("task-1"), lineage("subagent", "home-1")),
+    ).toEqual({ bot: reviewer, kind: "task" });
+    expect(threadBotOf(bots, [], ThreadId.make("sub"), lineage("subagent", "home-1"))).toEqual({
+      bot: builder,
+      kind: "task",
+    });
+  });
+
+  it("leaves forks of a bot chat and ordinary threads to no bot", () => {
+    expect(threadBotOf(bots, tasks, ThreadId.make("fork"), lineage("fork", "home-1"))).toBeNull();
+    expect(threadBotOf(bots, tasks, ThreadId.make("x"), lineage(null, "x"))).toBeNull();
+    expect(threadBotOf(bots, tasks, ThreadId.make("x"), null)).toBeNull();
   });
 });

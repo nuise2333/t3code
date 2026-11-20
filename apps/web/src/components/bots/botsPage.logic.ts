@@ -11,11 +11,14 @@ import {
   type BotTaskStatus,
   type BotUpsertInput,
   type EnvironmentId,
+  isListedThreadLineage,
   type ModelSelection,
+  type OrchestrationV2AppThreadLineage,
   type ProjectId,
   type RuntimeMode,
   type ScheduledTask,
   type ScopedThreadRef,
+  type ThreadId,
 } from "@t3tools/contracts";
 
 import type { ProviderInstanceEntry } from "../../providerInstances";
@@ -298,6 +301,26 @@ export function activeBotId(
 ): BotId | null {
   if (activeThreadRef === null || activeThreadRef.environmentId !== environmentId) return null;
   return bots.find((bot) => bot.homeThreadId === activeThreadRef.threadId)?.id ?? null;
+}
+
+/**
+ * Whose conversation a thread is: a bot's own chat, a task it was handed, or a subagent under its
+ * chat. A fork of a bot chat belongs to no bot.
+ */
+export function threadBotOf(
+  bots: ReadonlyArray<Bot>,
+  tasks: ReadonlyArray<BotTask>,
+  threadId: ThreadId,
+  lineage: OrchestrationV2AppThreadLineage | null,
+): { readonly bot: Bot; readonly kind: "home" | "task" } | null {
+  const home = bots.find((bot) => bot.homeThreadId === threadId);
+  if (home !== undefined) return { bot: home, kind: "home" };
+  const taskBotId = tasks.find((task) => task.threadId === threadId)?.botId;
+  const taskBot = taskBotId === undefined ? undefined : bots.find((bot) => bot.id === taskBotId);
+  if (taskBot !== undefined) return { bot: taskBot, kind: "task" };
+  if (lineage === null || isListedThreadLineage(lineage)) return null;
+  const rootBot = bots.find((bot) => bot.homeThreadId === lineage.rootThreadId);
+  return rootBot === undefined ? null : { bot: rootBot, kind: "task" };
 }
 
 /** Keeps the input order, which the server sends newest first. */

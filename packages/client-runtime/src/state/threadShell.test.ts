@@ -16,13 +16,21 @@ import { PrimaryConnectionTarget } from "../connection/model.ts";
 import { v2Now, v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { applyShellStreamEvent } from "./shellReducer.ts";
 import { isThreadWorking } from "./threadInbox.ts";
-import { childThreadInputsTitle, createEnvironmentThreadShellAtoms } from "./threadShell.ts";
+import {
+  childThreadInputsTitle,
+  createEnvironmentThreadShellAtoms,
+  isBotThread,
+} from "./threadShell.ts";
+import { threadKey } from "./entities.ts";
 
 const environmentId = EnvironmentId.make("environment-v2");
 const remoteEnvironmentId = EnvironmentId.make("remote-environment-v2");
 const otherProjectId = ProjectId.make("other-project");
 
-function makeHarness(environmentIds: ReadonlyArray<EnvironmentId> = [environmentId]) {
+function makeHarness(
+  environmentIds: ReadonlyArray<EnvironmentId> = [environmentId],
+  botHomeThreadIds: ReadonlySet<ThreadId> = new Set(),
+) {
   const snapshotAtom = Atom.family((_environmentId: EnvironmentId) =>
     Atom.make<OrchestrationV2ShellSnapshot | null>(v2ShellSnapshot),
   );
@@ -52,6 +60,7 @@ function makeHarness(environmentIds: ReadonlyArray<EnvironmentId> = [environment
       catalogValueAtom,
       snapshotAtom,
       hiddenThreadTagsAtom: () => Atom.make(null),
+      botHomeThreadIdsAtom: () => Atom.make(botHomeThreadIds),
     }),
   };
 }
@@ -677,5 +686,79 @@ describe("v2 thread shell lists", () => {
       dispose();
       harness.registry.dispose();
     }
+  });
+
+  it("leaves bots' own chats out of thread lists and keeps them for the Bots side", () => {
+    const botHomeId = ThreadId.make("bot-home");
+    const botHome = {
+      ...v2ThreadShell,
+      id: botHomeId,
+      lineage: { ...v2ThreadShell.lineage, rootThreadId: botHomeId },
+    };
+    const ordinary = v2ThreadShell;
+    const { registry, threads, snapshotAtom } = makeHarness([environmentId], new Set([botHome.id]));
+    registry.set(snapshotAtom(environmentId), {
+      ...v2ShellSnapshot,
+      threads: [ordinary, botHome],
+    });
+    const lists = [
+      threads.quietThreadShellsAtom,
+      threads.visibleThreadShellsAtom,
+      threads.navigationThreadShellsAtom,
+    ];
+    const disposers = [...lists, threads.quietBotHomeThreadShellsAtom].map((atom) =>
+      registry.mount(atom),
+    );
+    try {
+      for (const atom of lists) {
+        expect(registry.get(atom).map((thread) => thread.id)).toEqual([ordinary.id]);
+      }
+      expect(registry.get(threads.quietBotHomeThreadShellsAtom).map((thread) => thread.id)).toEqual(
+        [botHome.id],
+      );
+      // Point reads and the complete list still know the chat, so opening it by URL works.
+      expect(registry.get(threads.threadShellsAtom)).toHaveLength(2);
+      expect(
+        registry.get(threads.quietThreadShellAtom({ environmentId, threadId: botHome.id })),
+      ).not.toBeNull();
+    } finally {
+      for (const dispose of disposers) dispose();
+      registry.dispose();
+    }
+  });
+});
+
+describe("isBotThread", () => {
+  const home = ThreadId.make("bot-home");
+  const keys = new Set([threadKey({ environmentId, threadId: home })]);
+  const lineage = (
+    relationshipToParent: "fork" | "subagent" | null,
+    extra: { sideChat?: boolean } = {},
+  ) => ({
+    parentThreadId: relationshipToParent === null ? null : home,
+    relationshipToParent,
+    rootThreadId: home,
+    ...extra,
+  });
+
+  it.each([
+    ["the bot's own chat", home, lineage(null), true],
+    ["a task delegated from it", ThreadId.make("task"), lineage("subagent"), true],
+    ["a side chat of it", ThreadId.make("side"), lineage("fork", { sideChat: true }), true],
+    ["a fork the user made of it", ThreadId.make("fork"), lineage("fork"), false],
+    [
+      "an ordinary thread",
+      ThreadId.make("other"),
+      { parentThreadId: null, relationshipToParent: null, rootThreadId: ThreadId.make("other") },
+      false,
+    ],
+  ] as const)("classifies %s", (_name, threadId, threadLineage, expected) => {
+    expect(isBotThread({ environmentId, threadId }, threadLineage, keys)).toBe(expected);
+  });
+
+  it("matches only the bot's own environment", () => {
+    expect(
+      isBotThread({ environmentId: remoteEnvironmentId, threadId: home }, lineage(null), keys),
+    ).toBe(false);
   });
 });

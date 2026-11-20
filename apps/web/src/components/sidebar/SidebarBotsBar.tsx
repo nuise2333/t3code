@@ -6,7 +6,7 @@ import { useThreadRouteRef } from "../../hooks/useThreadRouteTarget";
 import { useDefaultBotsEnvironmentId } from "../bots/botShared";
 import { SidebarMenuButton } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { requestBotsSearchFocus, useSidebarMode } from "./sidebarMode";
+import { requestBotsSearchFocus, useSidebarBotsOpen } from "./sidebarMode";
 import { useSidebarBotsModel } from "./useSidebarBotsModel";
 
 /** The bar at the bottom of the sidebar that switches it between threads and bots. */
@@ -28,8 +28,7 @@ function SidebarBotsBarEnvironment({ environmentId }: { environmentId: Environme
 }
 
 function BotsBarButton({ count, unread }: { count: number; unread: number }) {
-  const [mode, setMode] = useSidebarMode();
-  const open = mode === "bots";
+  const [open, setOpen] = useSidebarBotsOpen();
   const Chevron = open ? ChevronDownIcon : ChevronUpIcon;
   return (
     <Tooltip>
@@ -42,7 +41,7 @@ function BotsBarButton({ count, unread }: { count: number; unread: number }) {
             aria-label={unread > 0 ? `Bots, ${unread} unread` : "Bots"}
             onClick={() => {
               if (!open) requestBotsSearchFocus();
-              setMode(open ? "threads" : "bots");
+              setOpen(!open);
             }}
           >
             <BotIcon />

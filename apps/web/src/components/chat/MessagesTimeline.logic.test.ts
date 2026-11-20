@@ -1448,6 +1448,7 @@ describe("deriveMessagesTimelineRows", () => {
     );
     expect(foldRow?.runId).toBe("turn-1");
     expect(foldRow?.label).toBe("Worked for 12s");
+    expect(foldRow?.stepsLabel).toBe("1 step · 12s");
   });
 
   it("uses latest-turn timings and the stopped label for an interrupted latest turn", () => {
@@ -1486,6 +1487,7 @@ describe("deriveMessagesTimelineRows", () => {
         expanded: false,
       }),
     ]);
+    expect(rows[0]).not.toHaveProperty("stepsLabel");
   });
 
   it.each(["steer", "promoted_queued_to_steer"] as const)(

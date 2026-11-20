@@ -31,7 +31,8 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { BotAvatar, reportBotFailure } from "./botShared";
+import { BotAvatar } from "./BotAvatar";
+import { reportBotFailure } from "./botShared";
 
 /** Creates a channel, or edits one's name, members and lead. */
 export function BotChannelDialog({

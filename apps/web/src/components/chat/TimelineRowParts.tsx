@@ -3,11 +3,35 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
+import { BotAvatar } from "../bots/BotAvatar";
+import type { TimelineBot } from "./timelineRowContext";
 
 export const MESSAGE_HEADING_LEVEL = 3;
 
 export function MessageAuthorHeading({ children }: { children: string }) {
   return <h3 className="sr-only select-none">{children}</h3>;
+}
+
+/** In a bot conversation, who answers: its face and name over a group, the name alone after. */
+export function BotReplyHeading({ bot, groupStart }: { bot: TimelineBot; groupStart: boolean }) {
+  if (!groupStart) return <MessageAuthorHeading>{bot.name}</MessageAuthorHeading>;
+  return (
+    <h3 className="mb-1 flex min-w-0 select-none items-center gap-2 text-sm font-medium text-foreground">
+      <BotAvatar bot={bot} size="xs" />
+      <span className="min-w-0 truncate">{bot.name}</span>
+    </h3>
+  );
+}
+
+/** A bot's words sit indented under its face; everywhere else children render as they are. */
+export function BotReplyIndent({
+  bot,
+  children,
+}: {
+  bot: TimelineBot | null;
+  children: ReactNode;
+}) {
+  return bot === null ? children : <div className="ps-7">{children}</div>;
 }
 
 export function TimelineRowTimestamp({

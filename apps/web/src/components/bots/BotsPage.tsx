@@ -57,8 +57,8 @@ import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { BotEditorDialog } from "./BotEditorDialog";
+import { BotAvatar } from "./BotAvatar";
 import {
-  BotAvatar,
   reportBotFailure,
   useAddBotTeam,
   useBotActions,

@@ -1,5 +1,6 @@
 import type { ToolCallDiffTarget } from "../../diffPanelStore";
 import type {
+  Bot,
   ProviderApprovalDecision,
   ResponseContextRecord,
   RuntimeRequestId,
@@ -104,7 +105,12 @@ export interface TimelineRowSharedState {
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
   workGroupViewState: WorkGroupViewState;
+  /** Set in a bot's chat or task, which reads as a chat with that bot. */
+  bot: TimelineBot | null;
 }
+
+/** Who answers in a bot conversation. */
+export type TimelineBot = Pick<Bot, "name" | "avatar" | "color">;
 
 export interface TimelineRowActivityState {
   isWorking: boolean;

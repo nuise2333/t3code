@@ -104,6 +104,7 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
 import { TimelineMinimap } from "./TimelineMinimap";
 import {
+  type TimelineBot,
   type TimelineRowSharedState,
   type TimelineRowActivityState,
   TimelineRowCtx,
@@ -329,8 +330,8 @@ interface MessagesTimelineProps {
   emptyPlaceholderInset: number;
   /** Replaces the generic empty-thread line. */
   emptyPlaceholder?: ReactNode;
-  /** A bot's own chat: day and unread dividers, and time-bounded grouping. */
-  botChat?: boolean;
+  /** A bot's chat or task: chat bubbles under its face and name, dividers and step folds. */
+  bot?: TimelineBot | null;
   /** When the bot chat was last read before it opened; null shows no unread divider. */
   unreadAfter?: number | null;
   topFadeEnabled?: boolean;
@@ -430,7 +431,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   hideEmptyPlaceholder = false,
   emptyPlaceholderInset,
   emptyPlaceholder,
-  botChat = false,
+  bot = null,
   unreadAfter = null,
   topFadeEnabled = false,
   historyControls,
@@ -770,7 +771,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     toolCallVisibility,
     revealedMessageId,
   });
-  const botRows = useBotTimelineRows(rawRows, botChat, unreadAfter);
+  const botRows = useBotTimelineRows(rawRows, bot !== null, unreadAfter);
   const rows = useStableRows(botRows, listIdentityKey);
   const matchedApprovalRequestIds = new Set<string>();
   for (const row of pendingApprovalRequestIds.size > 0 ? rows : []) {
@@ -1172,6 +1173,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
     onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
     workGroupViewState,
+    bot,
   };
   const compactionAwaitingRow =
     isCompacting &&
@@ -1896,6 +1898,11 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
             <ChevronRightIcon className="size-3.5" />
           )}
         </button>
+        {ctx.bot !== null && row.failedSteps !== undefined ? (
+          <span className="rounded-full bg-destructive/10 px-1.5 text-xs font-medium text-destructive-foreground">
+            {row.failedSteps} failed
+          </span>
+        ) : null}
         <TimelineRowTimestamp
           createdAt={row.createdAt}
           timestampFormat={ctx.timestampFormat}
