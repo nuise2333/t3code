@@ -254,6 +254,32 @@ a team stops its threads from leading it. Forks, side chats and the team's own
 task threads never lead a team. Mobile starts threads with a team and shows it, but
 teams are edited on web and desktop.
 
+## Bots
+
+A bot is a named agent with its own chat, job title, instructions, model,
+permissions and memories. Open **Bots** from the sidebar's bottom menu or the
+command palette on web and desktop. Start with **Add a team**, such as **Dev
+squad** (a dispatcher, a builder, a tester and a reviewer) or **Research desk**,
+or create one with **New bot**. Templates use your default model; edit any bot
+to change it. **Open chat** opens the bot's own chat thread.
+
+Bots hand each other work by `@handle`. Each piece of work becomes a task with
+its own thread, listed under the bot with its status. A task runs in the project
+and checkout of the chat that asked for it, and its answer goes back to that
+chat. The **dispatcher** is the one bot that splits a request and hands the
+pieces out; messages to it land in its chat. Only one bot is the dispatcher, so
+marking another one moves the role.
+
+A bot saves lasting facts and preferences as **memories** and reads them in
+its chat and its tasks. Add or remove memories on the Bots page. To schedule work, ask the
+bot in its chat, such as "every weekday at 9, summarize new issues"; the
+schedule shows under the bot and in **Settings → Scheduled tasks**. Moving a bot
+to another project starts a new chat there; the old chat and its schedules stay
+as ordinary threads.
+
+A task that stays quiet for 20 minutes is asked for a status report, and one
+that stays quiet for 20 more minutes is stopped.
+
 ## Token saver
 
 The leaf button beside the model picker turns on guidance that makes the agent

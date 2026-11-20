@@ -27,6 +27,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import {
@@ -41,6 +42,7 @@ import * as AgentTeam from "../routing/AgentTeam.ts";
 import * as ThreadAssists from "../assist/ThreadAssists.ts";
 import { councilApplies, councilStatus, councilUserMessageTimes } from "@t3tools/shared/council";
 import * as ServerSettings from "../serverSettings.ts";
+import * as BotDirectory from "../bots/BotDirectory.ts";
 import { makeRestoreMissingWorktree } from "../workspace/restoreMissingWorktree.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
@@ -201,6 +203,7 @@ export const layer: Layer.Layer<
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
+    const sqlClient = yield* Effect.serviceOption(SqlClient.SqlClient);
     // Looked up once per server: installing rtk takes a restart to show.
     const rtkAvailable = yield* Effect.cached(
       ThreadAssists.rtkInstalled.pipe(
@@ -895,7 +898,13 @@ export const layer: Layer.Layer<
             rtk: yield* rtkAvailable,
           })
         : null;
+      // A bot's own chat carries who it is, what it remembers and its team on every turn.
+      const botBlock =
+        plainTurn && Option.isSome(sqlClient)
+          ? yield* BotDirectory.homeBriefFor(sqlClient.value, thread.id)
+          : null;
       const assistBlocks = [
+        botBlock,
         agentTeam === null || teamSettings === null
           ? null
           : agentTeam.kind === "auto"

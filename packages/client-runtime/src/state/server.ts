@@ -1503,6 +1503,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
+    botsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:bots:live",
+      tag: WS_METHODS.botsSubscribe,
+    }),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan. With
     // nothing to show yet, the server's last scan answers first, then a plain
@@ -1793,6 +1797,35 @@ export function createServerEnvironmentAtoms<R, E>(
     rotateScheduledTaskWebhookToken: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:rotate-webhook-token",
       tag: WS_METHODS.scheduledTasksRotateWebhookToken,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    upsertBot: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot:upsert",
+      tag: WS_METHODS.botsUpsert,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    deleteBot: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot:delete",
+      tag: WS_METHODS.botsDelete,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    // Off the config lane: the first open starts a thread.
+    openBotChat: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot:open-chat",
+      tag: WS_METHODS.botsOpenChat,
+    }),
+    addBotMemory: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot:memory-add",
+      tag: WS_METHODS.botsMemoryAdd,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    deleteBotMemory: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:bot:memory-delete",
+      tag: WS_METHODS.botsMemoryDelete,
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),

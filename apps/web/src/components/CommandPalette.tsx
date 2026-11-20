@@ -57,6 +57,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
+  BotIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
@@ -1796,6 +1797,19 @@ function OpenCommandPaletteDialog(props: {
       );
     },
   });
+
+  if (environments.some((environment) => environment.serverConfig !== null)) {
+    actionItems.push({
+      kind: "action",
+      value: "action:bots",
+      searchTerms: ["bots", "bot", "dispatcher", "team", "persona", "assistant", "memory"],
+      title: "Open bots",
+      icon: <BotIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/bots" });
+      },
+    });
+  }
 
   actionItems.push({
     kind: "action",

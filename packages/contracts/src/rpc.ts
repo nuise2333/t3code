@@ -397,6 +397,20 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+import {
+  BotDeleteInput,
+  BotDeleteResult,
+  BotError,
+  BotListResult,
+  BotMemoryAddInput,
+  BotMemoryAddResult,
+  BotMemoryDeleteInput,
+  BotMemoryDeleteResult,
+  BotOpenChatInput,
+  BotOpenChatResult,
+  BotUpsertInput,
+  BotUpsertResult,
+} from "./bot.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
@@ -578,6 +592,13 @@ export const WS_METHODS = {
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  botsSubscribe: "bots.subscribe",
+  botsUpsert: "bots.upsert",
+  botsDelete: "bots.delete",
+  botsOpenChat: "bots.openChat",
+  botsMemoryAdd: "bots.memoryAdd",
+  botsMemoryDelete: "bots.memoryDelete",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -2062,6 +2083,45 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const BotRpcError = Schema.Union([BotError, EnvironmentAuthorizationError]);
+
+const WsBotsSubscribeRpc = Rpc.make(WS_METHODS.botsSubscribe, {
+  payload: Schema.Struct({}),
+  success: BotListResult,
+  error: BotRpcError,
+  stream: true,
+});
+
+const WsBotsUpsertRpc = Rpc.make(WS_METHODS.botsUpsert, {
+  payload: BotUpsertInput,
+  success: BotUpsertResult,
+  error: BotRpcError,
+});
+
+const WsBotsDeleteRpc = Rpc.make(WS_METHODS.botsDelete, {
+  payload: BotDeleteInput,
+  success: BotDeleteResult,
+  error: BotRpcError,
+});
+
+const WsBotsOpenChatRpc = Rpc.make(WS_METHODS.botsOpenChat, {
+  payload: BotOpenChatInput,
+  success: BotOpenChatResult,
+  error: BotRpcError,
+});
+
+const WsBotsMemoryAddRpc = Rpc.make(WS_METHODS.botsMemoryAdd, {
+  payload: BotMemoryAddInput,
+  success: BotMemoryAddResult,
+  error: BotRpcError,
+});
+
+const WsBotsMemoryDeleteRpc = Rpc.make(WS_METHODS.botsMemoryDelete, {
+  payload: BotMemoryDeleteInput,
+  success: BotMemoryDeleteResult,
+  error: BotRpcError,
+});
+
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2216,6 +2276,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,
+  WsBotsSubscribeRpc,
+  WsBotsUpsertRpc,
+  WsBotsDeleteRpc,
+  WsBotsOpenChatRpc,
+  WsBotsMemoryAddRpc,
+  WsBotsMemoryDeleteRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
   WsScheduledTasksRunNowRpc,

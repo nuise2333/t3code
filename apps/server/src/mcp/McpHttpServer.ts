@@ -74,6 +74,9 @@ import {
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
 import * as WorktreeHandlers from "./toolkits/worktree/handlers.ts";
+import * as BotHandlers from "./toolkits/bots/handlers.ts";
+import { BotToolkit } from "./toolkits/bots/tools.ts";
+import * as BotMcpService from "./BotMcpService.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
 import * as PullRequestsHandlers from "./toolkits/pullRequests/handlers.ts";
@@ -1254,12 +1257,26 @@ export const layerPreviewToolkit = Layer.mergeAll(
   layerPreviewSnapshotRegistration,
 );
 
+const layerOrchestratorMcpService = OrchestratorMcpService.layer.pipe(
+  Layer.provide(RoutingPolicy.layer),
+);
+
 export const layerOrchestratorToolkit = toolkitRegistration(
   OrchestratorToolkit,
   OrchestratorHandlers.layer,
-).pipe(
-  Layer.provide(OrchestratorMcpService.layer.pipe(Layer.provide(RoutingPolicy.layer))),
-  Layer.provide(ThreadMetadataMcpService.layer),
+).pipe(Layer.provide(layerOrchestratorMcpService), Layer.provide(ThreadMetadataMcpService.layer));
+
+// Bot hand-offs are delegated tasks, so they share the orchestrator tools' service.
+// Listed only to a bot's threads.
+const layerBotsOnly = McpServer.visibility(() =>
+  Effect.serviceOption(McpInvocationContext.McpInvocationContext).pipe(
+    Effect.map((scope) => Option.isSome(scope) && scope.value.capabilities.has("bots")),
+  ),
+).layer;
+
+const layerBotToolkit = toolkitRegistration(BotToolkit, BotHandlers.layer).pipe(
+  Layer.provide(layerBotsOnly),
+  Layer.provide(BotMcpService.layer.pipe(Layer.provide(layerOrchestratorMcpService))),
 );
 
 export const layerThreadToolkit = toolkitRegistration(ThreadToolkit, ThreadHandlers.layer);
@@ -1399,4 +1416,7 @@ export const layerToolSearch = Layer.mergeAll(
   layerDeferredListing,
 ).pipe(Layer.provide(layerToolExposure));
 
-export const layer = layerMcpTransport(Layer.mergeAll(layerTools, layerToolSearch));
+/** Outside layerTools too: only bots' threads list these, and the budget measures other agents. */
+export const layer = layerMcpTransport(
+  Layer.mergeAll(layerTools, layerBotToolkit, layerToolSearch),
+);
