@@ -43,6 +43,7 @@ import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { useClientSettings } from "../../hooks/useSettings";
 import { GuestShareIndicator } from "./GuestShareControls";
+import { BotChatCrumb, type ThreadBot } from "../bots/BotConversation";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -57,6 +58,8 @@ interface ChatHeaderProps {
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   onFindInThread?: ((threadRef: ScopedThreadRef) => void) | undefined;
+  /** Set when this thread is a bot's own chat; its crumb replaces the title. */
+  threadBot?: ThreadBot | null | undefined;
 }
 
 function resolveRenameCommit(input: {
@@ -82,6 +85,7 @@ export const ChatHeader = memo(function ChatHeader({
   onNewThreadInProject,
   onOpenProjectSettings,
   onFindInThread,
+  threadBot = null,
 }: ChatHeaderProps) {
   const activeProjectName = activeProject?.isScratch ? "No project" : activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
@@ -324,7 +328,9 @@ export const ChatHeader = memo(function ChatHeader({
           </>
         ) : null}
         <WorkspaceBreadcrumbItem current className="min-w-10 flex-1">
-          {renamingTitle !== null ? (
+          {renamingTitle === null && threadBot !== null ? (
+            <BotChatCrumb environmentId={activeThreadEnvironmentId} threadBot={threadBot} />
+          ) : renamingTitle !== null ? (
             <input
               autoFocus
               dir="auto"

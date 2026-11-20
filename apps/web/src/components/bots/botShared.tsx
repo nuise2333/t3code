@@ -50,6 +50,7 @@ const AVATAR_SIZE_CLASS = {
   sm: "size-7 text-sm",
   md: "size-9 text-lg",
   lg: "size-10 text-xl",
+  xl: "size-14 text-3xl",
 } as const;
 
 export function reportBotFailure(title: string, error: unknown) {

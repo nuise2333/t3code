@@ -262,7 +262,8 @@ the sidebar switches it between your threads and your bots; a dot on the bar
 means a bot replied since you last opened it. Each bot shows its latest message
 and a badge when it needs your answer or approval, failed, hit a usage limit,
 is working or has unread replies. Bots waiting on you rise to **Needs you**.
-Click a bot to open its chat. Right-click it, or use its **…** menu, to pin it,
+Click a bot to open its chat; its header has the bot's settings and a pause
+button, and a new chat suggests a few things to ask. Right-click it, or use its **…** menu, to pin it,
 edit, duplicate or delete it, or **Hide (pause)** it: a paused bot's running
 turns stop, its chat's schedules turn off until you **Restore** it, and other
 bots cannot hand it work. Drag bots, or press Alt+Up and Alt+Down, to reorder

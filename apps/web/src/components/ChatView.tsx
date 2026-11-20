@@ -322,6 +322,7 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { BotWelcome, useThreadBot } from "./bots/BotConversation";
 import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
@@ -1052,6 +1053,7 @@ export default function ChatView(props: ChatViewProps) {
   })();
   const activeThreadRef = useActiveThreadRef(activeThread);
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const threadBot = useThreadBot(embedded || !isServerThread ? null : activeThreadRef);
   const activeEnvironmentServerBrowser = useEnvironmentSupportsServerBrowser(
     activeThreadRef?.environmentId ?? null,
   );
@@ -1949,6 +1951,11 @@ export default function ChatView(props: ChatViewProps) {
     scheduleComposerFocusStable();
   };
   const insertArtifactTemplateStable = useStableCallback(insertArtifactTemplate);
+  const insertBotSuggestion = useStableCallback((text: string) => {
+    if (composerRef.current?.insertTextAtEnd(text, { ensureLeadingBoundary: true })) {
+      scheduleComposerFocusStable();
+    }
+  });
   const sendAppMessage = async (text: string) => {
     if (!isServerThread || activeThreadId === null) {
       throw new Error("Messages from apps need a started thread.");
@@ -3670,6 +3677,7 @@ export default function ChatView(props: ChatViewProps) {
                 ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
                 : {})}
               {...(threadFindEnabled ? { onFindInThread: openThreadFindStable } : {})}
+              threadBot={threadBot}
             />
           </header>
         )}
@@ -3812,6 +3820,19 @@ export default function ChatView(props: ChatViewProps) {
                   onFooterGrow={onTimelineFooterGrowStable}
                   hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                   emptyPlaceholderInset={composerReservedHeight}
+                  {...(threadBot === null
+                    ? {}
+                    : {
+                        botChat: true,
+                        unreadAfter: threadBot.unreadAfter,
+                        emptyPlaceholder: (
+                          <BotWelcome
+                            environmentId={activeThread.environmentId}
+                            threadBot={threadBot}
+                            onSuggest={insertBotSuggestion}
+                          />
+                        ),
+                      })}
                   topFadeEnabled={!hasTimelineTopBanner}
                   {...(threadHistoryControls === undefined
                     ? {}

@@ -2183,10 +2183,14 @@ describe("chooseAutoModel", () => {
   });
 
   it("picks automatic team workers: cheapest that passes, one tier up, or the strongest", () => {
-    const worker = (kind: "cheap" | "balanced" | "best", providers = [claude(), codex()]) =>
+    const worker = (
+      kind: "cheap" | "balanced" | "best",
+      providers = [claude(), codex()],
+      rows: RoutingTable["rows"] = ROWS,
+    ) =>
       chooseTeamWorkerModel({
         kind,
-        table: tableOf(ROWS),
+        table: tableOf(rows),
         taskClass: "implement",
         providers,
         settings: settingsFor(providers),
@@ -2205,6 +2209,35 @@ describe("chooseAutoModel", () => {
       model: "model-sol",
     });
     expect(worker("best", [])).toBeUndefined();
+    // Best spends on the pricier of two models at the top tier; the others keep the cheaper.
+    const withTop = [provider(claudeId, "claudeAgent", [...CLAUDE_MODELS, "model-top"]), codex()];
+    const topRows = [...ROWS, row("claudeAgent", "model-top", every("S"), 6)];
+    expect(worker("best", withTop, topRows)).toStrictEqual({
+      instanceId: claudeId,
+      model: "model-top",
+    });
+    expect(worker("balanced", withTop, topRows)).toStrictEqual({
+      instanceId: claudeId,
+      model: "model-opus",
+    }); // A pricier lower tier never beats a cheaper model above it.
+    const midRows = [
+      row("codex", "model-sol", every("A"), 2),
+      row("codex", "model-mid", every("B"), 5),
+    ];
+    const withMid = [provider(codexId, "codex", ["model-sol", "model-mid"])];
+    expect(
+      chooseTeamWorkerModel({
+        kind: "cheap",
+        table: tableOf(midRows),
+        taskClass: "quick_edit",
+        providers: withMid,
+        settings: settingsFor(withMid),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection,
+    ).toStrictEqual({ instanceId: codexId, model: "model-sol" });
   });
 
   it("drops the old selection's options and keeps them when it stays", () => {

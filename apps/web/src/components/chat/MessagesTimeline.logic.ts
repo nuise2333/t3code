@@ -616,6 +616,10 @@ type MessagesTimelineRowContent =
       groupedWithPrevious?: boolean;
       /** Set when the message above is a steer too, so the label shows once. */
       continuesSteer?: boolean;
+      /** Bot chats: the first message of a day carries the day's divider. */
+      dayDividerAt?: number;
+      /** Bot chats: the first reply since the chat was last read. */
+      unreadDivider?: boolean;
     }
   | {
       kind: "assistant-meta";
@@ -2843,7 +2847,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.revertTurnCount === bm.revertTurnCount &&
         a.groupedWithNext === bm.groupedWithNext &&
         a.groupedWithPrevious === bm.groupedWithPrevious &&
-        a.continuesSteer === bm.continuesSteer
+        a.continuesSteer === bm.continuesSteer &&
+        a.dayDividerAt === bm.dayDividerAt &&
+        a.unreadDivider === bm.unreadDivider
       );
     }
   }

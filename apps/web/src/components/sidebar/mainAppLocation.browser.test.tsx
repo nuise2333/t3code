@@ -9,6 +9,7 @@ import {
   assistantCitationNavigation,
 } from "../../lib/assistantCitationNavigation";
 import {
+  isSidebarUtilityPage,
   startMainAppLocationTracking,
   useCloseAppModal,
   useNavigateToMainApp,
@@ -68,11 +69,18 @@ describe("main app return location", () => {
 
     const closingUsage = await returnLocation("/usage", "Close modal");
     const sidebarBack = await returnLocation("/pull-requests", "Back to app");
+    const channelBack = await returnLocation(
+      "/bots/channels/environment-one/launch",
+      "Back to app",
+    );
 
-    expect({ closingUsage, sidebarBack }).toEqual({
+    expect({ closingUsage, sidebarBack, channelBack }).toEqual({
       closingUsage: THREAD_PATH,
       sidebarBack: THREAD_PATH,
+      channelBack: THREAD_PATH,
     });
+    // A channel keeps the normal footer; only its own header offers Back.
+    expect(isSidebarUtilityPage("/bots/channels/environment-one/launch")).toBe(false);
   });
 
   it("leaves no stop on Settings for history back after it closes", async () => {

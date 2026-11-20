@@ -9,13 +9,14 @@ export function isAppModalPage(pathname: string) {
   return pathname === "/settings" || pathname.startsWith("/settings/") || pathname === "/usage";
 }
 
+/** Pages whose sidebar footer offers only Back. */
 export function isSidebarUtilityPage(pathname: string) {
-  return (
-    pathname.startsWith("/projects/") ||
-    pathname === "/pull-requests" ||
-    pathname === "/bots" ||
-    pathname.startsWith("/bots/channels/")
-  );
+  return pathname.startsWith("/projects/") || pathname === "/pull-requests" || pathname === "/bots";
+}
+
+/** A channel keeps the normal footer, but its own Back still leads past it. */
+function isMainAppPage(pathname: string) {
+  return !isSidebarUtilityPage(pathname) && !pathname.startsWith("/bots/channels/");
 }
 
 // Pages the root route always renders without the app shell, so they are never
@@ -41,7 +42,7 @@ export function startMainAppLocationTracking(router: AnyRouter): () => void {
     appModalReturnThreadTarget = resolveThreadRouteTarget(
       router.state.matches.at(-1)?.params ?? {},
     );
-    if (!isSidebarUtilityPage(pathname)) mainAppHref = href;
+    if (isMainAppPage(pathname)) mainAppHref = href;
   };
   record();
   return router.subscribe("onResolved", record);

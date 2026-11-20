@@ -869,8 +869,9 @@ export function chooseAutoModel(input: {
 
 /**
  * A worker's model for an automatic team, from every ready instance. Cheap takes the cheapest
- * model at the task's tier or above; Balanced the cheapest one tier higher; Best the cheapest at
- * the highest tier on offer. Null when no model in the table can run here.
+ * model at the task's tier or above; Balanced the cheapest one tier higher or above; Best the priciest at
+ * the highest tier on offer, since a tier is too coarse to separate e.g. Fable 5.2 from Opus 5.5.
+ * Null when no model in the table can run here.
  */
 export function chooseTeamWorkerModel(input: {
   readonly kind: AutoTeamKind;
@@ -924,14 +925,18 @@ export function chooseTeamWorkerModel(input: {
         ? (atOrAbove(Math.min(desired + 1, rank("S"))) ?? atOrAbove(desired) ?? available.at(-1))
         : (atOrAbove(desired) ?? available.at(-1));
   const chosen = candidates
-    .filter((candidate) => rank(candidate.tier) === level)
+    // Cheap and Balanced take a cheaper model above their tier over a pricier one at it.
+    .filter((candidate) =>
+      input.kind === "best" ? rank(candidate.tier) === level : rank(candidate.tier) >= (level ?? 0),
+    )
     .map((candidate) => ({
       candidate,
       ...quotaRank(candidate.provider, candidate.slug, input.now),
     }))
     .sort(
       (a, b) =>
-        a.candidate.relativeCost - b.candidate.relativeCost ||
+        (input.kind === "best" ? -1 : 1) * (a.candidate.relativeCost - b.candidate.relativeCost) ||
+        rank(b.candidate.tier) - rank(a.candidate.tier) ||
         a.bucket - b.bucket ||
         b.score - a.score,
     )[0]?.candidate;

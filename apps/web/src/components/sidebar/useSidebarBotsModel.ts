@@ -36,6 +36,11 @@ const EMPTY_SEEN: BotSeen = {};
 const NO_IDS: ReadonlyArray<string> = [];
 const NO_BOTS: ReadonlyArray<Bot> = [];
 
+/** When each bot's chat was last read on this device. */
+export function useBotSeen() {
+  return useLocalStorage(SEEN_KEY, EMPTY_SEEN, SeenSchema);
+}
+
 export function useBotPins() {
   return useLocalStorage(PINS_KEY, NO_IDS, IdsSchema);
 }
@@ -55,7 +60,7 @@ export function useSidebarBotsModel(
 ) {
   const botsQuery = useEnvironmentQuery(serverEnvironment.botsLive({ environmentId, input: {} }));
   const shells = useQuietThreadShells();
-  const [seen, setSeen] = useLocalStorage(SEEN_KEY, EMPTY_SEEN, SeenSchema);
+  const [seen, setSeen] = useBotSeen();
   const data = botsQuery.data;
   const bots = data?.bots ?? NO_BOTS;
 

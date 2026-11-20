@@ -139,7 +139,14 @@ import {
 } from "./timelineViewport";
 import { useThreadFindPositionReader } from "./useThreadFindPositionReader";
 import { ThreadActivityAnnouncer } from "./ThreadActivityAnnouncer";
-import { useStableHandoffRuns, useIncrementalTimelineRows, useStableRows } from "./useTimelineRows";
+import {
+  useBotTimelineRows,
+  useStableHandoffRuns,
+  useIncrementalTimelineRows,
+  useStableRows,
+} from "./useTimelineRows";
+import { botDayLabel } from "../bots/botConversation.logic";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { useClientSettings } from "../../hooks/useSettings";
 
 function timelineListStateFor(identity: string): {
@@ -320,6 +327,12 @@ interface MessagesTimelineProps {
   hideEmptyPlaceholder?: boolean;
   /** Composer space to center the empty state against; held steady through collapse. */
   emptyPlaceholderInset: number;
+  /** Replaces the generic empty-thread line. */
+  emptyPlaceholder?: ReactNode;
+  /** A bot's own chat: day and unread dividers, and time-bounded grouping. */
+  botChat?: boolean;
+  /** When the bot chat was last read before it opened; null shows no unread divider. */
+  unreadAfter?: number | null;
   topFadeEnabled?: boolean;
   historyControls?: MessagesTimelineHistoryControls | undefined;
   findExpanded?: boolean;
@@ -416,6 +429,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onFooterGrow,
   hideEmptyPlaceholder = false,
   emptyPlaceholderInset,
+  emptyPlaceholder,
+  botChat = false,
+  unreadAfter = null,
   topFadeEnabled = false,
   historyControls,
 }: MessagesTimelineProps) {
@@ -754,7 +770,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     toolCallVisibility,
     revealedMessageId,
   });
-  const rows = useStableRows(rawRows, listIdentityKey);
+  const botRows = useBotTimelineRows(rawRows, botChat, unreadAfter);
+  const rows = useStableRows(botRows, listIdentityKey);
   const matchedApprovalRequestIds = new Set<string>();
   for (const row of pendingApprovalRequestIds.size > 0 ? rows : []) {
     const entries =
@@ -1409,7 +1426,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
           className="flex h-full items-center justify-center ps-(--chat-lane-inset-start) pe-(--chat-lane-inset-end)"
           style={{ paddingBottom: emptyPlaceholderInset }}
         >
-          <p className="text-sm text-muted-foreground">Send a message to start the conversation.</p>
+          {emptyPlaceholder ?? (
+            <p className="text-sm text-muted-foreground">
+              Send a message to start the conversation.
+            </p>
+          )}
         </div>
       </>
     );
@@ -1673,6 +1694,12 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow key={row.id} row={row} /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
+      {row.kind === "message" && row.unreadDivider === true ? (
+        <ConversationDivider label="New messages" tone="unread" />
+      ) : null}
+      {row.kind === "message" && row.dayDividerAt !== undefined ? (
+        <DayDivider at={row.dayDividerAt} />
+      ) : null}
       {row.kind === "message" && row.message.role === "user" ? <UserMessageRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
@@ -1689,6 +1716,29 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     </div>
   );
 });
+
+function DayDivider({ at }: { at: number }) {
+  const now = Date.parse(useNowMinute());
+  return <ConversationDivider label={botDayLabel(at, now)} tone="muted" />;
+}
+
+function ConversationDivider({ label, tone }: { label: string; tone: "muted" | "unread" }) {
+  const line = cn("h-px flex-1", tone === "unread" ? "bg-primary/40" : "bg-border/70");
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      className={cn(
+        "mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 pb-3 text-xs",
+        tone === "unread" ? "font-medium text-primary" : "text-muted-foreground",
+      )}
+    >
+      <span className={line} />
+      <span className="min-w-0">{label}</span>
+      <span className={line} />
+    </div>
+  );
+}
 
 function WorktreeSetupTimelineRow({
   row,

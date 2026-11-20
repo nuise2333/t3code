@@ -9,6 +9,7 @@ import {
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
 import { type HandoffTimelineRun } from "./V2LifecycleRow";
+import { decorateBotTimelineRows } from "../bots/botConversation.logic";
 
 const EMPTY_TIMELINE_RUNS: ReadonlyArray<HandoffTimelineRun> = [];
 
@@ -75,4 +76,22 @@ export function useStableRows(
   );
   setState({ identity, source: rows, stable });
   return stable.result;
+}
+
+/** A bot chat's dividers and time-bounded grouping; other threads get their rows untouched. */
+export function useBotTimelineRows(
+  rows: MessagesTimelineRow[],
+  botChat: boolean,
+  unreadAfter: number | null,
+): MessagesTimelineRow[] {
+  const [state, setState] = useState<{
+    readonly source: MessagesTimelineRow[];
+    readonly unreadAfter: number | null;
+    readonly result: MessagesTimelineRow[];
+  } | null>(null);
+  if (!botChat) return rows;
+  if (state?.source === rows && state.unreadAfter === unreadAfter) return state.result;
+  const result = decorateBotTimelineRows(rows, unreadAfter);
+  setState({ source: rows, unreadAfter, result });
+  return result;
 }
