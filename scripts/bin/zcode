@@ -1,0 +1,4 @@
+#!/bin/sh
+# ACP entry point for ZCode; runs the bridge on ZCode's bundled Node runtime.
+APP="${ZCODE_APP:-/Applications/ZCode.app}"
+ELECTRON_RUN_AS_NODE=1 exec "$APP/Contents/MacOS/ZCode" "$(dirname "$0")/../zcode-acp.mjs" "$@"

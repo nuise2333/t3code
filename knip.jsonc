@@ -30,6 +30,8 @@
         "fixtures/*/*.js",
         // bin/dsh, the DSH ACP launcher, runs this by path.
         "dsh-acp.mjs",
+        // bin/zcode, the ZCode ACP launcher, runs this by path.
+        "zcode-acp.mjs",
         "dsh-stack/sync-desktop.mjs",
         "knip-schemas.ts",
         "linux-after-pack.ts",

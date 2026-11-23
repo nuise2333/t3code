@@ -62,6 +62,12 @@ describe("ACP Registry contracts", () => {
     expect(bundledAcpIconUrlForCommand("/Users/me/.kimi-code/bin/kimi")).toBe(
       "t3-acp-icon:kimi-code",
     );
+    expect(bundledAcpIconUrlForCommand("/Users/me/t3-code/scripts/bin/zcode")).toBe(
+      "t3-acp-icon:zcode",
+    );
+    expect(isFullColorAcpIconUrl(resolveOfficialAcpRegistryIconUrl("t3-acp-icon:zcode"))).toBe(
+      true,
+    );
 
     const kimiDataUrl = resolveOfficialAcpRegistryIconUrl("t3-acp-icon:kimi-code");
     expect(kimiDataUrl).toMatch(/^data:image\/svg\+xml,/);

@@ -40,6 +40,12 @@ const BUNDLED_ACP_AGENT_ICONS = {
     fullColor: true,
     svg: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><rect width='128' height='128' rx='28'/><path fill='#fff' d='M37 35h10.5v27L75 35h16L64 62l24 16q3 1.5 3 3.5V90q-9 0-17-8L57 70l-9.5 9.5V90H37z'/><circle cx='101.5' cy='29' r='6.8' fill='#1783FF'/></svg>",
   },
+  // ZCode app icon (Zhipu AI), traced from the 1024px icon.png in ZCode.app.
+  zcode: {
+    commands: ["zcode"],
+    fullColor: true,
+    svg: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='96 96 832 832'><rect x='96' y='96' width='832' height='832' rx='186'/><path fill='#fff' d='M268.5 294.5h255l-45 64h-210zM563 294.5h203.5l-306 434H257zM545.5 665.5h209v63H501z'/></svg>",
+  },
 } as const satisfies Record<
   string,
   {
