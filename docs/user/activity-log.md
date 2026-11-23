@@ -30,6 +30,20 @@ answering, the answer it finished before reading your steer stays too. On web an
 shows the in-between messages while it is open. Approvals, questions, and errors always show. The
 setting applies to this browser or device only.
 
+## Thought translation
+
+**Thought translation** in **Settings → Chat** (web and desktop) translates the agent's reasoning
+blocks into your configured **Response language** (**Settings → Threads → Response language**),
+using the environment's [text generation model](./text-generation.md).
+
+- **Off** (default) shows reasoning in its original language.
+- **Immersive** replaces the reasoning text with the translation and adds a **Show original** toggle.
+- **Bilingual** shows the original reasoning above and the translation below.
+
+Translation is skipped when **Response language** is empty or when the reasoning is already written
+in that language. Tool output and code blocks are left untouched. The setting applies to this
+browser or device only.
+
 ## Screen reader announcements
 
 On web and desktop, a screen reader hears the open thread's turn as it runs. **Screen reader

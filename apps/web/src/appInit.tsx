@@ -88,6 +88,15 @@ function startClientAppearance(): void {
     if (previous?.chatWidth !== settings.chatWidth) {
       root.dataset.chatWidth = settings.chatWidth;
     }
+    if (previous?.cornerStyle !== settings.cornerStyle) {
+      root.dataset.cornerStyle = settings.cornerStyle;
+    }
+    if (previous?.codeLigatures !== settings.codeLigatures) {
+      root.dataset.codeLigatures = settings.codeLigatures ? "1" : "0";
+    }
+    if (previous?.sidebarCompact !== settings.sidebarCompact) {
+      root.dataset.sidebarCompact = settings.sidebarCompact ? "1" : "0";
+    }
     if (previous?.appearanceContrast !== settings.appearanceContrast) {
       applyAppearanceContrast(root, settings.appearanceContrast);
     }

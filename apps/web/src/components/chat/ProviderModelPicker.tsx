@@ -6,8 +6,8 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { RegistryContext } from "@effect/atom-react";
+import { ChevronDownIcon } from "lucide-react";
 import {
-  createContext,
   memo,
   type ReactNode,
   useContext,
@@ -26,6 +26,7 @@ import {
   resolveModelPickerSelectedModel,
   type PickerTeams,
 } from "./ModelPickerContent";
+import type { ModelRowEffortDisplay } from "./ComposerModelEffort";
 import type { ModelPickerTeamRow } from "./modelPickerKeys";
 import type { PickerRoutingGroup } from "@t3tools/client-runtime/routing";
 import { type ModelPickerTab, retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
@@ -90,9 +91,6 @@ function lockBackgroundScroll(popup: HTMLElement | null) {
   };
 }
 
-/** What a docked effort column needs from its picker: the model it serves. */
-export const DockedPickerContext = createContext<{ modelLabel: string }>({ modelLabel: "" });
-
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   environmentId: EnvironmentId | null;
   workspaceCwd?: string | null;
@@ -128,11 +126,13 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /** Composer shortcuts this trigger answers besides the picker's own. */
   triggerShortcuts?: string;
   /**
-   * Docks an effort column beside the list and a footer under both. The popup then stays open
+   * Docks an effort section below the list and a footer row under both. The popup then stays open
    * until Escape or an outside press, and picking a model moves focus to its levels.
    */
   effortColumn?: ReactNode;
   footer?: ReactNode;
+  /** Resolves a model row's current reasoning level word and tier color, when known. */
+  getModelEffort?: (instanceId: ProviderInstanceId, slug: string) => ModelRowEffortDisplay | null;
   /** A new thread's routing groups, listed in their own tab; picking one closes the picker. */
   routingGroups?: ReadonlyArray<PickerRoutingGroup>;
   activeRoutingGroupId?: string | null;
@@ -228,11 +228,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const openTarget = (target: "effort" | "permissions") => {
     if (target === "effort") {
       focusEffort("any");
-      return;
     }
-    popupRef.current
-      ?.querySelector<HTMLButtonElement>("[data-composer-permissions-trigger]")
-      ?.click();
   };
 
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
@@ -354,8 +350,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       {...(docked
         ? {
             docked,
+            ...(props.getModelEffort ? { getModelEffort: props.getModelEffort } : {}),
             onFocusEffort: () => void focusEffort("any"),
-            // Inside the fixed height, so switching to or from a ChatGPT plan never resizes it.
+            // Inside the scrollable list, so switching to or from a ChatGPT plan never resizes it.
             ...(props.selectedModels === undefined
               ? { listFooter: <ChatGptSharingControl provider={activeEntry?.snapshot ?? null} /> }
               : {}),
@@ -480,6 +477,13 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               Unavailable
             </Badge>
           ) : null}
+          {props.isComposerOwned ? (
+            <ChevronDownIcon
+              aria-hidden="true"
+              data-composer-control-chevron
+              className="size-3.5 shrink-0 text-muted-foreground/75"
+            />
+          ) : null}
         </span>
       </PopoverTrigger>
       <PopoverPopup
@@ -504,40 +508,35 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         touchBackdrop
       >
         {props.effortColumn ? (
-          <DockedPickerContext value={{ modelLabel: triggerTitle }}>
-            <div className="flex max-h-(--available-height) flex-col">
-              {/* One fixed height, so a model with more options never resizes the popup. Short
-                  windows shrink it and keep the footer. */}
-              <div className="flex h-86.5 min-h-0 max-sm:h-auto max-sm:flex-col">
-                {picker}
-                <div
-                  {...(teamSetupColumn ? { "data-model-picker-team-setup": true } : {})}
-                  data-model-picker-effort
-                  className={cn(
-                    "flex min-h-0 flex-col sm:shrink-0 border-l border-border/70 bg-muted/40 max-sm:h-64 max-sm:w-full max-sm:border-t max-sm:border-l-0",
-                    // The team setup needs room for its model fields and guidance.
-                    teamSetupColumn ? "w-80" : "w-48",
-                  )}
-                  onKeyDown={(event) => {
-                    if (event.key !== "ArrowLeft" || event.altKey || event.ctrlKey || event.metaKey)
-                      return;
-                    // Left moves the caret in a field of the team setup.
-                    if (
-                      event.target instanceof Element &&
-                      event.target.closest("input, textarea, [contenteditable]")
-                    )
-                      return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    searchInputRef.current?.focus();
-                  }}
-                >
-                  {teamSetupColumn ?? props.effortColumn}
-                </div>
-              </div>
-              {props.footer}
+          <div className="flex max-h-(--available-height) w-90 max-w-[calc(100vw-2rem)] flex-col overflow-hidden">
+            <div className="flex max-h-86 min-h-40 flex-1 flex-col overflow-hidden">{picker}</div>
+            <div
+              {...(teamSetupColumn ? { "data-model-picker-team-setup": true } : {})}
+              data-model-picker-effort
+              className={cn(
+                "flex shrink-0 flex-col border-t border-border/70 bg-muted/25",
+                teamSetupColumn ? "max-h-72 overflow-y-auto" : "max-h-60 overflow-y-auto",
+              )}
+              onKeyDown={(event) => {
+                if (event.altKey || event.ctrlKey || event.metaKey) return;
+                // Left/Up move the caret in a field of the team setup.
+                if (
+                  event.target instanceof Element &&
+                  event.target.closest("input, textarea, [contenteditable]")
+                ) {
+                  return;
+                }
+                if (event.key === "ArrowLeft" || (event.key === "ArrowUp" && !teamSetupColumn)) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  searchInputRef.current?.focus();
+                }
+              }}
+            >
+              {teamSetupColumn ?? props.effortColumn}
             </div>
-          </DockedPickerContext>
+            {props.footer}
+          </div>
         ) : (
           picker
         )}

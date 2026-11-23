@@ -3,35 +3,25 @@ import { describe, expect, it } from "vite-plus/test";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 
 const base = {
-  matchesDefault: true,
   collapsed: false,
   measuredHiddenBlockCount: 0,
 };
 
 describe("resolveComposerControlsOwnership", () => {
-  it("hides the chip at the default and lets the model picker answer composer.mode", () => {
+  it("shows a labelled standalone permissions control that owns composer.mode", () => {
     const result = resolveComposerControlsOwnership(base);
-    expect(result).toMatchObject({
-      accessDisplay: "hidden",
-      showModeBlock: false,
-      hiddenBlockIds: [],
-      pickerOwnsModeShortcut: true,
-    });
-  });
-
-  it("shows a labelled chip that owns composer.mode when the mode differs", () => {
-    const result = resolveComposerControlsOwnership({ ...base, matchesDefault: false });
     expect(result).toMatchObject({
       accessDisplay: "label",
       showModeBlock: true,
+      hiddenBlockIds: [],
+      overflowShowsPermissions: false,
       pickerOwnsModeShortcut: false,
     });
   });
 
-  it("gives an overflowed chip's Permissions to the overflow menu", () => {
+  it("gives an overflowed permissions control to the overflow menu", () => {
     const result = resolveComposerControlsOwnership({
       ...base,
-      matchesDefault: false,
       measuredHiddenBlockCount: 1,
     });
     expect(result.hiddenBlockIds).toEqual(["mode"]);
@@ -39,12 +29,13 @@ describe("resolveComposerControlsOwnership", () => {
     expect(result.pickerOwnsModeShortcut).toBe(false);
   });
 
-  it("shows the non-default chip as an icon in the compacted row", () => {
+  it("shows the permissions control as an icon in the compacted row", () => {
     const result = resolveComposerControlsOwnership({
       ...base,
-      matchesDefault: false,
       collapsed: true,
     });
     expect(result.accessDisplay).toBe("icon");
+    expect(result.showModeBlock).toBe(true);
+    expect(result.pickerOwnsModeShortcut).toBe(false);
   });
 });

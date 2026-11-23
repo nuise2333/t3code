@@ -54,6 +54,8 @@ interface PointerSample {
  */
 export function OpticalEffortSlider(props: {
   title: string;
+  /** Shows `title` on the left of the slider header, opposite the current level. */
+  showTitle?: boolean;
   levels: ReadonlyArray<OpticalEffortLevel>;
   /** The picked level, or null when Auto holds it or the level is not one of `levels`. */
   value: string | null;
@@ -307,32 +309,35 @@ export function OpticalEffortSlider(props: {
       data-energy={shownEnergy > 0 ? "1" : "0"}
     >
       <div className="optical-effort__head">
-        {props.auto && !autoActive ? (
-          <button
-            type="button"
-            className="optical-effort__auto"
-            disabled={props.disabled}
-            onClick={props.auto.onPick}
+        {props.showTitle ? <span className="optical-effort__title">{props.title}</span> : null}
+        <span className={props.showTitle ? "optical-effort__right" : "contents"}>
+          {props.auto && !autoActive ? (
+            <button
+              type="button"
+              className="optical-effort__auto"
+              disabled={props.disabled}
+              onClick={props.auto.onPick}
+            >
+              Auto
+            </button>
+          ) : null}
+          <span
+            // Remounts per level so the rise plays once on each change.
+            key={autoActive ? "auto" : shownIndex}
+            className={cn(
+              "optical-effort__value",
+              autoActive && "is-auto",
+              isTop && !motionOff && "is-glowing",
+            )}
+            style={
+              valueColor
+                ? ({ color: valueColor, "--effort-glow": valueColor } as CSSProperties)
+                : undefined
+            }
+            aria-hidden="true"
           >
-            Auto
-          </button>
-        ) : null}
-        <span
-          // Remounts per level so the rise plays once on each change.
-          key={autoActive ? "auto" : shownIndex}
-          className={cn(
-            "optical-effort__value",
-            autoActive && "is-auto",
-            isTop && !motionOff && "is-glowing",
-          )}
-          style={
-            valueColor
-              ? ({ color: valueColor, "--effort-glow": valueColor } as CSSProperties)
-              : undefined
-          }
-          aria-hidden="true"
-        >
-          {autoActive ? "Auto" : (shownLevel?.label ?? "")}
+            {autoActive ? "Auto" : (shownLevel?.label ?? "")}
+          </span>
         </span>
       </div>
       <div

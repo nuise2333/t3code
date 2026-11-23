@@ -29,6 +29,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.serverCheckSecretSource]: AuthSettingsWriteScope,
   // Listing models spends the stored API key, so only those who can choose a model may.
   [WS_METHODS.serverListTextGeneratorModels]: AuthSettingsWriteScope,
+  // Translating reasoning invokes the environment's text generation model.
+  [WS_METHODS.serverTranslateThought]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationReadScope,
   // Names a model from the providers a reader already sees; it launches nothing.
   [WS_METHODS.serverCrossVendorModel]: AuthOrchestrationReadScope,

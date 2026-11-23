@@ -74,7 +74,12 @@ import {
   resolveDisclosureRevealScrollDelta,
 } from "./timelineScrollAnchoring";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
-import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
+import {
+  captureElementAssistantCitation,
+  type AssistantCitationSourceAnchor,
+} from "~/lib/assistantTextSelection";
+import { TimelineContextMenu } from "./TimelineContextMenu";
+import type { CodeBlockCitationInput } from "./MarkdownCodeBlock";
 import { type AssistantCitationRequest } from "./AssistantCitationSource";
 import { useAssistantCitationTarget } from "./useAssistantCitationTarget";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
@@ -244,6 +249,16 @@ interface MessagesTimelineProps {
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => boolean;
+  onAskAsideEmpty?: (() => boolean) | undefined;
+  hasComposerDraft?: (() => boolean) | undefined;
+  sideChatAvailable?: boolean | undefined;
+  sideChatDisabledReason?: string | null | undefined;
+  onCompactContext?: (() => void) | undefined;
+  compactDisabled?: boolean | undefined;
+  onFreshSession?: (() => void) | undefined;
+  freshSessionDisabled?: boolean | undefined;
+  onOpenModelPicker?: (() => void) | undefined;
+  onInsertTextIntoComposer?: ((text: string) => boolean) | undefined;
   onReplyToResponse?: TimelineRowSharedState["onReplyToResponse"];
   isWorking: boolean;
   runlessWorkActive?: boolean;
@@ -370,6 +385,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
   citationHistory = CITED_HISTORY_LOADING,
   onCiteAssistantText,
   onAskAsideAboutAssistantText,
+  onAskAsideEmpty,
+  hasComposerDraft,
+  sideChatAvailable,
+  sideChatDisabledReason,
+  onCompactContext,
+  compactDisabled,
+  onFreshSession,
+  freshSessionDisabled,
+  onOpenModelPicker,
+  onInsertTextIntoComposer,
   onReplyToResponse,
   isWorking,
   runlessWorkActive = false,
@@ -827,7 +852,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
         animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
         viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
       })
-      .then(() => pulseTimelineTarget(list.getScrollableNode(), item.id));
+      .then(() => {
+        if (listRef.current === list) {
+          pulseTimelineTarget(list.getScrollableNode(), item.id);
+        }
+      });
   };
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
@@ -1160,6 +1189,51 @@ const ConversationTimeline = memo(function ConversationTimeline({
     };
   };
 
+  const hasExpandedSteps =
+    paintedExpandedWorkGroupIds.size > 0 ||
+    paintedExpandedRunIds.size > 0 ||
+    paintedExpandedAttemptIds.size > 0 ||
+    workGroupViewState.expandedEntries.size > 0;
+  const collapseAllSteps = () => {
+    setExpandedWorkGroupIds(new Set());
+    setExpandedRunIds(new Set());
+    setExpandedAttemptIds(new Set());
+    workGroupViewState.expandedEntries.clear();
+  };
+  const resolveContextMenuMessageText = useStableCallback((messageId: string) => {
+    for (const row of rows) {
+      if (row.kind === "message" && row.message.id === messageId) {
+        return row.message.text.trim() || null;
+      }
+      if (row.kind === "sent-message" && row.id === messageId) {
+        return row.text.trim() || null;
+      }
+    }
+    return null;
+  });
+  const citeCodeBlockStable = useStableCallback((input: CodeBlockCitationInput) => {
+    if (onCiteAssistantText && citationThreadRef && input.element) {
+      const captured = captureElementAssistantCitation(
+        input.element,
+        citationThreadRef,
+        input.code,
+      );
+      if (captured) {
+        onCiteAssistantText(captured.citation, captured.sourceAnchor);
+        return;
+      }
+    }
+    if (!onInsertTextIntoComposer) return;
+    const trimmed = input.code.trim();
+    if (!trimmed) return;
+    const referenceText = input.fenceTitle
+      ? `@${input.fenceTitle} `
+      : `\`\`\`${input.language}\n${trimmed}\n\`\`\`\n`;
+    onInsertTextIntoComposer(referenceText);
+  });
+  const onCiteCodeBlock =
+    onCiteAssistantText || onInsertTextIntoComposer ? citeCodeBlockStable : undefined;
+
   // Built from props after the last hook so the compiler can memoize the row context; a map
   // made before a hook would rebuild it, and re-render every row, on each streamed update.
   const pendingApprovalsByRequestId = new Map(
@@ -1186,6 +1260,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     activeThreadEnvironmentId,
     onRevertToTurnCount,
     onRunShellCommand,
+    onCiteCodeBlock,
     findActive,
     onImageExpand,
     onFileOpen,
@@ -1508,6 +1583,21 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 onAskAside={onAskAsideAboutAssistantText}
               />
             ) : null}
+            <TimelineContextMenu
+              viewport={timelineViewportElement}
+              threadRef={citationThreadRef}
+              resolveMessageText={resolveContextMenuMessageText}
+              hasComposerDraft={hasComposerDraft}
+              onAskAsideWithCitation={onAskAsideAboutAssistantText}
+              onAskAsideEmpty={onAskAsideEmpty}
+              sideChatAvailable={sideChatAvailable}
+              sideChatDisabledReason={sideChatDisabledReason}
+              onCompactContext={onCompactContext}
+              compactDisabled={compactDisabled}
+              onFreshSession={onFreshSession}
+              freshSessionDisabled={freshSessionDisabled}
+              onOpenModelPicker={onOpenModelPicker}
+            />
             <LegendList<MessagesTimelineRow>
               ref={setTimelineList}
               data={rows}
@@ -1564,6 +1654,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
               currentIndex={minimapCurrentIndex}
               atEnd={minimapAtEnd}
               stripMap={minimapStripMap}
+              hasExpandedSteps={hasExpandedSteps}
+              onCollapseAllSteps={collapseAllSteps}
               onWheel={forwardMinimapWheel}
               onSelect={selectMinimapItem}
             />

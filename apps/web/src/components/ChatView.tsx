@@ -223,7 +223,6 @@ import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
 import { GuestPendingMessages } from "./chat/GuestShareControls";
 import { useDeviceState } from "~/state/device";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
-import { ComposerContextPermissions } from "./ComposerContextPermissions";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
@@ -308,7 +307,7 @@ import {
 } from "../state/entities";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
-import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { DraftHeroComposerBar, DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialogHost, openExpandedImagePreview } from "./chat/ExpandedImageDialog";
 import {
   BranchRestoreConfirmHost,
@@ -701,6 +700,20 @@ export default function ChatView(props: ChatViewProps) {
       });
     }
     return started;
+  });
+  const hasComposerDraftStable = useStableCallback(() => {
+    if (promptRef.current.trim().length > 0) return true;
+    const draft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+    return draft ? composerDraftHasUserContent(draft) : false;
+  });
+  const insertTextIntoComposerStable = useStableCallback((text: string) => {
+    const inserted =
+      composerRef.current?.insertTextAtEnd(text, { ensureLeadingBoundary: true }) ?? false;
+    if (inserted) composerRef.current?.focusAtEnd();
+    return inserted;
+  });
+  const openModelPickerStable = useStableCallback(() => {
+    composerRef.current?.openModelPicker();
   });
   const replyToResponseStable = useStableCallback((response: ResponseContextRecord) => {
     const accepted = composerRef.current?.replyToResponse(response) ?? false;
@@ -2474,6 +2487,7 @@ export default function ChatView(props: ChatViewProps) {
     moveRightPanelSurfaceStable,
     onOpenToolDiffStable,
     onOpenTurnDiffStable,
+    openBrowserSurfaceStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,
     toggleRightPanelMaximizedStable,
@@ -3153,6 +3167,19 @@ export default function ChatView(props: ChatViewProps) {
                 : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
   const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
+  const askAsideEmptyStable = useStableCallback(() => {
+    if (sideChatDisabledReason !== null || hasComposerDraftStable()) {
+      toastManager.add({
+        type: "info",
+        title: "Finish or clear your draft first",
+        description: "A side question starts from an empty composer.",
+      });
+      return false;
+    }
+    const inserted = composerRef.current?.insertTextAtEnd("/btw ") ?? false;
+    if (inserted) composerRef.current?.focusAtEnd();
+    return inserted;
+  });
   const {
     onConfirmRevertStable,
     onForkFromRunStable,
@@ -3810,6 +3837,16 @@ export default function ChatView(props: ChatViewProps) {
                   citationHistory={citationHistory}
                   onCiteAssistantText={citeAssistantTextStable}
                   onAskAsideAboutAssistantText={askAsideAboutAssistantTextStable}
+                  onAskAsideEmpty={askAsideEmptyStable}
+                  hasComposerDraft={hasComposerDraftStable}
+                  sideChatAvailable={sideChat.available}
+                  sideChatDisabledReason={sideChatDisabledReason}
+                  onCompactContext={onComposerCompactContextStable}
+                  compactDisabled={compactDisabled}
+                  onFreshSession={freshSessionCommandAvailable ? armFreshSessionStable : undefined}
+                  freshSessionDisabled={freshSessionArmed}
+                  onOpenModelPicker={openModelPickerStable}
+                  onInsertTextIntoComposer={insertTextIntoComposerStable}
                   onReplyToResponse={replyToResponseStable}
                   {...(activeProject
                     ? { onRunShellCommand: parentPanel?.runShellCommand ?? runShellCommandStable }
@@ -3935,35 +3972,61 @@ export default function ChatView(props: ChatViewProps) {
               }}
               inert={isRevertingCheckpoint}
               data-chat-composer-overlay="true"
+              data-draft-hero={isDraftHeroState ? "true" : undefined}
               className={
                 isDraftHeroState
-                  ? "pointer-events-none absolute inset-0 z-20 flex items-center [@media(max-height:34rem)]:items-end"
+                  ? "pointer-events-none absolute inset-0 z-20 flex flex-col justify-between"
                   : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
               }
             >
+              {isDraftHeroState ? (
+                <div
+                  data-draft-hero-top="true"
+                  className="chat-composer-lane pointer-events-none flex min-h-0 flex-1 flex-col pt-3 sm:pt-5"
+                >
+                  <div
+                    data-optical-calm-zone="1"
+                    className="mx-auto flex w-full max-w-(--chat-content-max-width) flex-col items-start"
+                    style={
+                      forceExpandedMobileComposer
+                        ? { viewTransitionName: MOBILE_DRAFT_HEADLINE_VIEW_TRANSITION_NAME }
+                        : undefined
+                    }
+                  >
+                    <DraftHeroHeadline
+                      draftId={draftId}
+                      activeProjectRef={activeProjectRef}
+                      activeProjectTitle={activeProject?.title ?? null}
+                    />
+                  </div>
+                </div>
+              ) : null}
               <div ref={draftHeroTransitionGroupRef} className="chat-composer-lane w-full">
                 <div
                   data-chat-composer-stack="true"
                   className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
                 >
                   {isDraftHeroState ? (
-                    <div className="absolute inset-x-0 bottom-full">
-                      <div
-                        data-optical-calm-zone="1"
-                        className="pb-4 group-has-data-[composer-shoulder-tab]/composer-stack:pb-0"
-                        style={
-                          forceExpandedMobileComposer
-                            ? { viewTransitionName: MOBILE_DRAFT_HEADLINE_VIEW_TRANSITION_NAME }
-                            : undefined
-                        }
-                      >
-                        <DraftHeroHeadline
-                          draftId={draftId}
-                          activeProjectRef={activeProjectRef}
-                          activeProjectTitle={activeProject?.title ?? null}
-                        />
-                      </div>
-                    </div>
+                    <DraftHeroComposerBar
+                      draftId={draftId}
+                      activeProjectRef={activeProjectRef}
+                      activeProjectTitle={activeProject?.title ?? null}
+                      environmentId={activeThread.environmentId}
+                      availableEnvironments={logicalProjectEnvironments}
+                      autoEnvironmentLabel={autoEnvironmentLabel}
+                      onAutoEnvironment={
+                        draftId &&
+                        !envLocked &&
+                        canAutoBalanceEnvironments &&
+                        loadBalancingSettings.loadBalancingEnabled
+                          ? onAutoEnvironmentStable
+                          : undefined
+                      }
+                      envLocked={envLocked}
+                      {...(canChangeEnvironment
+                        ? { onEnvironmentChange: onEnvironmentChangeStable }
+                        : {})}
+                    />
                   ) : null}
                   <div
                     ref={draftHeroComposerAnchorRef}
@@ -4029,6 +4092,10 @@ export default function ChatView(props: ChatViewProps) {
                                 activeThreadId={activeThreadId}
                                 activeThread={activeThread}
                                 activeThreadRuns={serverProjection?.runs ?? EMPTY_RUNS}
+                                activeContextWindow={activeContextWindow}
+                                activeProviderThreadId={activeProviderThread?.id ?? null}
+                                activeThreadProviderTurns={serverProjection?.providerTurns}
+                                activeThreadVisibleTurnItems={serverVisibleTurnItems}
                                 promptHistoryEntries={timelineEntries}
                                 forceExpandedOnMobile={
                                   forceExpandedMobileComposer && isDraftHeroState
@@ -4158,6 +4225,12 @@ export default function ChatView(props: ChatViewProps) {
                                 setThreadError={setThreadError}
                                 onExpandImage={onExpandTimelineImageStable}
                                 onFileOpen={openFileAttachmentStable}
+                                onOpenBrowser={
+                                  browserAvailable && canOperatePreview
+                                    ? openBrowserSurfaceStable
+                                    : undefined
+                                }
+                                onOpenFilesPanel={activeProject ? addFilesSurfaceStable : undefined}
                                 editingQueuedAttachments={queuedRunEdit.editingAttachments}
                                 onRemoveEditingQueuedAttachment={
                                   queuedRunEdit.removeEditingAttachment
@@ -4212,20 +4285,6 @@ export default function ChatView(props: ChatViewProps) {
                                       : undefined
                                   }
                                   availableEnvironments={logicalProjectEnvironments}
-                                  {...(isServerThread
-                                    ? {}
-                                    : {
-                                        trailing: (
-                                          <ComposerContextPermissions
-                                            environmentId={environmentId}
-                                            runtimeMode={runtimeMode}
-                                            supportedRuntimeModes={
-                                              activeProviderStatus?.supportedRuntimeModes
-                                            }
-                                            onRuntimeModeChange={handleRuntimeModeChangeStable}
-                                          />
-                                        ),
-                                      })}
                                 />
                               </div>
                             )}
@@ -4233,10 +4292,7 @@ export default function ChatView(props: ChatViewProps) {
                         </div>
                       </ComposerSurface.Shell>
                       {isDraftHeroState && composerBannerItems.length > 0 ? (
-                        // Out of flow, like the headline, so a notice never moves the centered composer.
-                        // Short windows pin the composer to the bottom, where an out-of-flow notice
-                        // would fall off-screen, so there it takes space and lifts the composer.
-                        <div className="absolute inset-x-0 top-full flex flex-col gap-1 pt-4 [@media(max-height:34rem)]:static">
+                        <div className="flex flex-col gap-1 pt-2">
                           <ComposerBannerStack items={composerBannerItems} detached />
                         </div>
                       ) : null}

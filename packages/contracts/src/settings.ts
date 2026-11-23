@@ -195,6 +195,10 @@ export const OpticalMascot = Schema.Literals(["crab", "minis", "off"]);
 export type OpticalMascot = typeof OpticalMascot.Type;
 const DEFAULT_OPTICAL_MASCOT: OpticalMascot = "crab";
 
+export const CornerStyle = Schema.Literals(["sharp", "balanced", "soft"]);
+export type CornerStyle = typeof CornerStyle.Type;
+const DEFAULT_CORNER_STYLE: CornerStyle = "balanced";
+
 export const MIN_INTERFACE_FONT_SIZE = 12;
 export const MAX_INTERFACE_FONT_SIZE = 20;
 export const InterfaceFontSize = Schema.Int.check(
@@ -421,6 +425,10 @@ export type EffortDisplay = typeof EffortDisplay.Type;
 export const ToolCallVisibility = Schema.Literals(["showAll", "hideSuccessful", "hideAll", "zen"]);
 export type ToolCallVisibility = typeof ToolCallVisibility.Type;
 
+/** How agent reasoning blocks are translated into the response language: off, immersive, or bilingual. */
+export const ThoughtTranslationMode = Schema.Literals(["off", "immersive", "bilingual"]);
+export type ThoughtTranslationMode = typeof ThoughtTranslationMode.Type;
+
 /** What the open thread reads to a screen reader: turn status, the agent's in-between messages too, or every step. */
 export const ScreenReaderAnnouncements = Schema.Literals(["status", "messages", "everything"]);
 export type ScreenReaderAnnouncements = typeof ScreenReaderAnnouncements.Type;
@@ -508,6 +516,9 @@ export const ClientSettingsSchema = Schema.Struct({
   opticalMascot: OpticalMascot.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_OPTICAL_MASCOT)),
   ),
+  cornerStyle: CornerStyle.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_CORNER_STYLE))),
+  codeLigatures: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  sidebarCompact: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   browserDefaultViewport: PreviewViewportSetting.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_VIEWPORT)),
   ),
@@ -619,6 +630,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   toolCallVisibility: ToolCallVisibility.pipe(
     Schema.withDecodingDefault(Effect.succeed("showAll" as const)),
+  ),
+  thoughtTranslation: ThoughtTranslationMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
   screenReaderAnnouncements: ScreenReaderAnnouncements.pipe(
     Schema.withDecodingDefault(Effect.succeed("status" as const)),
@@ -2249,6 +2263,9 @@ export const ClientSettingsPatch = Schema.Struct({
   homeStudioPanel: Schema.optionalKey(Schema.Boolean),
   opticalSpectrum: Schema.optionalKey(OpticalSpectrum),
   opticalMascot: Schema.optionalKey(OpticalMascot),
+  cornerStyle: Schema.optionalKey(CornerStyle),
+  codeLigatures: Schema.optionalKey(Schema.Boolean),
+  sidebarCompact: Schema.optionalKey(Schema.Boolean),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
   browserDefaultAppearance: Schema.optionalKey(PreviewAppearancePreference),
@@ -2295,6 +2312,7 @@ export const ClientSettingsPatch = Schema.Struct({
   boringSidebarEnabled: Schema.optionalKey(Schema.Boolean),
   boringSidebarMultilineRows: Schema.optionalKey(Schema.Boolean),
   toolCallVisibility: Schema.optionalKey(ToolCallVisibility),
+  thoughtTranslation: Schema.optionalKey(ThoughtTranslationMode),
   screenReaderAnnouncements: Schema.optionalKey(ScreenReaderAnnouncements),
   screenReaderWindowTitle: Schema.optionalKey(Schema.Boolean),
   threadDetailsUsageEnabled: Schema.optionalKey(Schema.Boolean),

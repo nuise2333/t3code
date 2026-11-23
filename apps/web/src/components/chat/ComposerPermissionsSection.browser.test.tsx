@@ -31,6 +31,7 @@ function OverflowMenu() {
         <MenuPopup {...composerMenuProps}>
           <ComposerPermissionsSection
             runtimeMode={mode}
+            defaultRuntimeMode="full-access"
             runtimeModeOptions={options}
             onRuntimeModeChange={setMode}
           />
@@ -41,7 +42,7 @@ function OverflowMenu() {
   );
 }
 
-it("reaches Permissions with arrow keys, previews, and picks with Enter", async () => {
+it("reaches Permissions with arrow keys, shows the Default pill, and picks with Enter", async () => {
   await using screen = await render(<OverflowMenu />, { router: false }); // no routes involved
   const trigger = screen.getByRole("button", { name: "More" });
   await userEvent.tab();
@@ -52,13 +53,14 @@ it("reaches Permissions with arrow keys, previews, and picks with Enter", async 
   await expect
     .element(supervised)
     .toHaveAccessibleDescription("Ask before commands and file changes.");
+  await expect.element(page.getByText("Default", { exact: true })).toBeVisible();
 
-  await userEvent.keyboard("{ArrowRight}");
+  await userEvent.keyboard("{ArrowDown}");
   await expect
     .element(page.getByRole("menuitemradio", { name: "Auto-accept edits" }))
     .toHaveFocus();
-  await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
-  await expect.element(page.getByRole("menuitemradio", { name: "Supervised" })).toHaveFocus();
+  await userEvent.keyboard("{ArrowUp}");
+  await expect.element(supervised).toHaveFocus();
 
   await userEvent.keyboard("{ArrowDown}{Enter}");
   await expect.element(screen.getByRole("status")).toHaveTextContent("auto-accept-edits");
@@ -97,47 +99,54 @@ it("returns focus to the editor after a pick", async () => {
   await vi.waitFor(() => expect(handle.focusAtEnd).toHaveBeenCalled());
 });
 
-// Mirrors the model picker: a composer popover whose footer nests the Permissions menu.
-function PickerWithPermissions() {
+// Standalone footer permissions control: opens on tap and closes on outside tap without focusing editor on touch.
+function StandalonePermissions() {
   const [mode, setMode] = useState<RuntimeMode>("full-access");
-  const composerMenuProps = useComposerMenuProps();
   return (
     <>
       <p>Timeline</p>
-      <Popover>
-        <PopoverTrigger>Model</PopoverTrigger>
-        <PopoverPopup {...composerMenuProps}>
-          <ComposerPickerFooter
-            traits={null}
-            runtimeMode={mode}
-            runtimeModeOptions={options}
-            onRuntimeModeChange={setMode}
-          />
-        </PopoverPopup>
-      </Popover>
+      <ComposerFooterModeControls
+        runtimeMode={mode}
+        defaultRuntimeMode="full-access"
+        runtimeModeOptions={options}
+        accessDisplay="label"
+        onRuntimeModeChange={setMode}
+      />
     </>
   );
 }
 
-it("on a touch tablet, tapping outside the Permissions menu leaves the editor unfocused", async () => {
+it("on a touch tablet, tapping outside the standalone Permissions menu leaves the editor unfocused", async () => {
   const realMatchMedia = window.matchMedia.bind(window);
   using _touch = vi
     .spyOn(window, "matchMedia")
     .mockImplementation((query) => realMatchMedia(query === "(pointer: coarse)" ? "all" : query));
-  const { handle, ui } = withComposer(<PickerWithPermissions />);
+  const { handle, ui } = withComposer(<StandalonePermissions />);
   await using screen = await render(ui, { router: false }); // no routes involved
-  await userEvent.click(screen.getByRole("button", { name: "Model" }));
-  await userEvent.click(page.getByRole("button", { name: "Permissions: Full access" }));
+  await userEvent.click(screen.getByRole("button", { name: "Permissions: Full access" }));
   const fullAccess = page.getByRole("menuitemradio", { name: "Full access" });
   await expect.element(fullAccess).toBeInTheDocument();
-  const permissionsTrigger = page.getByRole("button", { name: "Permissions: Full access" });
-  // The first outside tap closes the Permissions menu, the second the picker around it.
   await userEvent.click(document.body, { position: { x: 1, y: 1 } });
   await expect.element(fullAccess).not.toBeInTheDocument();
-  await userEvent.click(screen.getByText("Timeline"));
-  await expect.element(permissionsTrigger).not.toBeInTheDocument();
   // Focusing the editor after a tap opens the on-screen keyboard on Android tablets.
   expect(handle.focusAtEnd).not.toHaveBeenCalled();
+});
+
+it("renders View Usage in the model picker footer without a duplicate permissions control", async () => {
+  const onViewUsage = vi.fn();
+  await using screen = await render(
+    <Popover>
+      <PopoverTrigger>Model</PopoverTrigger>
+      <PopoverPopup>
+        <ComposerPickerFooter onViewUsage={onViewUsage} />
+      </PopoverPopup>
+    </Popover>,
+    { router: false }, // no routes involved
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Model" }));
+  await expect.element(page.getByRole("button", { name: /Permissions:/ })).not.toBeInTheDocument();
+  await userEvent.click(page.getByRole("button", { name: "View Usage" }));
+  expect(onViewUsage).toHaveBeenCalledOnce();
 });
 
 it("opens on the checked permission when composer.mode marked the trigger", async () => {
@@ -153,31 +162,33 @@ it("opens on the checked permission when composer.mode marked the trigger", asyn
   await expect.element(page.getByRole("menuitemradio", { name: "Full access" })).not.toHaveFocus();
 });
 
-// Mirrors ComposerControlsBar: the chip shows only while the mode differs from the default.
+// Mirrors ComposerControlsBar: the standalone permissions trigger stays visible and changes mode.
 function PermissionsChip() {
   const [mode, setMode] = useState<RuntimeMode>("approval-required");
   return (
     <div data-slot="composer-shell">
-      <button type="button" data-composer-shortcut="composer.effort composer.mode">
+      <button type="button" data-composer-shortcut="composer.effort">
         Model
       </button>
-      {mode === "full-access" ? null : (
-        <ComposerFooterModeControls
-          runtimeMode={mode}
-          runtimeModeOptions={options}
-          accessDisplay="label"
-          onRuntimeModeChange={setMode}
-        />
-      )}
+      <ComposerFooterModeControls
+        runtimeMode={mode}
+        defaultRuntimeMode="full-access"
+        runtimeModeOptions={options}
+        accessDisplay="label"
+        onRuntimeModeChange={setMode}
+      />
     </div>
   );
 }
 
-it("returns focus to the editor when picking the default hides the chip", async () => {
+it("changes mode from the standalone footer control and returns focus to the editor", async () => {
   const { handle, ui } = withComposer(<PermissionsChip />);
   await using screen = await render(ui, { router: false }); // no routes involved
   await userEvent.click(screen.getByRole("button", { name: "Permissions: Supervised" }));
   await userEvent.click(page.getByRole("menuitemradio", { name: "Full access" }));
+  await expect
+    .element(screen.getByRole("button", { name: "Permissions: Full access" }))
+    .toBeVisible();
   await vi.waitFor(() => expect(handle.focusAtEnd).toHaveBeenCalled());
   await expect.element(screen.getByRole("button", { name: "Model" })).not.toHaveFocus();
 });

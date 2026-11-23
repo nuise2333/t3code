@@ -12,7 +12,7 @@ import {
   subscribeOpticalConfig,
   type OpticalSpectrumCode,
 } from "./config";
-import { mountOpticalVial, type VialAccent } from "./vialCore";
+import { mountOpticalVial, type VialAccent, type VialCamp } from "./vialCore";
 
 const AMBIENT_FRAME_GAP_MS = 33;
 const INTERACTION_HOT_MS = 600;
@@ -32,6 +32,10 @@ interface VialLevel {
   readonly fill: number;
   readonly streaming: boolean;
   readonly critical: boolean;
+  readonly ratios?: readonly [number, number, number] | undefined;
+  readonly hoveredSlice?: number | undefined;
+  readonly camp?: VialCamp | undefined;
+  readonly tickLabels?: readonly [string, string, string] | undefined;
 }
 
 interface VialController {
@@ -79,6 +83,10 @@ function mountContextVial(canvas: HTMLCanvasElement, initial: VialLevel): VialCo
       streaming: level.streaming,
       accent,
       reduceMotion,
+      ratios: level.ratios,
+      hoveredSlice: level.hoveredSlice,
+      camp: level.camp,
+      tickLabels: level.tickLabels,
     }),
     onWake: wake,
   });
@@ -168,6 +176,10 @@ export interface OpticalContextVialProps {
   readonly isStreaming?: boolean | undefined;
   /** Defaults to true once the window is 85% full. */
   readonly isCritical?: boolean | undefined;
+  readonly ratios?: readonly [number, number, number] | undefined;
+  readonly hoveredSlice?: number | undefined;
+  readonly camp?: VialCamp | undefined;
+  readonly tickLabels?: readonly [string, string, string] | undefined;
   readonly className?: string | undefined;
 }
 
@@ -177,16 +189,30 @@ export function OpticalContextVial({
   usedPercent,
   isStreaming = false,
   isCritical,
+  ratios,
+  hoveredSlice = -1,
+  camp = "gemini",
+  tickLabels,
   className,
 }: OpticalContextVialProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const controllerRef = useRef<VialController | null>(null);
   const level = Number.isFinite(fill) ? fill : 0;
   const critical = isCritical ?? level >= CRITICAL_FILL;
+  const r0 = ratios?.[0];
+  const r1 = ratios?.[1];
+  const r2 = ratios?.[2];
+  const t0 = tickLabels?.[0];
+  const t1 = tickLabels?.[1];
+  const t2 = tickLabels?.[2];
   const readLevel = useEffectEvent((): VialLevel => ({
     fill: level,
     streaming: isStreaming,
     critical,
+    ratios,
+    hoveredSlice,
+    camp,
+    tickLabels,
   }));
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Owns the vial's render loop, WebGL context and listeners for the canvas lifetime.
@@ -203,8 +229,17 @@ export function OpticalContextVial({
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The level drives a physics simulation on the canvas; nothing here renders.
   useEffect(() => {
-    controllerRef.current?.setLevel({ fill: level, streaming: isStreaming, critical });
-  }, [level, isStreaming, critical]);
+    controllerRef.current?.setLevel({
+      fill: level,
+      streaming: isStreaming,
+      critical,
+      ratios: r0 !== undefined && r1 !== undefined && r2 !== undefined ? [r0, r1, r2] : undefined,
+      hoveredSlice,
+      camp,
+      tickLabels:
+        t0 !== undefined && t1 !== undefined && t2 !== undefined ? [t0, t1, t2] : undefined,
+    });
+  }, [level, isStreaming, critical, r0, r1, r2, hoveredSlice, camp, t0, t1, t2]);
 
   return (
     <canvas

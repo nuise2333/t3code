@@ -4,6 +4,7 @@ import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
   DEFAULT_UNIFIED_SETTINGS,
   type ChatWidth,
+  type CornerStyle,
   type EffortDisplay,
   type EnvironmentIdentificationMode,
   type OpticalAmbientIntensity,
@@ -86,6 +87,12 @@ const CHAT_WIDTH_LABELS: Record<ChatWidth, string> = {
   comfortable: "Comfortable",
   wide: "Wide",
   full: "Full",
+};
+
+const CORNER_STYLE_LABELS: Record<CornerStyle, string> = {
+  sharp: "Sharp",
+  balanced: "Balanced",
+  soft: "Soft",
 };
 
 const EFFORT_DISPLAY_LABELS: Record<EffortDisplay, string> = {
@@ -362,6 +369,64 @@ export function AppearanceSettingsPanel() {
                 value={settings.glassOpacity}
               />
             </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("corner-style")}
+          description="Adjust how rounded controls, cards, and popovers appear across the interface."
+          resetAction={
+            settings.cornerStyle !== DEFAULT_UNIFIED_SETTINGS.cornerStyle ? (
+              <SettingResetButton
+                label="corner style"
+                onClick={() =>
+                  updateSettings({ cornerStyle: DEFAULT_UNIFIED_SETTINGS.cornerStyle })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="w-full sm:w-40">
+              <Select
+                value={settings.cornerStyle}
+                onValueChange={(value) => {
+                  if (value === "sharp" || value === "balanced" || value === "soft") {
+                    updateSettings({ cornerStyle: value });
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Corner style">
+                  <SelectValue>{CORNER_STYLE_LABELS[settings.cornerStyle]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="sharp">Sharp</SelectItem>
+                  <SelectItem value="balanced">Balanced (default)</SelectItem>
+                  <SelectItem value="soft">Soft</SelectItem>
+                </SelectPopup>
+              </Select>
+            </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("sidebar-compact")}
+          description="Use tighter row heights and padding in the thread sidebar."
+          resetAction={
+            settings.sidebarCompact !== DEFAULT_UNIFIED_SETTINGS.sidebarCompact ? (
+              <SettingResetButton
+                label="compact sidebar"
+                onClick={() =>
+                  updateSettings({ sidebarCompact: DEFAULT_UNIFIED_SETTINGS.sidebarCompact })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarCompact}
+              onCheckedChange={(checked) => updateSettings({ sidebarCompact: Boolean(checked) })}
+              aria-label="Compact sidebar"
+            />
           }
         />
 

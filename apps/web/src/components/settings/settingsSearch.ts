@@ -336,6 +336,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["transparent transparency solid menus dialogs composer"],
   },
   {
+    id: "corner-style",
+    title: "Corner style",
+    to: "/settings/appearance",
+    searchTerms: ["radius rounded corners sharp balanced soft geometry"],
+  },
+  {
+    id: "sidebar-compact",
+    title: "Compact sidebar",
+    to: "/settings/appearance",
+    searchTerms: ["sidebar density compact rows height padding threads list"],
+  },
+  {
     id: "optical-scene-preset",
     title: "Optical preset",
     to: "/settings/appearance",
@@ -483,6 +495,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["long lines code blocks diffs file previews"],
   },
   {
+    id: "code-ligatures",
+    title: "Code ligatures",
+    to: "/settings/appearance",
+    searchTerms: [
+      "typography font ligatures calt liga monospace arrows operators code blocks diffs",
+    ],
+  },
+  {
     id: "reader-typography",
     title: "Reading typography",
     to: "/settings/appearance",
@@ -593,6 +613,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/chat",
     searchTerms: [
       "hide tool calls commands edits searches work log activity quiet chat zen final answers only",
+    ],
+  },
+  {
+    id: "thought-translation",
+    title: "Thought translation",
+    to: "/settings/chat",
+    searchTerms: [
+      "translate reasoning thinking thought chain of thought immersive bilingual response language 中文 思考翻译",
     ],
   },
   {

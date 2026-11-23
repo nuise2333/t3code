@@ -1241,6 +1241,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       parseRawHtml={false}
       extraRemarkPlugins={USER_MESSAGE_REMARK_PLUGINS}
       renderContextReference={props.renderContextReference}
+      onCiteCodeBlock={ctx.onCiteCodeBlock}
       headingLevelOffset={MESSAGE_HEADING_LEVEL}
     />
   );

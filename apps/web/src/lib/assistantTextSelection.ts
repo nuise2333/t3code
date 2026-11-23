@@ -1,4 +1,10 @@
-import { ASSISTANT_CITATION_CONTEXT_LENGTH, type AssistantCitation } from "@t3tools/contracts";
+import {
+  ASSISTANT_CITATION_CONTEXT_LENGTH,
+  ASSISTANT_CITATION_MAX_TEXT_LENGTH,
+  MessageId,
+  type AssistantCitation,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 
 import { mathWrapperOf } from "../markdown-clipboard";
 
@@ -246,6 +252,63 @@ export function captureAssistantTextSelection(
   if (rawStart === null) return null;
   const selector = createAssistantTextSelector(stream.text, rawStart, rawEnd);
   return selector === null ? null : { source, selector, range };
+}
+
+export function captureElementAssistantCitation(
+  element: HTMLElement,
+  threadRef: ScopedThreadRef,
+  fallbackText: string,
+): { citation: AssistantCitation; sourceAnchor: AssistantCitationSourceAnchor } | null {
+  const source = element.closest<HTMLElement>("[data-assistant-citation-source]");
+  const viewport = source?.closest<HTMLElement>("[data-assistant-citation-viewport]");
+  const messageId = source?.dataset.assistantCitationSource;
+  if (!source || !viewport || !messageId) return null;
+
+  const target =
+    element.querySelector<HTMLElement>(".chat-markdown-shiki") ??
+    element.querySelector<HTMLElement>("pre code") ??
+    element.querySelector<HTMLElement>("pre") ??
+    element;
+  const range = source.ownerDocument.createRange();
+  range.selectNodeContents(target);
+
+  const stream = readAssistantText(source);
+  let rawStart: number | null = null;
+  let rawEnd = 0;
+  for (const chunk of stream.chunks) {
+    if (!range.intersectsNode(chunk.node)) continue;
+    rawStart ??= chunk.start;
+    rawEnd = chunk.end;
+  }
+
+  let selector: AssistantTextSelector | null = null;
+  if (rawStart !== null && rawEnd > rawStart) {
+    let clampedEnd = Math.min(rawEnd, rawStart + ASSISTANT_CITATION_MAX_TEXT_LENGTH);
+    if (clampedEnd < stream.text.length && splitsSurrogatePair(stream.text, clampedEnd)) {
+      clampedEnd -= 1;
+    }
+    selector = createAssistantTextSelector(stream.text, rawStart, clampedEnd);
+  }
+  if (selector === null) {
+    const trimmed = fallbackText.trim();
+    if (trimmed.length === 0) return null;
+    let clampedEnd = Math.min(trimmed.length, ASSISTANT_CITATION_MAX_TEXT_LENGTH);
+    if (clampedEnd < trimmed.length && splitsSurrogatePair(trimmed, clampedEnd)) {
+      clampedEnd -= 1;
+    }
+    selector = createAssistantTextSelector(trimmed, 0, clampedEnd);
+  }
+  if (selector === null) return null;
+
+  return {
+    citation: {
+      version: 1,
+      ...threadRef,
+      messageId: MessageId.make(messageId),
+      ...selector,
+    },
+    sourceAnchor: { source, range, viewport },
+  };
 }
 
 /** How much of a response a reply carries: enough to recognise it, not to resend it. */

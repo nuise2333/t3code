@@ -264,6 +264,34 @@ function WordWrapRow() {
   );
 }
 
+function CodeLigaturesRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("code-ligatures")}
+      description="Enable programming ligatures (such as => and !=) in code blocks, diffs, and monospace text."
+      resetAction={
+        settings.codeLigatures !== DEFAULT_UNIFIED_SETTINGS.codeLigatures ? (
+          <SettingResetButton
+            label="code ligatures"
+            onClick={() =>
+              updateSettings({ codeLigatures: DEFAULT_UNIFIED_SETTINGS.codeLigatures })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.codeLigatures}
+          onCheckedChange={(checked) => updateSettings({ codeLigatures: Boolean(checked) })}
+          aria-label="Enable code ligatures"
+        />
+      }
+    />
+  );
+}
+
 function FontSettingsGroup() {
   return (
     <>
@@ -347,6 +375,7 @@ export function TypographySection() {
     <SettingsSection id="typography" title="Typography">
       {showAdvanced ? <FontSettingsGroup /> : <SimpleFontRows />}
       <WordWrapRow />
+      <CodeLigaturesRow />
       <AdvancedSettings
         targetIds={[searchableSetting("separate-fonts").id, searchableSetting("font-smoothing").id]}
       >

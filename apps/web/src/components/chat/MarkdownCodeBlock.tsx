@@ -1,4 +1,4 @@
-import { PlayIcon, WrapTextIcon, CheckIcon, CopyIcon } from "lucide-react";
+import { AtSignIcon, PlayIcon, WrapTextIcon, CheckIcon, CopyIcon } from "lucide-react";
 import { toHtml } from "hast-util-to-html";
 import React, { use, useEffect, useState, type ReactNode } from "react";
 
@@ -142,12 +142,20 @@ function MarkdownCodeBlockTitleContent({
   );
 }
 
+export interface CodeBlockCitationInput {
+  readonly code: string;
+  readonly language: string;
+  readonly fenceTitle: string | null;
+  readonly element: HTMLElement | null;
+}
+
 export function MarkdownCodeBlock({
   code,
   language,
   fenceTitle,
   theme,
   onRunShellCommand,
+  onCiteCodeBlock,
   isStreaming,
   viewToggle,
   canWrap = true,
@@ -160,6 +168,7 @@ export function MarkdownCodeBlock({
   fenceTitle: string | null;
   theme: "light" | "dark";
   onRunShellCommand?: ((command: string) => void) | undefined;
+  onCiteCodeBlock?: ((input: CodeBlockCitationInput) => void) | undefined;
   isStreaming: boolean;
   viewToggle?: ReactNode;
   canWrap?: boolean;
@@ -211,6 +220,29 @@ export function MarkdownCodeBlock({
     }
   };
 
+  const citeButton =
+    onCiteCodeBlock && !isStreaming && code.trim().length > 0 ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost-muted"
+              size="icon-xs"
+              onClick={(event) => {
+                const block = event.currentTarget.closest<HTMLElement>(".chat-markdown-codeblock");
+                onCiteCodeBlock({ code, language, fenceTitle, element: block });
+              }}
+              aria-label="Cite code block in composer"
+            />
+          }
+        >
+          <AtSignIcon className="size-3" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Cite in composer</TooltipPopup>
+      </Tooltip>
+    ) : null;
+
   const copyButton = (
     <Tooltip>
       <TooltipTrigger
@@ -235,6 +267,7 @@ export function MarkdownCodeBlock({
       <div className="my-[0.65rem] border border-transparent" data-language={language}>
         <div className="flex items-center justify-end gap-0.5 pt-1.5 pr-1.5 select-none">
           {viewToggle}
+          {citeButton}
           {copyButton}
         </div>
         {children}
@@ -301,6 +334,7 @@ export function MarkdownCodeBlock({
             </Tooltip>
           ) : null}
           {viewToggle}
+          {citeButton}
           {copyButton}
         </span>
       }

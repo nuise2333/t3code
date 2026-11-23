@@ -37,13 +37,18 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   CrossVendorModelInput,
   CrossVendorModelResult,
   RoutingSummaryInput,
   RoutingSummaryResult,
 } from "./routing.ts";
+import {
+  ThoughtTranslationError,
+  ThoughtTranslationInput,
+  ThoughtTranslationResult,
+} from "./thoughtTranslation.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -588,6 +593,7 @@ export const WS_METHODS = {
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
   serverCheckOtlpEndpoint: "server.checkOtlpEndpoint",
   serverListTextGeneratorModels: "server.listTextGeneratorModels",
+  serverTranslateThought: "server.translateThought",
   serverCrossVendorModel: "server.crossVendorModel",
   serverRoutingSummary: "server.routingSummary",
   serverPrepareTriage: "server.prepareTriage",
@@ -1074,6 +1080,12 @@ const WsServerListTextGeneratorModelsRpc = Rpc.make(WS_METHODS.serverListTextGen
   payload: ListTextGeneratorModelsInput,
   success: ListTextGeneratorModelsResult,
   error: Schema.Union([TextGeneratorError, EnvironmentAuthorizationError]),
+});
+
+const WsServerTranslateThoughtRpc = Rpc.make(WS_METHODS.serverTranslateThought, {
+  payload: ThoughtTranslationInput,
+  success: ThoughtTranslationResult,
+  error: Schema.Union([ThoughtTranslationError, EnvironmentAuthorizationError]),
 });
 
 const WsServerCrossVendorModelRpc = Rpc.make(WS_METHODS.serverCrossVendorModel, {
@@ -2346,6 +2358,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerCheckOtlpEndpointRpc,
   WsServerListTextGeneratorModelsRpc,
+  WsServerTranslateThoughtRpc,
   WsServerCrossVendorModelRpc,
   WsServerRoutingSummaryRpc,
   WsServerPrepareTriageRpc,

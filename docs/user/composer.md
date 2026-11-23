@@ -125,6 +125,9 @@ project's configured model takes precedence; resetting that project setting
 returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
+On web and desktop, the model picker places reasoning effort and other model options
+below the model list with a **View Usage** shortcut at the bottom, while permissions
+live in their own control beside the model picker in the composer footer.
 
 ## Auto effort
 
@@ -210,7 +213,7 @@ An agent team is a lead model and the models it may hand work to, each with its
 own options such as effort. Create one in **Settings → Providers → Agent teams**
 on web and desktop; the first model leads, and the next one leads if the first
 can't run. Pick a team in the model picker's **Agent team** tab (the people icon,
-right under Favorites):
+beside Favorites):
 
 - **No team**: a single agent.
 - **Cheap team**, **Balanced team** and **Best team**: your thread's model leads
@@ -219,7 +222,7 @@ right under Favorites):
   pick is remembered, and new threads start with it until you pick **No team**.
 - **Your teams**: the teams you saved, led by the thread's model.
 
-While the **Agent team** tab is open, the picker's right column widens into
+While the **Agent team** tab is open, the picker's bottom section switches to
 **Architect & workers**, the team setup: pick the architect (the lead) and its
 workers, set each one's reasoning effort with the gauge button beside its model,
 add lead guidance for this team, and limit how many tasks run at once.

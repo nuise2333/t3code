@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import type { ChatComposerProps } from "./ChatComposer";
 import type { PromptUltrathink } from "./TraitsPicker";
 import type { ProviderInstanceEntry } from "../../providerInstances";
@@ -55,6 +56,7 @@ import {
   ComposerPickerFooter,
   ComposerRoutingGroupColumn,
   describeComposerEffort,
+  resolveModelRowEffort,
 } from "./ComposerModelEffort";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useServerConfigs } from "../../state/entities";
@@ -184,12 +186,14 @@ export function ComposerControlsBar(props: {
     hiddenBlockCount: restingHiddenBlockCount,
     hiddenBlockIds: hiddenRestingBlockIds,
     overflowShowsPermissions,
-    pickerOwnsModeShortcut,
   } = resolveComposerControlsOwnership({
-    matchesDefault: accessMatchesDefault || props.permissionsShownInStrip,
     collapsed: composerControlsCollapsed,
     measuredHiddenBlockCount,
   });
+  const navigate = useNavigate();
+  const stickyOptionsByModelByProvider = useComposerDraftStore(
+    (store) => store.stickyOptionsByModelByProvider,
+  );
   const controlSize = composerControlsCollapsed ? "xs" : "sm";
   const applyThreadModelPick = useApplyThreadModelPick();
   const applyRouteThreadModelPick = useStableCallback(() => applyThreadModelPick(routeThreadRef));
@@ -471,6 +475,27 @@ export function ComposerControlsBar(props: {
     }
   });
   const closeModelPicker = useStableCallback(() => onModelPickerOpenChange(false));
+  const handleViewUsage = useStableCallback(() => {
+    onModelPickerOpenChange(false);
+    void navigate({ to: "/usage" });
+  });
+  const getModelEffort = useStableCallback((instanceId: ProviderInstanceId, slug: string) => {
+    if (
+      instanceId === selectedInstanceId &&
+      (slug === selectedModel || slug === selectedModelForPickerWithCustomFallback)
+    ) {
+      return resolveModelRowEffort(traitsInput, effortRouting);
+    }
+    const entry = providerInstanceEntries.find((candidate) => candidate.instanceId === instanceId);
+    if (!entry) return null;
+    return resolveModelRowEffort({
+      provider: entry.driverKind,
+      instanceId,
+      models: entry.models,
+      model: slug,
+      modelOptions: stickyOptionsByModelByProvider[instanceId]?.[slug],
+    });
+  });
   const pickerTeams: PickerTeams | undefined = showTeamControl
     ? {
         activeId: activeTeam?.id ?? null,
@@ -507,6 +532,7 @@ export function ComposerControlsBar(props: {
           content: (
             <ComposerFooterModeControls
               runtimeMode={compatibleRuntimeMode}
+              defaultRuntimeMode={defaultRuntimeMode}
               runtimeModeOptions={compatibleRuntimeModeOptions}
               size={controlSize}
               hidden={composerControlsHidden || restingHiddenBlockCount > 0}
@@ -525,8 +551,7 @@ export function ComposerControlsBar(props: {
       workspaceCwd={props.workspaceCwd}
       compact={false}
       isComposerOwned
-      // The trigger grows away from this edge when its model or effort label changes.
-      popupAlign={composerControlsCollapsed ? "start" : "end"}
+      popupAlign="start"
       disabled={providerCatalogPending || isSendBusy}
       multipleModelsEnabled={multipleModelsEnabled}
       multipleModelSelections={multipleModelSelections}
@@ -581,9 +606,8 @@ export function ComposerControlsBar(props: {
       activeRoutingGroupId={draftRoutingGroupId}
       {...(pickerTeams ? { teams: pickerTeams } : {})}
       onRoutingGroupSelect={handleRoutingGroupSelect}
-      triggerShortcuts={
-        pickerOwnsModeShortcut ? "composer.effort composer.mode" : "composer.effort"
-      }
+      triggerShortcuts="composer.effort"
+      getModelEffort={getModelEffort}
       effortColumn={
         pickedGroup ? (
           <ComposerRoutingGroupColumn
@@ -599,14 +623,7 @@ export function ComposerControlsBar(props: {
           />
         )
       }
-      footer={
-        <ComposerPickerFooter
-          traits={traitsInput}
-          runtimeMode={compatibleRuntimeMode}
-          runtimeModeOptions={compatibleRuntimeModeOptions}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
-      }
+      footer={<ComposerPickerFooter onViewUsage={handleViewUsage} />}
       terminalOpen={terminalOpen}
       open={modelPickerOpen}
       instanceIndicatorBackground={
@@ -640,14 +657,6 @@ export function ComposerControlsBar(props: {
   ) : (
     <>
       {composerModelPicker}
-      <ComposerThreadAssists
-        environmentId={environmentId}
-        serverThreadId={serverThreadId}
-        draftId={routeKind === "draft" ? draftId : null}
-        thread={props.activeThreadAssists}
-        size={controlSize}
-      />
-
       <>
         {restingBlockDefs.map((def, index) => {
           const hidden = index >= restingBlockDefs.length - restingHiddenBlockCount;
@@ -682,6 +691,7 @@ export function ComposerControlsBar(props: {
         >
           <CompactComposerControlsMenu
             runtimeMode={compatibleRuntimeMode}
+            defaultRuntimeMode={defaultRuntimeMode}
             runtimeModeOptions={compatibleRuntimeModeOptions}
             size={controlSize}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
@@ -691,6 +701,13 @@ export function ComposerControlsBar(props: {
           />
         </div>
       </>
+      <ComposerThreadAssists
+        environmentId={environmentId}
+        serverThreadId={serverThreadId}
+        draftId={routeKind === "draft" ? draftId : null}
+        thread={props.activeThreadAssists}
+        size={controlSize}
+      />
     </>
   );
 }

@@ -116,8 +116,8 @@ describe("book line", () => {
   });
 
   it("formats singular and plural copies", () => {
-    expect(bookLine(7607, 0)).toBe("≈ 1 copy of Tao Te Ching");
-    expect(bookLine(7607 * 1500, 0)).toBe("≈ 1,500 copies of Tao Te Ching");
+    expect(bookLine(7607, 0)).toBe("Your token usage equals 1 copy of Tao Te Ching.");
+    expect(bookLine(7607 * 1500, 0)).toBe("Your token usage equals 1,500 copies of Tao Te Ching.");
   });
 });
 

@@ -387,6 +387,9 @@ describe("ClientSettings optical", () => {
       opticalSmoothCaret: true,
       opticalSpectrum: "follow",
       opticalMascot: "crab",
+      cornerStyle: "balanced",
+      codeLigatures: false,
+      sidebarCompact: false,
     };
     expect(decodeClientSettings({})).toMatchObject(defaults);
     expect(DEFAULT_CLIENT_SETTINGS).toMatchObject(defaults);
@@ -401,12 +404,16 @@ describe("ClientSettings optical", () => {
         opticalSmoothCaret: false,
         opticalSpectrum: "mono",
         opticalMascot: "off",
+        cornerStyle: "sharp",
+        codeLigatures: true,
+        sidebarCompact: true,
       },
       {
         opticalMotionLevel: "subtle",
         opticalAmbientIntensity: 35,
         opticalTargetFps: "native",
         opticalMascot: "minis",
+        cornerStyle: "soft",
       },
       { opticalMotionLevel: "standard", opticalAmbientIntensity: 70, opticalTargetFps: "180" },
     ]) {
@@ -425,6 +432,9 @@ describe("ClientSettings optical", () => {
     { opticalSmoothCaret: 1 },
     { opticalSpectrum: "rainbow" },
     { opticalMascot: "dual" },
+    { cornerStyle: "round" },
+    { codeLigatures: "on" },
+    { sidebarCompact: 1 },
   ])("rejects %o as a patch and as stored settings", (invalid) => {
     expect(() => decodeClientSettingsPatch(invalid)).toThrow();
     expect(() => decodeClientSettings(invalid)).toThrow();
@@ -686,5 +696,20 @@ describe("server model preferences", () => {
     const input = { favorites: [], providerModelPreferences: {} };
     expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
     expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+});
+
+describe("thought translation setting", () => {
+  it("defaults to off and validates immersive and bilingual patches", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.thoughtTranslation).toBe("off");
+    expect(DEFAULT_UNIFIED_SETTINGS.thoughtTranslation).toBe("off");
+    expect(decodeClientSettings({}).thoughtTranslation).toBe("off");
+    expect(decodeClientSettingsPatch({ thoughtTranslation: "immersive" })).toEqual({
+      thoughtTranslation: "immersive",
+    });
+    expect(decodeClientSettingsPatch({ thoughtTranslation: "bilingual" })).toEqual({
+      thoughtTranslation: "bilingual",
+    });
+    expect(() => decodeClientSettingsPatch({ thoughtTranslation: "invalid" })).toThrow();
   });
 });

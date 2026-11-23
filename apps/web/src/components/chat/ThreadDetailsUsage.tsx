@@ -1,6 +1,7 @@
 import type {
   ProviderInstanceId,
   ServerProvider,
+  ServerProviderUsageLimits,
   ServerProviderUsageWindow,
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
@@ -22,6 +23,7 @@ import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
+import { deriveContextLayerRatios, deriveWindowQuotaStatus } from "./composerTelemetry.logic";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { OpticalContextVial } from "../../optical/OpticalContextVial";
 import { useOpticalConfig } from "../../optical/config";
@@ -42,6 +44,66 @@ export interface ThreadDetailsUsageInput {
 
 type UsageTone = "error" | "warning" | null;
 
+/** Resolves usage limits for one provider instance without mixing in other accounts. */
+export function resolveProviderInstanceLimits(input: {
+  readonly providerInstanceId: ProviderInstanceId | null;
+  readonly providers: readonly ServerProvider[];
+  readonly sources: UsageLimitSourceSnapshots;
+  readonly now: number;
+}): ServerProviderUsageLimits | null {
+  const { providerInstanceId, providers, sources, now } = input;
+  if (providerInstanceId === null) return null;
+  const report = collectProviderUsageLimits(providerInstanceId, providers, sources, now);
+  return (
+    report?.accounts.find((entry) => entry.instanceId === providerInstanceId)?.limits ??
+    providers.find((provider) => provider.instanceId === providerInstanceId)?.usageLimits ??
+    null
+  );
+}
+
+/** Shared compact quota window rows reused by ThreadDetailsUsage and the composer vial popover. */
+export function ProviderUsageLimitRows({
+  limits,
+  now,
+  showResetCountdown = false,
+  tooltipSide = "left",
+  compactPadding = false,
+}: {
+  readonly limits: ServerProviderUsageLimits;
+  readonly now: number;
+  readonly showResetCountdown?: boolean;
+  readonly tooltipSide?: "top" | "bottom" | "left" | "right";
+  readonly compactPadding?: boolean;
+}) {
+  const notice = limitsNotice(limits);
+  return (
+    <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
+      {notice ? (
+        <UsageRow
+          label="Limits"
+          fill={null}
+          tone={null}
+          value="Unavailable"
+          tooltipSide={tooltipSide}
+          compactPadding={compactPadding}
+          tooltip={<span className="text-foreground">{notice}</span>}
+        />
+      ) : (
+        limits.windows.map((window) => (
+          <LimitRow
+            key={window.id}
+            window={window}
+            now={now}
+            showResetCountdown={showResetCountdown}
+            tooltipSide={tooltipSide}
+            compactPadding={compactPadding}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
 /** The selected provider's limit windows. Each row reads as room left. */
 export function ThreadDetailsUsage({
   providerInstanceId,
@@ -50,17 +112,8 @@ export function ThreadDetailsUsage({
 }: Omit<ThreadDetailsUsageInput, "contextWindow">) {
   const nowMinute = useNowMinute();
   const now = Date.parse(`${nowMinute}:00Z`);
-  const report =
-    providerInstanceId !== null
-      ? collectProviderUsageLimits(providerInstanceId, providers, sources, now)
-      : null;
-  // Only this instance's data: the report keeps one instance per login, and any other entry may be
-  // a different login or workspace, so fall back to the instance's own snapshot.
-  const limits =
-    report?.accounts.find((entry) => entry.instanceId === providerInstanceId)?.limits ??
-    providers.find((provider) => provider.instanceId === providerInstanceId)?.usageLimits;
+  const limits = resolveProviderInstanceLimits({ providerInstanceId, providers, sources, now });
   if (!limits) return null;
-  const notice = limitsNotice(limits);
 
   return (
     <ThreadDetailsSection
@@ -68,19 +121,7 @@ export function ThreadDetailsUsage({
       title="Usage limits"
       showHeading={false}
     >
-      <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
-        {notice ? (
-          <UsageRow
-            label="Limits"
-            fill={null}
-            tone={null}
-            value="Unavailable"
-            tooltip={<span className="text-foreground">{notice}</span>}
-          />
-        ) : (
-          limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />)
-        )}
-      </div>
+      <ProviderUsageLimitRows limits={limits} now={now} />
     </ThreadDetailsSection>
   );
 }
@@ -154,6 +195,11 @@ export function ThreadDetailsContext({
             usedPercent={used}
             isStreaming={isStreaming}
             isCritical={used >= 85}
+            ratios={deriveContextLayerRatios({
+              usedFraction: used / 100,
+              maxTokens,
+              toolUses: usage.toolUses ?? null,
+            })}
             className="h-14 w-8 shrink-0"
           />
           {contextRow}
@@ -168,21 +214,32 @@ export function ThreadDetailsContext({
 function LimitRow({
   window,
   now,
+  showResetCountdown = false,
+  tooltipSide = "left",
+  compactPadding = false,
 }: {
   readonly window: ServerProviderUsageWindow;
   readonly now: number;
+  readonly showResetCountdown?: boolean;
+  readonly tooltipSide?: "top" | "bottom" | "left" | "right";
+  readonly compactPadding?: boolean;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const left = remainingPercent(window);
+  const status = deriveWindowQuotaStatus(window);
   const pace = paceOf(window, now);
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  const resetCountdown =
+    showResetCountdown && window.resetsAt && resetsAt > now ? formatDuration(resetsAt - now) : null;
   return (
     <UsageRow
       label={window.label}
       fill={left}
-      tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
-      value={`${left}%`}
+      tone={status === "low" ? "error" : status === "tight" ? "warning" : null}
+      value={resetCountdown ? `${left}% · ${resetCountdown}` : `${left}%`}
       ariaValue={`${left}% left`}
+      tooltipSide={tooltipSide}
+      compactPadding={compactPadding}
       tooltip={
         <>
           <span className="text-foreground">
@@ -211,6 +268,8 @@ function UsageRow({
   ariaValue = value,
   tooltip,
   muted = false,
+  tooltipSide = "left",
+  compactPadding = false,
 }: {
   readonly label: string;
   /** Bar fill from 0 to 100. Null hides the bar. */
@@ -222,6 +281,8 @@ function UsageRow({
   readonly ariaValue?: string;
   readonly tooltip: ReactNode;
   readonly muted?: boolean;
+  readonly tooltipSide?: "top" | "bottom" | "left" | "right";
+  readonly compactPadding?: boolean;
 }) {
   return (
     <Tooltip>
@@ -230,7 +291,10 @@ function UsageRow({
           <div
             tabIndex={0}
             aria-label={`${label}: ${ariaValue}`}
-            className="col-span-3 grid h-6 cursor-default grid-cols-subgrid items-center rounded-lg px-2.5 outline-none hover:bg-black/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:bg-black/[0.035] dark:hover:bg-white/[0.08] dark:data-popup-open:bg-white/[0.08]"
+            className={cn(
+              "col-span-3 grid h-6 cursor-default grid-cols-subgrid items-center rounded-lg outline-none hover:bg-black/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:bg-black/[0.035] dark:hover:bg-white/[0.08] dark:data-popup-open:bg-white/[0.08]",
+              compactPadding ? "px-1.5" : "px-2.5",
+            )}
           />
         }
       >
@@ -279,7 +343,7 @@ function UsageRow({
         </span>
       </TooltipTrigger>
       {/* Rows sit 8px inside the card; clear its edge instead of overlapping it. */}
-      <TooltipPopup side="left" sideOffset={16}>
+      <TooltipPopup side={tooltipSide} sideOffset={tooltipSide === "left" ? 16 : 8}>
         <div className="flex flex-col gap-0.5">{tooltip}</div>
       </TooltipPopup>
     </Tooltip>

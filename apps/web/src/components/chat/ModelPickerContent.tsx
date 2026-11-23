@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
+import type { ModelRowEffortDisplay } from "./ComposerModelEffort";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
@@ -430,9 +431,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
   /** The owning popup moves focus here when it opens (its `initialFocus`). */
   searchInputRef: RefObject<HTMLInputElement | null>;
-  /** Sits beside an effort column: fills the shared row, and stacks above it on narrow screens. */
+  /** Single-column composer popup: shows the Model header and a horizontal provider bar. */
   docked?: boolean;
-  /** Right at the end of the search text moves into the popup's effort column. */
+  /** Resolves a model row's current reasoning level word and tier color, when known. */
+  getModelEffort?: (instanceId: ProviderInstanceId, slug: string) => ModelRowEffortDisplay | null;
+  /** Right at the end of the search text moves into the popup's effort section. */
   onFocusEffort?: () => void;
   /** Closes the list column, inside the popup's fixed height. */
   listFooter?: ReactNode;
@@ -938,6 +941,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelJumpLabelByKey,
     activeModelKey,
     selectedModelKeySet,
+    getModelEffort: props.getModelEffort,
   };
 
   const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1004,14 +1008,36 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     announce(`Model: ${name ?? selectedSlug}`, "model-picker");
   };
 
+  const sidebar = showSidebar ? (
+    <ModelPickerSidebar
+      orientation={props.docked ? "horizontal" : "vertical"}
+      selectedInstanceId={selectedInstanceId}
+      onSelectInstance={handleSelectInstance}
+      onFocusSearch={focusSearchInput}
+      instanceEntries={sidebarInstanceEntries}
+      showFavorites
+      showTeams={showTeams}
+      showRoutingGroups={showRoutingGroups}
+      routingGroupsLabel={routingGroupsLabel}
+      {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
+      {...(lockedDisabledInstanceIds
+        ? {
+            disabledInstanceIds: lockedDisabledInstanceIds,
+            getDisabledInstanceTooltip: (entry: ProviderInstanceEntry) =>
+              `${entry.displayName} is unavailable in this thread. Start a new thread to switch providers.`,
+          }
+        : {})}
+    />
+  ) : null;
+
   return (
     <TooltipProvider delay={0}>
       <WindowKeyDownListener onKeyDown={onWindowKeyDown} />
       <div
         ref={pickerContentRef}
         className={cn(
-          "relative flex w-screen max-w-90 flex-row overflow-hidden",
-          props.docked ? "max-sm:h-56 max-sm:w-full max-sm:max-w-none" : "max-h-86.5",
+          "relative flex overflow-hidden",
+          props.docked ? "min-h-0 w-full flex-1 flex-col" : "max-h-86.5 w-screen max-w-90 flex-row",
         )}
         // Docked, the popup sets the height; a minimum here would overflow short windows.
         style={
@@ -1025,26 +1051,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         }
         data-model-picker-content="true"
       >
-        {showSidebar && (
-          <ModelPickerSidebar
-            selectedInstanceId={selectedInstanceId}
-            onSelectInstance={handleSelectInstance}
-            onFocusSearch={focusSearchInput}
-            instanceEntries={sidebarInstanceEntries}
-            showFavorites
-            showTeams={showTeams}
-            showRoutingGroups={showRoutingGroups}
-            routingGroupsLabel={routingGroupsLabel}
-            {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
-            {...(lockedDisabledInstanceIds
-              ? {
-                  disabledInstanceIds: lockedDisabledInstanceIds,
-                  getDisabledInstanceTooltip: (entry: ProviderInstanceEntry) =>
-                    `${entry.displayName} is unavailable in this thread. Start a new thread to switch providers.`,
-                }
-              : {})}
-          />
-        )}
+        {!props.docked && sidebar}
 
         <Combobox<string, boolean>
           inline
@@ -1099,9 +1106,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           <div
             className={cn(
               "flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/40",
-              showSidebar && "border-l border-border/70",
+              !props.docked && showSidebar && "border-l border-border/70",
             )}
           >
+            {props.docked ? (
+              <div className="shrink-0 px-3 pt-2.5 pb-0.5 font-medium text-muted-foreground text-xs">
+                Model
+              </div>
+            ) : null}
             <ComboboxSearchInput
               ref={searchInputRef}
               placeholder="Search models..."
@@ -1124,13 +1136,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   ((e.key === "ArrowLeft" && !e.shiftKey && searchQuery.length === 0) ||
                     (e.key === "Tab" && e.shiftKey))
                 ) {
-                  const sidebar = e.currentTarget
+                  const sidebarEl = e.currentTarget
                     .closest("[data-model-picker-content]")
                     ?.querySelector("[data-model-picker-sidebar]");
                   const button =
-                    sidebar?.querySelector<HTMLButtonElement>(
+                    sidebarEl?.querySelector<HTMLButtonElement>(
                       'button[aria-pressed="true"]:not(:disabled)',
-                    ) ?? sidebar?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+                    ) ?? sidebarEl?.querySelector<HTMLButtonElement>("button:not(:disabled)");
                   if (button) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -1155,7 +1167,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 ) {
                   e.preventDefault();
                   e.stopPropagation();
-                  // The column shows the selected model's effort, so a highlighted model is picked
+                  // The section shows the selected model's effort, so a highlighted model is picked
                   // first; the owning popup then moves focus to that model's levels.
                   const highlighted = highlightedModelKeyRef.current
                     ? parseModelPickerModelKey(highlightedModelKeyRef.current)
@@ -1197,6 +1209,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
             />
+            {props.docked && sidebar}
 
             <ModelPickerList
               listRef={modelListRef}
@@ -1209,7 +1222,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   return (
                     <ComboboxItem
                       hideIndicator
-                      selectedFill={false}
                       index={index}
                       value={modelKey}
                       disabled={teamRow.disabled}
@@ -1221,13 +1233,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         <span className="min-w-0 shrink-0 truncate text-sm leading-snug">
                           {teamRow.label}
                         </span>
-                        {teamRow.checked ? (
-                          <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                        ) : null}
                         <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">
                           {teamRow.detail}
                         </span>
                       </div>
+                      {teamRow.checked ? (
+                        <CheckIcon className="size-4 shrink-0 text-foreground" aria-hidden="true" />
+                      ) : null}
                     </ComboboxItem>
                   );
                 }
@@ -1236,7 +1248,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   return (
                     <ComboboxItem
                       hideIndicator
-                      selectedFill={false}
                       index={index}
                       value={modelKey}
                       className="group relative w-full !min-w-0 max-w-full cursor-pointer"
@@ -1256,13 +1267,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         <span className="min-w-0 shrink-0 truncate text-sm leading-snug">
                           {routingGroup.name}
                         </span>
-                        {modelKey === activeRoutingGroupKey ? (
-                          <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                        ) : null}
                         <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">
                           {routingGroup.summary}
                         </span>
                       </div>
+                      {modelKey === activeRoutingGroupKey ? (
+                        <CheckIcon className="size-4 shrink-0 text-foreground" aria-hidden="true" />
+                      ) : null}
                     </ComboboxItem>
                   );
                 }
@@ -1310,6 +1321,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     showInstanceBadge={badgedInstanceIds.has(model.instanceId)}
                     showNewBadge={model.badge === "new"}
                     unavailable={model.isUnavailable === true}
+                    effort={props.getModelEffort?.(model.instanceId, model.slug) ?? null}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}
                     onToggleFavorite={toggleFavorite}

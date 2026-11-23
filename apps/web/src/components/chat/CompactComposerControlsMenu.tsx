@@ -9,6 +9,7 @@ import { ComposerPermissionsSection, type RuntimeModeOption } from "./ComposerFo
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   runtimeMode: RuntimeMode;
+  defaultRuntimeMode?: RuntimeMode | undefined;
   runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   showPermissions: boolean;
   size?: "sm" | "xs";
@@ -40,10 +41,11 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       >
         <ComposerControlIcon icon={EllipsisIcon} size={size} />
       </MenuTrigger>
-      <MenuPopup align="start" {...composerFloatingLayerProps}>
+      <MenuPopup side="top" align="start" {...composerFloatingLayerProps}>
         {props.showPermissions ? (
           <ComposerPermissionsSection
             runtimeMode={props.runtimeMode}
+            defaultRuntimeMode={props.defaultRuntimeMode}
             runtimeModeOptions={props.runtimeModeOptions}
             onRuntimeModeChange={props.onRuntimeModeChange}
           />

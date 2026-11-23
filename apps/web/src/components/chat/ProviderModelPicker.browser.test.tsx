@@ -15,6 +15,7 @@ import { render } from "../../../test/render";
 import { __setClientSettingsForTests } from "../../hooks/useSettings";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { ComposerTeamSetup } from "./ComposerTeamSetup";
+import { ComposerPickerFooter } from "./ComposerModelEffort";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 
 it("keeps each registry image when adding a model from another ACP agent", async () => {
@@ -131,7 +132,7 @@ it("keeps a docked picker open after a pick and hands focus to that model's effo
     plain: [],
   };
 
-  function Picker() {
+  function Picker({ onViewUsage }: { onViewUsage: () => void }) {
     const [model, setModel] = useState("original");
     return (
       <ProviderModelPicker
@@ -143,6 +144,13 @@ it("keeps a docked picker open after a pick and hands focus to that model's effo
         modelOptionsByInstance={options}
         triggerAriaLabel="Choose model"
         onInstanceModelChange={(_, selected) => setModel(selected)}
+        getModelEffort={(_, slug) =>
+          slug === "original"
+            ? { label: "High", tier: "high" }
+            : slug === "second"
+              ? { label: "Medium", tier: "medium" }
+              : null
+        }
         effortColumn={(levels[model] ?? []).map((level, index, all) => (
           <button
             key={level}
@@ -155,17 +163,29 @@ it("keeps a docked picker open after a pick and hands focus to that model's effo
             {level}
           </button>
         ))}
+        footer={<ComposerPickerFooter onViewUsage={onViewUsage} />}
       />
     );
   }
 
-  await using screen = await render(<Picker />);
+  const onViewUsage = vi.fn();
+  await using screen = await render(<Picker onViewUsage={onViewUsage} />);
   await screen.getByRole("button", { name: "Choose model" }).click();
   const search = page.getByPlaceholder("Search models...");
   await expect.element(search).toHaveFocus();
+  await expect
+    .element(page.getByRole("option", { name: /Original model/ }).getByText("High"))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("option", { name: /Second model/ }).getByText("Medium"))
+    .toBeVisible();
   await userEvent.keyboard("{ArrowRight}");
   await expect.element(page.getByRole("radio", { name: "High" })).toHaveFocus();
   await userEvent.keyboard("{ArrowLeft}");
+  await expect.element(search).toHaveFocus();
+  await userEvent.keyboard("{ArrowRight}");
+  await expect.element(page.getByRole("radio", { name: "High" })).toHaveFocus();
+  await userEvent.keyboard("{ArrowUp}");
   await expect.element(search).toHaveFocus();
 
   await page.getByRole("option", { name: /Second model/ }).click();
@@ -174,6 +194,8 @@ it("keeps a docked picker open after a pick and hands focus to that model's effo
   await page.getByRole("option", { name: /Plain model/ }).click();
   await page.getByRole("option", { name: /Second model/ }).click();
   await expect.element(page.getByRole("radio", { name: "Medium" })).toHaveFocus();
+  await page.getByRole("button", { name: "View Usage" }).click();
+  expect(onViewUsage).toHaveBeenCalledOnce();
   await userEvent.keyboard("{Escape}");
   await expect.element(search).not.toBeInTheDocument();
 });

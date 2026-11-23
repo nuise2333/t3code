@@ -1,3 +1,5 @@
+import "../../index.css";
+
 import { createMemoryHistory } from "@tanstack/react-router";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { ProjectId } from "@t3tools/contracts";
@@ -90,5 +92,63 @@ it("the new-thread project picker follows the manual sidebar project order", asy
       expect.stringMatching(/alpha$/),
       "Add project",
     ]);
+  });
+});
+
+it("keeps the draft hero headline and usage panel top-left and clear of the bottom-pinned composer and mascots", async () => {
+  using _environment = installFakeEnvironment([]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+    homeStudioPanel: true,
+    opticalMascot: "crab",
+  });
+  const draftId = DraftId.make("draft-hero-layout");
+  useComposerDraftStore
+    .getState()
+    .setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId);
+
+  const router = getRouter(createMemoryHistory({ initialEntries: [`/draft/${draftId}`] }));
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+
+  await page.viewport(1440, 900);
+  await expect.element(page.getByText("render", { exact: true }).first()).toBeVisible();
+
+  await vi.waitFor(() => {
+    const headline = document.querySelector<HTMLElement>('[data-draft-hero-top="true"] h1');
+    const panel = document.querySelector<HTMLElement>('[data-home-studio="panel"]');
+    const meta = document.querySelector<HTMLElement>('[data-draft-hero-composer-meta="true"]');
+    const composer = document.querySelector<HTMLElement>('[data-slot="composer-host"]');
+    const mascot = document.querySelector<HTMLElement>(".optical-mascot");
+    expect(headline).not.toBeNull();
+    expect(panel).not.toBeNull();
+    expect(meta).not.toBeNull();
+    expect(composer).not.toBeNull();
+    expect(mascot).not.toBeNull();
+
+    const headlineRect = headline!.getBoundingClientRect();
+    const panelRect = panel!.getBoundingClientRect();
+    const metaRect = meta!.getBoundingClientRect();
+    const composerRect = composer!.getBoundingClientRect();
+    const mascotRect = mascot!.getBoundingClientRect();
+
+    // Headline and usage panel sit at the top-left; composer is pinned near the bottom.
+    expect(headlineRect.top).toBeLessThan(panelRect.top);
+    expect(panelRect.bottom).toBeLessThan(mascotRect.top);
+    expect(panelRect.bottom).toBeLessThan(metaRect.top);
+    expect(metaRect.bottom).toBeLessThan(composerRect.top);
+    expect(composerRect.bottom).toBeGreaterThan(window.innerHeight - 100);
+    expect(panel!.scrollHeight).toBeLessThanOrEqual(panel!.clientHeight + 1);
+  });
+
+  // Very short windows hide the usage panel rather than scrolling or overlapping.
+  await page.viewport(1280, 500);
+  await vi.waitFor(() => {
+    const panel = document.querySelector<HTMLElement>('[data-home-studio="panel"]');
+    expect(panel?.getBoundingClientRect().height ?? 0).toBe(0);
   });
 });

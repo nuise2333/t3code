@@ -31,6 +31,7 @@ import { type MessagesTimelineRow, type WorkGroupScrollAnchor } from "./Messages
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import type { TurnItemDetailSource } from "../../state/queries";
 import { type HandoffTimelineRun } from "./V2LifecycleRow";
+import { type CodeBlockCitationInput } from "./MarkdownCodeBlock";
 
 /**
  * Where an expanded row reads an item's detail and a command's output. The owner's rows read them
@@ -69,6 +70,7 @@ export interface TimelineRowSharedState {
   onSendAppMessage: ((text: string) => Promise<void>) | undefined;
   onAppFullscreenChange: (rowId: string, fullscreen: boolean) => void;
   onRunShellCommand: ((command: string) => void) | undefined;
+  onCiteCodeBlock: ((input: CodeBlockCitationInput) => void) | undefined;
   findActive: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   displayThreadKey?: string;

@@ -15,7 +15,6 @@ import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import { memo, use, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { workEntryDisplayIndicatesToolFailure } from "../../session-logic";
-import ChatMarkdown from "../ChatMarkdown";
 import { assetMediaActionsSource } from "./ChatMarkdownMedia";
 import { Minimize2Icon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -54,6 +53,7 @@ import {
   ThreadReadLabel,
   ReasoningTraceContent,
   SimpleWorkEntryRow,
+  ThoughtPreviewMarkdown,
 } from "./TimelineWorkEntryRow";
 import {
   THINKING_PREVIEW_PLUGINS,
@@ -632,11 +632,11 @@ export function LiveWorkEntryTimelineRow({
           }
           label={
             <span className="line-clamp-4">
-              <ChatMarkdown
-                inline
+              <ThoughtPreviewMarkdown
+                scopeKey={`live-thought:${row.thought?.id ?? row.id}`}
                 text={thoughtLine}
+                streaming={row.active}
                 cwd={ctx.markdownCwd}
-                parseRawHtml={false}
                 extraRemarkPlugins={THOUGHT_PREVIEW_PLUGINS}
               />
             </span>
@@ -653,11 +653,11 @@ export function LiveWorkEntryTimelineRow({
               "Thought"
             )
           ) : row.entry.itemType === "reasoning" ? (
-            <ChatMarkdown
-              inline
-              text={(row.entry.detail ?? label).slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH)}
+            <ThoughtPreviewMarkdown
+              scopeKey={`trace:${row.entry.id}`}
+              text={row.entry.detail ?? label}
+              streaming={row.active}
               cwd={ctx.markdownCwd}
-              parseRawHtml={false}
               extraRemarkPlugins={row.active ? THINKING_PREVIEW_PLUGINS : THOUGHT_PREVIEW_PLUGINS}
             />
           ) : threadLabel ? (

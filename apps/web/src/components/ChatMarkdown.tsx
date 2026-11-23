@@ -198,7 +198,11 @@ import {
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
-import { MarkdownCodeBlock, SuspenseShikiCodeBlock } from "./chat/MarkdownCodeBlock";
+import {
+  MarkdownCodeBlock,
+  SuspenseShikiCodeBlock,
+  type CodeBlockCitationInput,
+} from "./chat/MarkdownCodeBlock";
 import { createMarkdownRenderer } from "./chat/markdownRenderer";
 import { splitMarkdownBlocks } from "./chat/markdownStreamBlocks";
 import { MarkdownMermaidCodeBlock } from "./chat/MarkdownMermaidCodeBlock";
@@ -263,6 +267,7 @@ interface ChatMarkdownProps {
   parseRawHtml?: boolean;
   onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
   onRunShellCommand?: ((command: string) => void) | undefined;
+  onCiteCodeBlock?: ((input: CodeBlockCitationInput) => void) | undefined;
   imageBaseDir?: string | undefined;
   workspaceMutationId?: string | null | undefined;
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
@@ -539,6 +544,7 @@ function useChatMarkdownState({
   skills = EMPTY_MARKDOWN_SKILLS,
   onUseArtifactTemplate,
   onRunShellCommand,
+  onCiteCodeBlock,
   imageBaseDir,
   workspaceMutationId,
   onImageExpand,
@@ -1013,6 +1019,7 @@ function useChatMarkdownState({
     onTaskListChange,
     onUseArtifactTemplate,
     onRunShellCommand,
+    onCiteCodeBlock,
     openChangeRequestLink,
     openDeferredMarkdownLink,
     openExternalLinkInPreview,
@@ -1758,6 +1765,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       expandMedia,
       isStreaming,
       onRunShellCommand,
+      onCiteCodeBlock,
       inline,
       mathEnabled,
       reader,
@@ -1831,6 +1839,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
             ? onRunShellCommand
             : undefined
         }
+        onCiteCodeBlock={!isStreaming ? onCiteCodeBlock : undefined}
         isStreaming={isStreaming}
         wrapByDefault={reader ? true : undefined}
       >

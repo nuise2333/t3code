@@ -25,7 +25,10 @@ const MAX_BUBBLES = 10;
 const SETTLE_MIN_AGE_SEC = 1.1;
 const MAX_DPR = 2;
 /** The capsule and its tick marks, without the label gutter of the full design. */
-const VIEW = { x: 8, y: 12, w: 58, h: 192 } as const;
+const VIEW_COMPACT = { x: 8, y: 12, w: 58, h: 192 } as const;
+/** Wider crop that preserves the right-hand gutter for 128k/256k/384k tick labels. */
+const VIEW_LABELED = { x: 8, y: 12, w: 86, h: 192 } as const;
+const DEFAULT_RATIOS: readonly [number, number, number] = [0.08, 0.27, 0.12];
 
 const clampFill = (value: number) =>
   Math.max(0.06, Math.min(0.95, Number.isFinite(value) ? value : 0.46));
@@ -838,6 +841,7 @@ void main() {
 }`;
 
 export type VialAccent = "cobalt" | "iris" | "amber" | "mono";
+export type VialCamp = "gemini" | "claude";
 
 export interface VialVisualState {
   readonly isDark: boolean;
@@ -846,6 +850,10 @@ export interface VialVisualState {
   readonly streaming: boolean;
   readonly accent: VialAccent;
   readonly reduceMotion: boolean;
+  readonly ratios?: readonly [number, number, number] | undefined;
+  readonly hoveredSlice?: number | undefined;
+  readonly camp?: VialCamp | undefined;
+  readonly tickLabels?: readonly [string, string, string] | undefined;
 }
 
 export interface OpticalVialOptions {
@@ -1178,23 +1186,28 @@ export function mountOpticalVial(
     tryBuildGl();
   }
 
-  const layout = () => {
-    const scale = Math.max(0.01, Math.min(cssWidth / VIEW.w, cssHeight / VIEW.h));
+  const activeView = (state: VialVisualState = options.getState()) =>
+    state.tickLabels ? VIEW_LABELED : VIEW_COMPACT;
+
+  const layout = (state: VialVisualState = options.getState()) => {
+    const view = activeView(state);
+    const scale = Math.max(0.01, Math.min(cssWidth / view.w, cssHeight / view.h));
     return {
+      view,
       scale,
-      width: VIEW.w * scale,
-      height: VIEW.h * scale,
-      left: (cssWidth - VIEW.w * scale) / 2,
-      top: (cssHeight - VIEW.h * scale) / 2,
+      width: view.w * scale,
+      height: view.h * scale,
+      left: (cssWidth - view.w * scale) / 2,
+      top: (cssHeight - view.h * scale) / 2,
     };
   };
 
   const toDesign = (event: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
-    const { scale, left, top } = layout();
-    const x = VIEW.x + (event.clientX - rect.left - left) / scale;
-    const y = VIEW.y + (event.clientY - rect.top - top) / scale;
+    const { view, scale, left, top } = layout();
+    const x = view.x + (event.clientX - rect.left - left) / scale;
+    const y = view.y + (event.clientY - rect.top - top) / scale;
     return {
       normX: (x - TUBE_X) / TUBE_IN_R,
       normY: (y - CHAMBER_TOP) / (HEM_Y - LIP_Y + 6),
@@ -1229,8 +1242,11 @@ export function mountOpticalVial(
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerleave", onPointerLeave);
 
-  const visualKey = (state: VialVisualState) =>
-    `${state.isDark}|${state.critical}|${state.accent}|${clampFill(state.fill).toFixed(4)}|${cssWidth}x${cssHeight}`;
+  const visualKey = (state: VialVisualState) => {
+    const ratios = state.ratios ?? DEFAULT_RATIOS;
+    const labels = state.tickLabels ? state.tickLabels.join(",") : "";
+    return `${state.isDark}|${state.critical}|${state.accent}|${state.camp ?? "gemini"}|${state.hoveredSlice ?? -1}|${ratios[0].toFixed(3)},${ratios[1].toFixed(3)},${ratios[2].toFixed(3)}|${labels}|${clampFill(state.fill).toFixed(4)}|${cssWidth}x${cssHeight}`;
+  };
 
   const cachedGradient = (key: string, build: () => CanvasGradient) => {
     let gradient = gradients.get(key);
@@ -1417,6 +1433,14 @@ export function mountOpticalVial(
     }
     const active = TICK_ACTIVE[accent][isDark ? "dark" : "light"];
     const major = Math.max(2, Math.round(3.5 * unit));
+    const labels = state.tickLabels;
+    const labelX = tickX + major + Math.max(2, Math.round(2.5 * unit));
+    if (labels) {
+      context.save();
+      context.font = `500 ${Math.max(8, Math.round(8.5 * unit))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      context.textBaseline = "middle";
+      context.textAlign = "left";
+    }
     [0.25, 0.5, 0.75].forEach((fraction, index) => {
       const row = rowAt(fraction);
       const reached = fill >= fraction - 0.012;
@@ -1434,7 +1458,19 @@ export function mountOpticalVial(
             : "#EA580C"
           : (active[index] ?? "#3186FF");
       context.fillRect(tickX, row, major, thickness);
+      const label = labels?.[index];
+      if (label) {
+        context.fillStyle = reached
+          ? isDark
+            ? "rgba(226, 236, 250, 0.82)"
+            : "rgba(15, 23, 42, 0.78)"
+          : isDark
+            ? "rgba(168, 186, 214, 0.44)"
+            : "rgba(30, 41, 59, 0.52)";
+        context.fillText(label, labelX, row + Math.round(0.5 * thickness));
+      }
     });
+    if (labels) context.restore();
   }
 
   function render(state: VialVisualState) {
@@ -1446,8 +1482,9 @@ export function mountOpticalVial(
       canvas.width = targetW;
       canvas.height = targetH;
     }
-    const view = layout();
-    const unit = view.scale * dpr;
+    const frameLayout = layout(state);
+    const { view } = frameLayout;
+    const unit = frameLayout.scale * dpr;
     const snap = physics.snapshot();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, targetW, targetH);
@@ -1455,8 +1492,8 @@ export function mountOpticalVial(
     if (glState?.gl.isContextLost()) glState = null;
     if (glState && glCanvas) {
       const { gl, u } = glState;
-      const glW = Math.max(1, Math.round(view.width * dpr));
-      const glH = Math.max(1, Math.round(view.height * dpr));
+      const glW = Math.max(1, Math.round(frameLayout.width * dpr));
+      const glH = Math.max(1, Math.round(frameLayout.height * dpr));
       if (glCanvas.width !== glW || glCanvas.height !== glH) {
         glCanvas.width = glW;
         glCanvas.height = glH;
@@ -1478,28 +1515,35 @@ export function mountOpticalVial(
             : state.accent === "iris"
               ? 1
               : 0;
+      const ratios = state.ratios ?? DEFAULT_RATIOS;
       gl.viewport(0, 0, glW, glH);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.useProgram(glState.program);
-      gl.uniform4f(u.u_view, VIEW.x, VIEW.y, VIEW.w, VIEW.h);
+      gl.uniform4f(u.u_view, view.x, view.y, view.w, view.h);
       gl.uniform1f(u.u_time, elapsed);
       gl.uniform1f(u.u_dark, state.isDark ? 1 : 0);
       gl.uniform1f(u.u_fill, snap.fill);
       gl.uniform1f(u.u_tilt, snap.tiltAngle);
-      gl.uniform1f(u.u_camp, 0);
+      gl.uniform1f(u.u_camp, state.camp === "claude" ? 1 : 0);
       gl.uniform1f(u.u_accent, accent);
       gl.uniform1f(u.u_critical, state.critical ? 1 : 0);
       gl.uniform1f(u.u_wetL, snap.wetLeft);
       gl.uniform1f(u.u_wetR, snap.wetRight);
-      gl.uniform1f(u.u_hoverSlice, -1);
-      gl.uniform3f(u.u_ratios, 0.08, 0.27, 0.12);
+      gl.uniform1f(u.u_hoverSlice, state.hoveredSlice ?? -1);
+      gl.uniform3f(u.u_ratios, ratios[0], ratios[1], ratios[2]);
       gl.uniform1fv(glState.wave, physics.waveH);
       gl.uniform4fv(glState.drops, dropData);
       gl.uniform4fv(glState.bubbles, bubbleData);
       gl.uniform2fv(glState.bubbleShape, bubbleShape);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      ctx.drawImage(glCanvas, view.left * dpr, view.top * dpr, view.width * dpr, view.height * dpr);
+      ctx.drawImage(
+        glCanvas,
+        frameLayout.left * dpr,
+        frameLayout.top * dpr,
+        frameLayout.width * dpr,
+        frameLayout.height * dpr,
+      );
     } else {
       ctx.save();
       ctx.setTransform(
@@ -1507,8 +1551,8 @@ export function mountOpticalVial(
         0,
         0,
         unit,
-        (view.left - VIEW.x * view.scale) * dpr,
-        (view.top - VIEW.y * view.scale) * dpr,
+        (frameLayout.left - view.x * frameLayout.scale) * dpr,
+        (frameLayout.top - view.y * frameLayout.scale) * dpr,
       );
       drawFallback(ctx, state, snap.fill);
       ctx.restore();
@@ -1518,8 +1562,8 @@ export function mountOpticalVial(
       ctx,
       state,
       snap.fill,
-      (x) => (view.left + (x - VIEW.x) * view.scale) * dpr,
-      (y) => (view.top + (y - VIEW.y) * view.scale) * dpr,
+      (x) => (frameLayout.left + (x - view.x) * frameLayout.scale) * dpr,
+      (y) => (frameLayout.top + (y - view.y) * frameLayout.scale) * dpr,
       unit,
     );
     renderedKey = visualKey(state);

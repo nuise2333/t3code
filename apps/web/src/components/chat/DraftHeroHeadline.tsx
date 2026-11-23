@@ -1,10 +1,22 @@
 import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
-import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
+import {
+  resolveEnvironmentMachineKind,
+  type EnvironmentId,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { FolderPlusIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  FolderPlusIcon,
+  MessageSquareIcon,
+  MonitorIcon,
+  ScaleIcon,
+} from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
+import { useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useRef, useState } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -32,9 +44,12 @@ import {
   usePrimaryEnvironmentId,
   useEnvironmentProviders,
 } from "~/state/environments";
+import type { EnvironmentOption } from "../BranchToolbar.logic";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { isProjectPinShortcut, ProjectPinButton } from "../ProjectPinButton";
+import { T3Wordmark } from "../T3Wordmark";
 import { useSortedProjectGroups } from "../CommandPaletteLookups";
 import {
   Combobox,
@@ -46,10 +61,9 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "../ui/combobox";
+import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { InlineButton } from "../ui/button";
 import { DraftProjectName } from "./DraftProjectName";
-import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { TriageDraftHero } from "./TriageDraftHero";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
@@ -62,6 +76,7 @@ const HomeStudioPanel = lazy(() =>
 );
 
 const ADD_PROJECT_VALUE = "add-project";
+const NO_PROJECT_VALUE = "no-project";
 
 interface PickerItem {
   readonly value: string;
@@ -81,6 +96,96 @@ export function DraftHeroHeadline({
 }: DraftHeroHeadlineProps) {
   const projects = useProjects();
   const { environments } = useEnvironments();
+  // A boolean, so typing in a draft does not re-render the hero.
+  const isTriageDraftPrompt = useComposerDraftStore((store) =>
+    draftId ? isTriagePrompt(store.getComposerDraft(draftId)?.prompt ?? "") : false,
+  );
+  const { scratchWorkspaceRootFor } = useScratchProject();
+  const showStudioPanel = useClientSettings((settings) => settings.homeStudioPanel);
+
+  const environmentLabelById = new Map(
+    environments.map((environment) => [environment.environmentId, environment.label] as const),
+  );
+  const projectGroups = useSortedProjectGroups(environmentLabelById);
+  const projectPickerEntries = buildSidebarProjectPickerEntries({
+    groups: pickableProjectGroups(projectGroups),
+    preferredProjectRef: activeProjectRef,
+  });
+  const hasResolvedProject = activeProjectTitle !== null;
+  const canChooseProject = projectPickerEntries.length > 0;
+  const activeProject =
+    activeProjectRef === null
+      ? null
+      : (projects.find(
+          (project) =>
+            project.environmentId === activeProjectRef.environmentId &&
+            project.id === activeProjectRef.projectId,
+        ) ?? null);
+  const isScratchDraft =
+    activeProject !== null &&
+    isScratchProject(activeProject, scratchWorkspaceRootFor(activeProject.environmentId));
+
+  if (isScratchDraft && isTriageDraftPrompt) {
+    const environment = environments.find(
+      (entry) => entry.environmentId === activeProject.environmentId,
+    );
+    return (
+      <TriageDraftHero
+        machineLabel={environment?.label ?? null}
+        serverVersion={environment?.serverConfig?.environment.serverVersion ?? null}
+      />
+    );
+  }
+
+  return (
+    <div className="flex w-full flex-col items-start">
+      <div className="flex w-full items-center gap-3 text-left">
+        <T3Wordmark aria-hidden="true" className="h-6 w-auto shrink-0 text-primary sm:h-7" />
+        <h1 className="min-w-0 truncate font-bold text-2xl text-foreground tracking-tight sm:text-3xl">
+          {hasResolvedProject && !isScratchDraft ? (
+            <>What should we build in {activeProjectTitle}?</>
+          ) : isScratchDraft || canChooseProject ? (
+            <>What should we work on?</>
+          ) : (
+            <>Add a project to start</>
+          )}
+        </h1>
+      </div>
+      {showStudioPanel ? (
+        <Suspense fallback={<HomeStudioPanelSkeleton />}>
+          <HomeStudioPanel />
+        </Suspense>
+      ) : null}
+    </div>
+  );
+}
+
+interface DraftHeroComposerBarProps {
+  readonly draftId: DraftId | null;
+  readonly activeProjectRef: ScopedProjectRef | null;
+  readonly activeProjectTitle: string | null;
+  readonly environmentId: EnvironmentId;
+  readonly availableEnvironments: readonly EnvironmentOption[];
+  readonly autoEnvironmentLabel?: string | undefined;
+  readonly onAutoEnvironment?: (() => void) | undefined;
+  readonly envLocked?: boolean | undefined;
+  readonly onEnvironmentChange?: ((environmentId: EnvironmentId) => void) | undefined;
+}
+
+export function DraftHeroComposerBar({
+  draftId,
+  activeProjectRef,
+  activeProjectTitle,
+  environmentId,
+  availableEnvironments,
+  autoEnvironmentLabel,
+  onAutoEnvironment,
+  envLocked = false,
+  onEnvironmentChange,
+}: DraftHeroComposerBarProps) {
+  const navigate = useNavigate();
+  const projects = useProjects();
+  const { environments } = useEnvironments();
   const providersByEnvironment = useEnvironmentProviders();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -88,7 +193,6 @@ export function DraftHeroHeadline({
     (store) => store.setLogicalProjectDraftThreadId,
   );
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
-  // A boolean, so typing in a draft does not re-render the hero.
   const isTriageDraftPrompt = useComposerDraftStore((store) =>
     draftId ? isTriagePrompt(store.getComposerDraft(draftId)?.prompt ?? "") : false,
   );
@@ -103,7 +207,6 @@ export function DraftHeroHeadline({
   const pickerFilter = useComboboxFilter();
   const highlightedPickerValueRef = useRef<string | null>(null);
   const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
-  const showStudioPanel = useClientSettings((settings) => settings.homeStudioPanel);
 
   const environmentLabelById = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
@@ -135,9 +238,7 @@ export function DraftHeroHeadline({
           ),
         ) ?? null);
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
-  const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
-  const shouldShowProjectMenu = canChooseProject;
   const menuEntries = projectPickerEntries.filter(
     ({ targetProject }) =>
       !isScratchProject(targetProject, scratchWorkspaceRootFor(targetProject.environmentId)),
@@ -160,6 +261,9 @@ export function DraftHeroHeadline({
   const pickerItems: readonly PickerItem[] = useOrderWhileOpen(
     [
       ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
+      ...(scratchWorkspaceRoot !== null && !isScratchDraft
+        ? [{ value: NO_PROJECT_VALUE, label: "No project" }]
+        : []),
       { value: ADD_PROJECT_VALUE, label: "Add project" },
     ],
     (item) => item.value,
@@ -172,14 +276,13 @@ export function DraftHeroHeadline({
       : pickerItems.filter(
           (item) =>
             item.value !== ADD_PROJECT_VALUE &&
+            item.value !== NO_PROJECT_VALUE &&
             pickerFilter.contains(item, pickerSearch, (candidate) => candidate.label),
         );
   const selectedPickerItem = pickerItems.find((item) => item.value === activeProjectKey) ?? null;
 
   // The picker can change the draft's target while the no-project home is
-  // still being opened; a stale continuation must not retarget it again. Picking
-  // a project clears the pending request, and the draft session is compared
-  // against the store when the scratch project arrives.
+  // still being opened; a stale continuation must not retarget it again.
   const pendingScratchRef = useRef<symbol | null>(null);
   const draftTargetKey = () => {
     const session = draftId ? useComposerDraftStore.getState().getDraftSession(draftId) : null;
@@ -255,7 +358,14 @@ export function DraftHeroHeadline({
     return true;
   };
 
-  const projectSelector = shouldShowProjectMenu ? (
+  if (isScratchDraft && isTriageDraftPrompt) {
+    return null;
+  }
+
+  const projectChipClasses =
+    "pointer-events-auto inline-flex h-8 max-w-full cursor-pointer items-center gap-1.5 rounded-full border border-border/70 bg-card/85 px-3 text-xs font-medium text-foreground shadow-xs/5 backdrop-blur-sm transition-colors hover:bg-accent/70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
+
+  const projectSelector = canChooseProject ? (
     <Combobox
       items={pickerItems}
       filteredItems={filteredPickerItems}
@@ -278,6 +388,14 @@ export function DraftHeroHeadline({
           openAddProject();
           return;
         }
+        if (item.value === NO_PROJECT_VALUE) {
+          void startScratch().then((started) => {
+            if (started) {
+              document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus();
+            }
+          });
+          return;
+        }
         const entry = projectEntryByKey.get(item.value);
         if (!entry || item.value === activeProjectKey) {
           return;
@@ -289,9 +407,9 @@ export function DraftHeroHeadline({
         <TooltipTrigger
           render={
             <ComboboxTrigger
-              render={<InlineButton tone="picker" />}
+              render={<button type="button" />}
               data-draft-project-trigger=""
-              className="pointer-events-auto min-w-0 max-w-full align-baseline"
+              className={projectChipClasses}
             />
           }
         >
@@ -299,12 +417,13 @@ export function DraftHeroHeadline({
             value={isScratchDraft ? "No project" : (activeProjectTitle ?? "Choose a project")}
             singleLine
           />
+          <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
         </TooltipTrigger>
         {activeProjectTitle && !isScratchDraft ? (
           <TooltipPopup side="top">{activeProjectTitle}</TooltipPopup>
         ) : null}
       </Tooltip>
-      <ComboboxPopup align="center" className="w-72 overflow-hidden">
+      <ComboboxPopup align="start" side="top" className="w-72 overflow-hidden">
         <ComboboxSearchInput
           aria-label="Search projects"
           placeholder="Search projects..."
@@ -329,6 +448,8 @@ export function DraftHeroHeadline({
               <ComboboxItem key={item.value} hideIndicator value={item}>
                 {item.value === ADD_PROJECT_VALUE ? (
                   <FolderPlusIcon className="size-4 shrink-0" />
+                ) : item.value === NO_PROJECT_VALUE ? (
+                  <MessageSquareIcon className="size-4 shrink-0 text-muted-foreground" />
                 ) : entry ? (
                   <ProjectFavicon project={entry.group} className="size-4 shrink-0" />
                 ) : null}
@@ -360,79 +481,112 @@ export function DraftHeroHeadline({
       </ComboboxPopup>
     </Combobox>
   ) : (
-    <button
-      type="button"
-      onClick={openAddProject}
-      className="pointer-events-auto inline min-w-0 max-w-full cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-    >
+    <button type="button" onClick={openAddProject} className={projectChipClasses}>
       <DraftProjectName value={activeProjectTitle ?? "Add a project"} singleLine />
     </button>
   );
 
-  const noProjectShortcut = shortcutLabelForCommand(keybindings, "chat.newWithoutProject");
-  const orStartWithoutProject =
-    scratchWorkspaceRoot !== null && !isScratchDraft && (hasResolvedProject || canChooseProject) ? (
+  const activeEnvironmentOption =
+    availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
+  const fallbackEnvironment =
+    environments.find((env) => env.environmentId === environmentId) ?? environments[0] ?? null;
+  const activeEnvironmentLabel =
+    autoEnvironmentLabel ??
+    activeEnvironmentOption?.label ??
+    fallbackEnvironment?.label ??
+    "This device";
+  const activeEnvironmentMachine =
+    activeEnvironmentOption?.machine ??
+    (fallbackEnvironment?.serverConfig
+      ? resolveEnvironmentMachineKind(fallbackEnvironment.serverConfig)
+      : null);
+  const canPickEnvironment =
+    availableEnvironments.length > 1 && !envLocked && onEnvironmentChange !== undefined;
+  const hostShortcutLabel = shortcutLabelForCommand(keybindings, "composer.host");
+
+  const envIconButtonClasses =
+    "pointer-events-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/70 bg-card/85 text-muted-foreground shadow-xs/5 backdrop-blur-sm transition-colors hover:bg-accent/70 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
+
+  const environmentIcon = autoEnvironmentLabel ? (
+    <ScaleIcon aria-hidden="true" className="size-3.5" />
+  ) : activeEnvironmentMachine ? (
+    <EnvironmentMachineIcon kind={activeEnvironmentMachine} className="size-3.5" />
+  ) : (
+    <MonitorIcon aria-hidden="true" className="size-3.5" />
+  );
+
+  const environmentButton = canPickEnvironment ? (
+    <Menu>
       <Tooltip>
         <TooltipTrigger
           render={
-            <InlineButton
-              tone="muted"
-              className="pointer-events-auto"
-              onClick={() =>
-                void startScratch().then((started) => {
-                  if (started) {
-                    document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus();
-                  }
-                })
-              }
+            <MenuTrigger
+              render={<button type="button" />}
+              aria-label={`Run on ${activeEnvironmentLabel}`}
+              data-draft-environment-trigger=""
+              className={envIconButtonClasses}
             />
           }
         >
-          or start without a project
+          {environmentIcon}
         </TooltipTrigger>
-        {noProjectShortcut ? <TooltipPopup side="bottom">{noProjectShortcut}</TooltipPopup> : null}
+        <TooltipPopup side="top">
+          {activeEnvironmentLabel}
+          {hostShortcutLabel ? ` · ${hostShortcutLabel}` : null}
+        </TooltipPopup>
       </Tooltip>
-    ) : null;
-
-  if (isScratchDraft && isTriageDraftPrompt) {
-    const environment = environments.find(
-      (entry) => entry.environmentId === activeProject.environmentId,
-    );
-    return (
-      <TriageDraftHero
-        machineLabel={environment?.label ?? null}
-        serverVersion={environment?.serverConfig?.environment.serverVersion ?? null}
-      />
-    );
-  }
+      <MenuPopup align="start" side="top">
+        <MenuGroup>
+          <MenuGroupLabel>Run on</MenuGroupLabel>
+          {onAutoEnvironment ? (
+            <MenuItem onClick={onAutoEnvironment}>
+              <ScaleIcon aria-hidden="true" className="size-3.5" />
+              <span className="flex-1">{autoEnvironmentLabel ?? "Auto balance"}</span>
+              {autoEnvironmentLabel ? <CheckIcon aria-hidden="true" className="size-3.5" /> : null}
+            </MenuItem>
+          ) : null}
+          {availableEnvironments.map((env) => {
+            const selected = !autoEnvironmentLabel && env.environmentId === environmentId;
+            return (
+              <MenuItem
+                key={env.environmentId}
+                onClick={() => onEnvironmentChange(env.environmentId)}
+              >
+                <EnvironmentMachineIcon kind={env.machine} className="size-3.5" />
+                <span className="flex-1">{env.label}</span>
+                {selected ? <CheckIcon aria-hidden="true" className="size-3.5" /> : null}
+              </MenuItem>
+            );
+          })}
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
+  ) : (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`Environment: ${activeEnvironmentLabel}`}
+            data-draft-environment-trigger=""
+            onClick={() => void navigate({ to: "/settings/connections" })}
+            className={envIconButtonClasses}
+          />
+        }
+      >
+        {environmentIcon}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{activeEnvironmentLabel} · Connections</TooltipPopup>
+    </Tooltip>
+  );
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col items-center">
-      {hasResolvedProject && !isScratchDraft ? (
-        <DraftHeroProjectHeading projectName={activeProjectTitle ?? "Choose a project"}>
-          {projectSelector}
-        </DraftHeroProjectHeading>
-      ) : (
-        <h1 className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-          {isScratchDraft ? (
-            <>What should we work on?</>
-          ) : canChooseProject ? (
-            <>{projectSelector} to start</>
-          ) : (
-            <>Add a project to start</>
-          )}
-        </h1>
-      )}
-      {scratchWorkspaceRoot === null ? null : (
-        <p className="mt-2 flex h-6 w-full items-center justify-center text-sm">
-          {isScratchDraft ? projectSelector : orStartWithoutProject}
-        </p>
-      )}
-      {showStudioPanel ? (
-        <Suspense fallback={<HomeStudioPanelSkeleton />}>
-          <HomeStudioPanel />
-        </Suspense>
-      ) : null}
+    <div
+      data-draft-hero-composer-meta="true"
+      className="pointer-events-none relative z-30 flex w-full items-center gap-2"
+    >
+      <div className="min-w-0 max-w-full">{projectSelector}</div>
+      {environmentButton}
     </div>
   );
 }

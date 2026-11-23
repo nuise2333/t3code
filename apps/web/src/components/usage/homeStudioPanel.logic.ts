@@ -205,7 +205,7 @@ export function pickBook(
 export function bookLine(totalTokens: number, pick: number): string | null {
   const book = pickBook(totalTokens, pick);
   if (!book) return null;
-  return `≈ ${formatCount(book.count)} ${book.count === 1 ? "copy" : "copies"} of ${book.title}`;
+  return `Your token usage equals ${formatCount(book.count)} ${book.count === 1 ? "copy" : "copies"} of ${book.title}.`;
 }
 
 export type QuotaWarnLevel = 0 | 1 | 2;

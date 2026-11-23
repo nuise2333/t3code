@@ -262,6 +262,7 @@ import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReact
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as OtlpEndpointCheck from "./observability/OtlpEndpointCheck.ts";
 import * as TextGenerators from "./textGeneration/TextGenerators.ts";
+import * as ThoughtTranslationService from "./thoughtTranslation/ThoughtTranslationService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
 import * as SourceControlBuiltInDrivers from "./sourceControl/builtInDrivers.ts";
@@ -1579,6 +1580,7 @@ export const layerWsRpc = (
       const secretCheck = yield* SecretCheck.SecretCheck;
       const otlpEndpointCheck = yield* OtlpEndpointCheck.OtlpEndpointCheck;
       const textGenerators = yield* TextGenerators.TextGenerators;
+      const thoughtTranslation = yield* ThoughtTranslationService.ThoughtTranslationService;
       const routingPolicy = yield* RoutingPolicy.RoutingPolicy;
       const routingSummary = yield* RoutingSummary.RoutingSummary;
       const sourceControlRepositories =
@@ -2741,6 +2743,7 @@ export const layerWsRpc = (
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
         [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),
         [WS_METHODS.serverListTextGeneratorModels]: (input) => textGenerators.listModels(input),
+        [WS_METHODS.serverTranslateThought]: (input) => thoughtTranslation.translate(input),
         [WS_METHODS.serverCrossVendorModel]: (input) => routingPolicy.crossVendorModel(input),
         [WS_METHODS.serverRoutingSummary]: (input) => routingSummary.read(input),
         [WS_METHODS.serverPrepareTriage]: (input) => triage.prepare(input),

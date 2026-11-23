@@ -35,8 +35,15 @@ import { useStreamingInkChoreography } from "../../optical/streamChoreography";
 import { ChatMarkdownAssetImage } from "./ChatMarkdownMedia";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { workGroupImageGallery } from "./markdownImageGallery";
-import { ChevronRightIcon, CircleAlertIcon, XIcon, RotateCcwIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  CircleAlertIcon,
+  LanguagesIcon,
+  XIcon,
+  RotateCcwIcon,
+} from "lucide-react";
 import { Button, InlineButton } from "../ui/button";
+import { useThoughtTranslation } from "../../hooks/useThoughtTranslation";
 import { useAssetUrls } from "../../assets/assetUrls";
 import { useThreadShell } from "../../state/entities";
 import {
@@ -121,8 +128,147 @@ const toolCallExpandedBodyClassName =
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
-export function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
+function ReasoningTraceEntry({
+  entry,
+  isStreaming,
+}: {
+  entry: TimelineWorkEntry;
+  isStreaming: boolean;
+}) {
   const ctx = use(TimelineRowCtx);
+  const sourceText = entry.detail ?? "";
+  const [showOriginal, setShowOriginal] = useState(false);
+  const translation = useThoughtTranslation({
+    environmentId: ctx.activeThreadEnvironmentId,
+    scopeKey: `trace:${entry.id}`,
+    text: sourceText,
+    streaming: isStreaming,
+  });
+
+  const renderMarkdown = (text: string, streamingMarkdown: boolean) => (
+    <ChatMarkdown
+      className="text-foreground"
+      text={text}
+      cwd={ctx.markdownCwd}
+      threadRef={ctx.threadRef ?? undefined}
+      skills={ctx.skills}
+      isStreaming={streamingMarkdown}
+      headingLevelOffset={MESSAGE_HEADING_LEVEL}
+      onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+      onImageExpand={ctx.onImageExpand}
+      lineBreaks
+    />
+  );
+
+  if (translation.mode === "off" || translation.status === "idle") {
+    return renderMarkdown(sourceText, isStreaming);
+  }
+
+  const hasTranslation = translation.translatedText !== null;
+  const showingTranslatedInImmersive =
+    translation.mode === "immersive" && hasTranslation && !showOriginal;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div
+        className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground select-none"
+        onClick={stopRowToggle}
+        onKeyDown={stopRowToggle}
+      >
+        <span className="inline-flex items-center gap-1">
+          <LanguagesIcon aria-hidden="true" className="size-3 shrink-0 opacity-75" />
+          <span>
+            {translation.status === "error"
+              ? "Translation failed"
+              : hasTranslation
+                ? translation.status === "loading"
+                  ? "Translated · updating…"
+                  : "Translated"
+                : "Translating…"}
+          </span>
+        </span>
+        {translation.mode === "immersive" && hasTranslation ? (
+          <button
+            type="button"
+            className="cursor-pointer rounded-sm text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={(event) => {
+              event.stopPropagation();
+              setShowOriginal((current) => !current);
+            }}
+          >
+            {showOriginal ? "Show translation" : "Show original"}
+          </button>
+        ) : null}
+        {translation.status === "error" ? (
+          <button
+            type="button"
+            className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={(event) => {
+              event.stopPropagation();
+              translation.retry();
+            }}
+          >
+            <RotateCcwIcon aria-hidden="true" className="size-2.5 shrink-0" />
+            Retry
+          </button>
+        ) : null}
+      </div>
+
+      {translation.mode === "immersive" ? (
+        renderMarkdown(
+          showingTranslatedInImmersive ? translation.translatedText! : sourceText,
+          isStreaming && !showingTranslatedInImmersive,
+        )
+      ) : (
+        <div className="flex flex-col gap-2">
+          {renderMarkdown(sourceText, isStreaming)}
+          {hasTranslation ? (
+            <div className="border-t border-border/50 pt-2">
+              {renderMarkdown(translation.translatedText!, false)}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ThoughtPreviewMarkdown({
+  scopeKey,
+  text,
+  streaming,
+  cwd,
+  extraRemarkPlugins,
+}: {
+  scopeKey: string;
+  text: string;
+  streaming: boolean;
+  cwd: string | undefined;
+  extraRemarkPlugins: typeof THINKING_PREVIEW_PLUGINS;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const translation = useThoughtTranslation({
+    environmentId: ctx.activeThreadEnvironmentId,
+    scopeKey,
+    text,
+    streaming,
+  });
+  const displayText =
+    translation.mode !== "off" && translation.translatedText !== null
+      ? translation.translatedText
+      : text;
+  return (
+    <ChatMarkdown
+      inline
+      text={displayText.slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH)}
+      cwd={cwd}
+      parseRawHtml={false}
+      extraRemarkPlugins={extraRemarkPlugins}
+    />
+  );
+}
+
+export function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
   const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
   const isStreaming = (entry: TimelineWorkEntry) =>
     isWorking && entry.runId === latestRunId && entry.toolLifecycleStatus === "inProgress";
@@ -137,19 +283,7 @@ export function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<Time
         data-optical-thought-streaming={streaming ? "1" : undefined}
       >
         {entries.map((entry) => (
-          <ChatMarkdown
-            key={entry.id}
-            className="text-foreground"
-            text={entry.detail ?? ""}
-            cwd={ctx.markdownCwd}
-            threadRef={ctx.threadRef ?? undefined}
-            skills={ctx.skills}
-            isStreaming={isStreaming(entry)}
-            headingLevelOffset={MESSAGE_HEADING_LEVEL}
-            onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-            onImageExpand={ctx.onImageExpand}
-            lineBreaks
-          />
+          <ReasoningTraceEntry key={entry.id} entry={entry} isStreaming={isStreaming(entry)} />
         ))}
       </div>
     </WorkLogDetails>
@@ -483,14 +617,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               className={cn(answerPreview ? "min-w-0" : "min-w-0 flex-1", "truncate", headingClass)}
             >
               {isReasoning && !expanded ? (
-                <ChatMarkdown
-                  inline
-                  text={(workEntry.detail ?? previewText).slice(
-                    0,
-                    THOUGHT_PREVIEW_SOURCE_MAX_LENGTH,
-                  )}
+                <ThoughtPreviewMarkdown
+                  scopeKey={`trace:${workEntry.id}`}
+                  text={workEntry.detail ?? previewText}
+                  streaming={workEntry.toolLifecycleStatus === "inProgress"}
                   cwd={ctx.markdownCwd}
-                  parseRawHtml={false}
                   extraRemarkPlugins={
                     workEntry.toolLifecycleStatus === "inProgress"
                       ? THINKING_PREVIEW_PLUGINS

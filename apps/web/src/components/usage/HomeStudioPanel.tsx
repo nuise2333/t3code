@@ -30,14 +30,7 @@ import { Badge } from "../ui/badge";
 import { Button, InlineButton } from "../ui/button";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  HOME_STUDIO_FOOTNOTE_CLASS,
-  HOME_STUDIO_HEAT_SIZE_CLASS,
-  HOME_STUDIO_OVERVIEW_CLASS,
-  HOME_STUDIO_STAT_LIST_CLASS,
-  HomeStudioPanelFrame,
-  HomeStudioStatsSkeleton,
-} from "./HomeStudioPanelFrame";
+import { HomeStudioPanelFrame, HomeStudioStatsSkeleton } from "./HomeStudioPanelFrame";
 import {
   HOME_HEAT_WEEKS,
   HOME_HEAT_WINDOW_DAYS,
@@ -203,7 +196,7 @@ export function HomeStudioPanel() {
           </ToggleGroup>
         )}
       </div>
-      <div key={tab} data-home-studio-motion="swap" className="flex flex-col gap-2">
+      <div key={tab} data-home-studio-motion="swap" className="flex flex-col gap-3">
         {tab === "overview" ? (
           <OverviewTab
             untilDay={windows.all.untilDay}
@@ -303,24 +296,26 @@ function OverviewTab({
   ];
   return (
     <>
-      <div className={HOME_STUDIO_OVERVIEW_CLASS}>
-        <Heatmap cells={buildHeatCells(untilDay, heatUsage.daily)} />
-        <dl className={HOME_STUDIO_STAT_LIST_CLASS}>
+      <div data-home-studio="overview">
+        <dl data-home-studio="stats">
           {stats.map((stat, index) => (
             <div
               key={stat.key}
+              data-home-studio="stat-card"
               data-home-studio-motion="rise"
               style={{ "--home-studio-index": index } as CSSProperties}
-              className="flex min-w-0 items-baseline justify-between gap-2 text-2xs leading-3.5"
             >
-              <dt className="flex-none text-muted-foreground">{stat.label}</dt>
+              <dt data-home-studio="stat-label" className="flex-none text-muted-foreground">
+                {stat.label}
+              </dt>
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <dd
+                      data-home-studio="stat-value"
                       className={cn(
-                        "min-w-0 truncate text-foreground tabular-nums",
-                        stat.text ? "font-medium" : "font-mono font-semibold tracking-tight",
+                        "min-w-0 truncate text-foreground tabular-nums tracking-tight",
+                        stat.text ? "font-semibold" : "font-mono font-semibold",
                       )}
                     />
                   }
@@ -332,14 +327,10 @@ function OverviewTab({
             </div>
           ))}
         </dl>
+        <Heatmap cells={buildHeatCells(untilDay, heatUsage.daily)} />
       </div>
-      {/* Always rendered, so a book arriving with the data never moves the headline. */}
-      <p
-        className={cn(
-          "truncate text-xs leading-4 text-muted-foreground",
-          HOME_STUDIO_FOOTNOTE_CLASS,
-        )}
-      >
+      {/* Always rendered, so a book arriving with the data never shifts layout. */}
+      <p data-home-studio="footnote" className="truncate text-muted-foreground">
         {book}
       </p>
     </>
@@ -423,12 +414,10 @@ function Heatmap({ cells }: { readonly cells: readonly HeatCell[] }) {
       ref={containerRef}
       role="img"
       aria-label={`Daily token usage over the last ${HOME_HEAT_WEEKS} weeks`}
+      data-home-studio="heatmap"
       data-home-studio-motion="fade"
       {...hover}
-      className={cn(
-        "relative grid auto-cols-fr grid-flow-col grid-rows-7 content-start gap-0.5 [contain:layout_style]",
-        HOME_STUDIO_HEAT_SIZE_CLASS,
-      )}
+      className="relative grid auto-cols-fr grid-flow-col grid-rows-7 content-start [contain:layout_style]"
     >
       {cells.map((cell) => (
         <span
@@ -502,7 +491,7 @@ function ModelsTab({
   return (
     <>
       <div className="flex flex-col gap-1.5">
-        <div className="relative ml-9 h-38 border-b">
+        <div data-home-studio="models-chart" className="relative ml-9 border-b">
           {[1, 0.75, 0.5, 0.25, 0].map((at) => (
             <span
               key={at}

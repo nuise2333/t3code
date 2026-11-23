@@ -35,6 +35,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   onSelectInstance: (instanceId: ModelPickerTab) => void;
   onFocusSearch: () => void;
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  orientation?: "vertical" | "horizontal";
   showFavorites?: boolean;
   /** The Agent team tab, under Favorites. */
   showTeams?: boolean;
@@ -48,10 +49,13 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   const handleSelect = (instanceId: ModelPickerTab) => {
     props.onSelectInstance(instanceId);
   };
+  const orientation = props.orientation ?? "vertical";
+  const isHorizontal = orientation === "horizontal";
+  const tooltipSide = isHorizontal ? ("top" as const) : PICKER_TOOLTIP_SIDE;
   const showFavorites = props.showFavorites ?? true;
   const [hoveredInstanceId, setHoveredInstanceId] = useState<ProviderInstanceId | null>(null);
   const sidebarContentRef = useRef<HTMLDivElement>(null);
-  const [selectedIndicatorTop, setSelectedIndicatorTop] = useState<number | null>(null);
+  const [selectedIndicatorPos, setSelectedIndicatorPos] = useState<number | null>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the selected provider item's DOM offset to position the selection indicator
   useLayoutEffect(() => {
     const content = sidebarContentRef.current;
@@ -62,64 +66,96 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
       content.querySelectorAll<HTMLElement>("[data-model-picker-provider]"),
     ).find((item) => item.dataset.modelPickerProvider === props.selectedInstanceId);
     if (!selectedItem) {
-      setSelectedIndicatorTop(null);
+      setSelectedIndicatorPos(null);
       return;
     }
-    setSelectedIndicatorTop(selectedItem.offsetTop + selectedItem.offsetHeight / 2 - 10);
+    setSelectedIndicatorPos(
+      isHorizontal
+        ? selectedItem.offsetLeft + selectedItem.offsetWidth / 2 - 8
+        : selectedItem.offsetTop + selectedItem.offsetHeight / 2 - 10,
+    );
   }, [
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Adding, removing or reordering providers moves the selected item, so the indicator re-measures.
     props.instanceEntries,
     props.selectedInstanceId,
+    isHorizontal,
     showFavorites,
     props.showTeams,
     props.showRoutingGroups,
   ]);
 
+  const tabButtonClassName = isHorizontal
+    ? "relative isolate flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
+    : "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none";
+  const tabItemClassName = isHorizontal ? "relative shrink-0" : "relative w-full";
+  const tabIconClassName = isHorizontal ? "size-4 shrink-0" : "size-5 shrink-0";
+
   return (
     <Toolbar.Root
-      className="w-11 shrink-0 overflow-hidden bg-muted/30"
+      className={
+        isHorizontal
+          ? "w-full shrink-0 overflow-hidden border-b border-border/70 bg-muted/20"
+          : "w-11 shrink-0 overflow-hidden bg-muted/30"
+      }
       data-model-picker-sidebar="true"
       aria-label="Providers"
-      orientation="vertical"
+      orientation={orientation}
       onKeyDown={(event) => {
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-        if (event.key === "ArrowRight") {
+        if (
+          (!isHorizontal && event.key === "ArrowRight") ||
+          (isHorizontal && event.key === "ArrowDown")
+        ) {
           event.preventDefault();
           props.onFocusSearch();
           return;
         }
       }}
     >
-      <div className="h-full overflow-y-auto overscroll-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div ref={sidebarContentRef} className="relative flex min-h-full flex-col gap-1 p-1">
-          {selectedIndicatorTop !== null ? (
+      <div
+        className={cn(
+          "overscroll-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+          isHorizontal ? "w-full overflow-x-auto" : "h-full overflow-y-auto",
+        )}
+      >
+        <div
+          ref={sidebarContentRef}
+          className={
+            isHorizontal
+              ? "relative flex min-w-full flex-row items-center gap-1 px-2 py-1.5"
+              : "relative flex min-h-full flex-col gap-1 p-1"
+          }
+        >
+          {selectedIndicatorPos !== null ? (
             <div
               data-model-picker-selected-indicator="true"
-              className="pointer-events-none absolute right-1 z-10 h-5 w-0.75 rounded-full bg-primary transition-[top] duration-200 ease-out"
-              style={{ top: selectedIndicatorTop }}
+              className={
+                isHorizontal
+                  ? "pointer-events-none absolute bottom-0.5 z-10 h-0.5 w-4 rounded-full bg-primary transition-[left] duration-200 ease-out"
+                  : "pointer-events-none absolute right-1 z-10 h-5 w-0.75 rounded-full bg-primary transition-[top] duration-200 ease-out"
+              }
+              style={isHorizontal ? { left: selectedIndicatorPos } : { top: selectedIndicatorPos }}
             />
           ) : null}
           {showFavorites ? (
             <>
-              <div className="relative w-full" data-model-picker-provider="favorites">
+              <div className={tabItemClassName} data-model-picker-provider="favorites">
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <Toolbar.Button
-                        className={cn(
-                          "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none",
-                        )}
+                        className={tabButtonClassName}
                         onClick={() => handleSelect("favorites")}
                         type="button"
                         aria-label="Favorites"
                         aria-pressed={props.selectedInstanceId === "favorites"}
                       >
-                        <StarIcon className="size-5 fill-current shrink-0" aria-hidden />
+                        <StarIcon className={cn(tabIconClassName, "fill-current")} aria-hidden />
                       </Toolbar.Button>
                     }
                   />
                   <TooltipPopup
-                    side={PICKER_TOOLTIP_SIDE}
+                    side={tooltipSide}
                     sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                     align="center"
                   >
@@ -128,23 +164,23 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 </Tooltip>
               </div>
               {props.showTeams ? (
-                <div className="relative w-full" data-model-picker-provider="team">
+                <div className={tabItemClassName} data-model-picker-provider="team">
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <Toolbar.Button
-                          className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
+                          className={tabButtonClassName}
                           onClick={() => handleSelect("team")}
                           type="button"
                           aria-label="Agent team"
                           aria-pressed={props.selectedInstanceId === "team"}
                         >
-                          <UsersIcon className="size-5 shrink-0" aria-hidden />
+                          <UsersIcon className={tabIconClassName} aria-hidden />
                         </Toolbar.Button>
                       }
                     />
                     <TooltipPopup
-                      side={PICKER_TOOLTIP_SIDE}
+                      side={tooltipSide}
                       sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                       align="center"
                     >
@@ -154,23 +190,23 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 </div>
               ) : null}
               {props.showRoutingGroups ? (
-                <div className="relative w-full" data-model-picker-provider="groups">
+                <div className={tabItemClassName} data-model-picker-provider="groups">
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <Toolbar.Button
-                          className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
+                          className={tabButtonClassName}
                           onClick={() => handleSelect("groups")}
                           type="button"
                           aria-label={props.routingGroupsLabel ?? "Routing groups"}
                           aria-pressed={props.selectedInstanceId === "groups"}
                         >
-                          <ListOrderedIcon className="size-5 shrink-0" aria-hidden />
+                          <ListOrderedIcon className={tabIconClassName} aria-hidden />
                         </Toolbar.Button>
                       }
                     />
                     <TooltipPopup
-                      side={PICKER_TOOLTIP_SIDE}
+                      side={tooltipSide}
                       sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                       align="center"
                     >
@@ -179,7 +215,14 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   </Tooltip>
                 </div>
               ) : null}
-              <div className="border-b border-border/70" aria-hidden="true" />
+              <div
+                className={
+                  isHorizontal
+                    ? "mx-0.5 h-4 w-px shrink-0 bg-border/70"
+                    : "border-b border-border/70"
+                }
+                aria-hidden="true"
+              />
             </>
           ) : null}
 
@@ -203,7 +246,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             const button = (
               <Toolbar.Button
                 className={cn(
-                  "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none",
+                  tabButtonClassName,
                   isDisabled && "opacity-50 cursor-not-allowed hover:bg-transparent",
                 )}
                 data-provider-accent-color={entry.accentColor}
@@ -229,8 +272,8 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   acpRegistryAgentId={entry.acpRegistryAgentId}
                   acpRegistryIconUrl={entry.acpRegistryIconUrl}
                   showBadge={showInstanceBadge}
-                  className="size-6 z-30"
-                  iconClassName="size-5"
+                  className={isHorizontal ? "size-4.5 z-30" : "size-6 z-30"}
+                  iconClassName={isHorizontal ? "size-4" : "size-5"}
                   indicatorBackground={
                     isHovered && !isDisabled
                       ? "var(--muted)"
@@ -244,7 +287,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             );
 
             const trigger = isDisabled ? (
-              <span className="relative block w-full">{button}</span>
+              <span className={isHorizontal ? "relative block" : "relative block w-full"}>
+                {button}
+              </span>
             ) : (
               button
             );
@@ -252,13 +297,13 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             return (
               <div
                 key={entry.instanceId}
-                className="relative w-full"
+                className={tabItemClassName}
                 data-model-picker-provider={entry.instanceId}
               >
                 <Tooltip>
                   <TooltipTrigger render={trigger} />
                   <TooltipPopup
-                    side={PICKER_TOOLTIP_SIDE}
+                    side={tooltipSide}
                     sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                     align="center"
                   >

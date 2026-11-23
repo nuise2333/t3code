@@ -197,11 +197,15 @@ import { useLinkedEnvironments } from "~/state/peerLinks";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import type {
   ComposerContextRecord,
+  OrchestrationV2ProviderTurn,
   OrchestrationV2Run,
+  ProviderThreadId,
   RouteDecision,
   ThreadAgentTeam,
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
+import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
+import type { ThreadStructureVisibleTurnItem } from "@t3tools/client-runtime/state/models";
 import { threadContextAttachment } from "~/lib/threadContextAttachment";
 import type { ThreadAssistsState } from "./ComposerThreadAssists";
 import {
@@ -209,8 +213,8 @@ import {
   ComposerCommandMenu,
   composerSuggestionOptionId,
 } from "./ComposerCommandMenu";
+import { ComposerAddContextMenu } from "./ComposerAddContextMenu";
 import {
-  ComposerAttachButton,
   ComposerAttachmentFileList,
   ComposerAttachmentMediaRow,
   ComposerFilePreviewDialog,
@@ -286,6 +290,7 @@ import {
   usePreparingComposerImages,
 } from "./preparingComposerImages";
 import { ComposerControlsBar } from "./ComposerControlsBar";
+import { ComposerTelemetryVial } from "./ComposerTelemetryVial";
 import { composerCommandKeyHandler } from "./composerCommandKey";
 import { usePromptSuggestion } from "./usePromptSuggestion";
 import { useFreshSessionArmed } from "./freshSessionArms";
@@ -376,6 +381,10 @@ export interface ChatComposerProps {
   activeThreadId: ThreadId | null;
   activeThread: Thread | undefined;
   activeThreadRuns: ReadonlyArray<OrchestrationV2Run>;
+  activeContextWindow?: ContextWindowSnapshot | null | undefined;
+  activeProviderThreadId?: ProviderThreadId | null | undefined;
+  activeThreadProviderTurns?: ReadonlyArray<OrchestrationV2ProviderTurn> | undefined;
+  activeThreadVisibleTurnItems?: ReadonlyArray<ThreadStructureVisibleTurnItem> | undefined;
   promptHistoryEntries: ReadonlyArray<TimelineEntry>;
   forceExpandedOnMobile: boolean;
   projectSelectionRequired: boolean;
@@ -488,6 +497,8 @@ export interface ChatComposerProps {
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
+  onOpenBrowser?: (() => void) | undefined;
+  onOpenFilesPanel?: (() => void) | undefined;
 }
 
 const NO_PROVIDER_SKILLS: ServerProvider["skills"] = [];
@@ -575,6 +586,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
     onFileOpen,
+    onOpenBrowser,
+    onOpenFilesPanel,
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
@@ -1186,7 +1199,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
   const showComposerTopDrawer = pendingUserInputs.length > 0;
   const showCollapsedMobilePromptRow = isComposerCollapsedMobile;
-  const showComposerAttachAction =
+  const canAttachFiles =
     fileStagingLimit !== null &&
     (!activePendingProgress ||
       (supportsQuestionAttachments &&
@@ -2747,6 +2760,116 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
   const addComposerFoldersStable = useStableCallback(addComposerFolders);
 
+  const openComposerTrigger = (prefix: "@" | "/") => {
+    if (
+      isLiteralPendingAnswer ||
+      activePendingIsResponding ||
+      projectSelectionRequired ||
+      speechInput.freezesEditor ||
+      (pendingUserInputs.length > 0 && !activePendingProgress?.activeQuestion)
+    ) {
+      return;
+    }
+    const snapshot = readComposerSnapshot();
+    const expectedKind = prefix === "@" ? "path" : "slash-command";
+    const existing = detectComposerTrigger(snapshot.value, snapshot.expandedCursor);
+    if (existing?.kind === expectedKind) {
+      resetComposerTrigger(existing);
+      window.requestAnimationFrame(() => {
+        composerEditorRef.current?.focusAt(snapshot.cursor);
+      });
+      return;
+    }
+    const cursor = snapshot.expandedCursor;
+    const needsLeadingSpace = cursor > 0 && !/\s/.test(snapshot.value[cursor - 1] ?? "");
+    const needsTrailingSpace =
+      cursor < snapshot.value.length && !/\s/.test(snapshot.value[cursor] ?? "");
+    const replacement = `${needsLeadingSpace ? " " : ""}${prefix}${needsTrailingSpace ? " " : ""}`;
+    const cursorAfterPrefix = cursor + (needsLeadingSpace ? 1 : 0) + prefix.length;
+    const applied = applyPromptReplacement(cursor, cursor, replacement, {
+      expandedCursorAfterReplace: cursorAfterPrefix,
+    });
+    if (applied) {
+      resetComposerTrigger(detectComposerTrigger(promptRef.current, cursorAfterPrefix));
+    }
+  };
+  const openMentionTriggerStable = useStableCallback(() => openComposerTrigger("@"));
+  const openActionsTriggerStable = useStableCallback(() => openComposerTrigger("/"));
+
+  const pickComposerFolder = () => {
+    const target = folderDropTarget({
+      localEnvironmentDisabled: isLocalEnvironmentDisabled(),
+      environmentId,
+      primaryEnvironmentId,
+      connection: readPreparedConnection(environmentId),
+      isDesktopRenderer: window.desktopBridge !== undefined,
+      primaryRunsInWsl:
+        window.desktopBridge
+          ?.getLocalEnvironmentBootstraps()
+          .some(
+            (bootstrap) =>
+              bootstrap.id === PRIMARY_LOCAL_ENVIRONMENT_ID &&
+              typeof bootstrap.runningDistro === "string",
+          ) === true,
+    });
+    const bridge = window.desktopBridge;
+    if (!bridge || target === "remote") {
+      if (onOpenFilesPanel) {
+        onOpenFilesPanel();
+      } else {
+        toastManager.add({
+          type: "error",
+          title: "Folders can only be referenced on a server running on this computer",
+        });
+      }
+      return;
+    }
+    const draftKey = attachmentTargetKeyRef.current;
+    const pickerOptions = {
+      ...(gitCwd ? { initialPath: gitCwd } : {}),
+      ...(typeof target === "object" && target.wslBackendId !== PRIMARY_LOCAL_ENVIRONMENT_ID
+        ? { targetEnvironmentId: target.wslBackendId }
+        : {}),
+    };
+    pendingDraftWork.begin(draftKey);
+    void bridge
+      .pickFolder(Object.keys(pickerOptions).length > 0 ? pickerOptions : undefined)
+      .then(async (pickedPath) => {
+        if (!composerMountedRef.current || attachmentTargetKeyRef.current !== draftKey) return;
+        if (!pickedPath) {
+          focusComposer();
+          return;
+        }
+        const resolvedPath =
+          typeof target === "object" && target.wslBackendId === PRIMARY_LOCAL_ENVIRONMENT_ID
+            ? ((await bridge
+                .toLocalBackendPath(target.wslBackendId, pickedPath)
+                .catch(() => null)) ?? pickedPath)
+            : pickedPath;
+        if (!composerMountedRef.current || attachmentTargetKeyRef.current !== draftKey) return;
+        const inserted = insertComposerTextStable(
+          `${serializeComposerFileLink(resolvedPath)} `,
+          "cursor",
+          { ensureLeadingBoundary: true },
+        );
+        if (!inserted) {
+          toastManager.add({
+            type: "error",
+            title: "Unable to add folder",
+            description: "The composer is busy; try again once it is ready.",
+          });
+        }
+        focusComposer();
+      })
+      .catch(() => {
+        if (composerMountedRef.current && attachmentTargetKeyRef.current === draftKey) {
+          focusComposer();
+        }
+      })
+      .finally(() => pendingDraftWork.end(draftKey));
+  };
+  const pickComposerFolderStable = useStableCallback(pickComposerFolder);
+
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
     const { files, folders } = splitTransferredFiles(event.clipboardData);
     const plainText = event.clipboardData.getData("text/plain");
@@ -3347,12 +3470,38 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onRemoveFile={removeComposerFileFromDraft}
       />
     ) : null;
-  const composerAttachButton = showComposerAttachAction ? (
-    <ComposerAttachButton
-      addComposerAttachments={addComposerAttachments}
-      focusComposer={focusComposer}
-    />
-  ) : null;
+  const canTriggerMention =
+    !projectSelectionRequired &&
+    !isChoiceOnlyPendingQuestion &&
+    !isLiteralPendingAnswer &&
+    (!activePendingProgress || activePendingProgress.activeQuestion?.allowCustomAnswer !== false);
+  const canTriggerActions =
+    !projectSelectionRequired && !activePendingProgress && !isLiteralPendingAnswer;
+  const canPickFolder =
+    !projectSelectionRequired &&
+    !activePendingProgress &&
+    ((typeof window !== "undefined" && window.desktopBridge !== undefined) ||
+      onOpenFilesPanel !== undefined);
+  const canOpenBrowser =
+    !projectSelectionRequired && !activePendingProgress && onOpenBrowser !== undefined;
+  const composerAttachButton =
+    !isChoiceOnlyPendingQuestion &&
+    (canAttachFiles ||
+      canPickFolder ||
+      canTriggerMention ||
+      canTriggerActions ||
+      canOpenBrowser) ? (
+      <ComposerAddContextMenu
+        canAttachFiles={canAttachFiles}
+        addComposerAttachments={addComposerAttachments}
+        onPickFolder={canPickFolder ? pickComposerFolderStable : undefined}
+        onOpenMention={canTriggerMention ? openMentionTriggerStable : undefined}
+        onOpenActions={canTriggerActions ? openActionsTriggerStable : undefined}
+        onOpenBrowser={canOpenBrowser ? onOpenBrowser : undefined}
+        focusComposer={focusComposer}
+        disabled={activePendingIsResponding || speechInput.freezesEditor}
+      />
+    ) : null;
   return (
     <form
       ref={composerFormRef}
@@ -3767,12 +3916,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     data-chat-composer-controls="footer"
                     data-chat-composer-footer-controls="true"
                     className={cn(
-                      "relative flex min-w-0 flex-1 items-center justify-end gap-0.5",
+                      "relative flex min-w-0 flex-1 items-center justify-start gap-1",
                       dictationTakesFooter && "hidden",
                     )}
                   >
                     {composerControls}
                   </div>
+                  {!dictationTakesFooter && props.activeContextWindow ? (
+                    <ComposerTelemetryVial
+                      environmentId={environmentId}
+                      contextWindow={props.activeContextWindow}
+                      providerTurns={props.activeThreadProviderTurns}
+                      activeProviderThreadId={props.activeProviderThreadId}
+                      visibleTurnItems={props.activeThreadVisibleTurnItems}
+                      providerInstanceId={selectedInstanceId}
+                      providers={providerStatuses}
+                      modelLabel={
+                        selectedProviderModels.find((model) => model.slug === selectedModel)?.name ??
+                        selectedModel
+                      }
+                      modelSlug={selectedModel}
+                      isStreaming={phase === "running" || phase === "connecting"}
+                      compactDisabled={
+                        compactDisabled ||
+                        !canOperateThread ||
+                        noProviderAvailable ||
+                        activePendingApproval !== null ||
+                        pendingUserInputs.length > 0 ||
+                        phase === "running" ||
+                        isSendBusy ||
+                        !activeThreadId
+                      }
+                      onCompactContext={compactThreadContextStable}
+                    />
+                  ) : null}
                   <ComposerFooterPrimaryActions
                     // Stop state belongs to one thread; the composer stays mounted across threads.
                     key={`${environmentId}:${activeThreadId ?? "new"}`}

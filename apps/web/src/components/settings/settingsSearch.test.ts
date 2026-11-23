@@ -232,6 +232,9 @@ describe("searchSettings", () => {
       ["group preset", "routing-groups"],
       ["agent team", "agent-teams"],
       ["lead guidance", "agent-teams"],
+      ["Corner style", "corner-style"],
+      ["Compact sidebar", "sidebar-compact"],
+      ["Code ligatures", "code-ligatures"],
     ] as const) {
       expect(searchSettings(title)[0]?.id, title).toBe(id);
     }

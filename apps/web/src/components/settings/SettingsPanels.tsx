@@ -24,6 +24,7 @@ import {
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
   ScreenReaderAnnouncements,
+  ThoughtTranslationMode,
   ToolCallVisibility,
 } from "@t3tools/contracts/settings";
 import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
@@ -461,6 +462,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ["Contrast"]
       : []),
     ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
+    ...(settings.cornerStyle !== DEFAULT_UNIFIED_SETTINGS.cornerStyle ? ["Corner style"] : []),
+    ...(settings.sidebarCompact !== DEFAULT_UNIFIED_SETTINGS.sidebarCompact
+      ? ["Compact sidebar"]
+      : []),
+    ...(settings.codeLigatures !== DEFAULT_UNIFIED_SETTINGS.codeLigatures
+      ? ["Code ligatures"]
+      : []),
     ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
       ? ["Diff colors"]
       : []),
@@ -569,6 +577,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       : []),
     ...(settings.toolCallVisibility !== DEFAULT_UNIFIED_SETTINGS.toolCallVisibility
       ? ["Tool calls in chat"]
+      : []),
+    ...(settings.thoughtTranslation !== DEFAULT_UNIFIED_SETTINGS.thoughtTranslation
+      ? ["Thought translation"]
       : []),
     ...(settings.screenReaderAnnouncements !== DEFAULT_UNIFIED_SETTINGS.screenReaderAnnouncements
       ? ["Screen reader announcements"]
@@ -698,10 +709,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       toolCallVisibility: DEFAULT_UNIFIED_SETTINGS.toolCallVisibility,
+      thoughtTranslation: DEFAULT_UNIFIED_SETTINGS.thoughtTranslation,
       screenReaderAnnouncements: DEFAULT_UNIFIED_SETTINGS.screenReaderAnnouncements,
       screenReaderWindowTitle: DEFAULT_UNIFIED_SETTINGS.screenReaderWindowTitle,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
+      cornerStyle: DEFAULT_UNIFIED_SETTINGS.cornerStyle,
+      codeLigatures: DEFAULT_UNIFIED_SETTINGS.codeLigatures,
+      sidebarCompact: DEFAULT_UNIFIED_SETTINGS.sidebarCompact,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
       opticalMotionLevel: DEFAULT_UNIFIED_SETTINGS.opticalMotionLevel,
       opticalAmbientIntensity: DEFAULT_UNIFIED_SETTINGS.opticalAmbientIntensity,
@@ -1355,6 +1370,7 @@ export function ChatSettingsPanel() {
 
       <SettingsSection id="activity" title="Activity">
         <ToolCallVisibilityRow />
+        <ThoughtTranslationRow />
       </SettingsSection>
 
       <SettingsSection id="screen-reader" title="Screen reader">
@@ -1405,6 +1421,54 @@ function ToolCallVisibilityRow() {
             {ToolCallVisibility.literals.map((value) => (
               <SelectItem key={value} value={value}>
                 {TOOL_CALL_VISIBILITY_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+const THOUGHT_TRANSLATION_LABELS: Record<ThoughtTranslationMode, string> = {
+  off: "Off",
+  immersive: "Immersive",
+  bilingual: "Bilingual",
+};
+
+const isThoughtTranslationMode = Schema.is(ThoughtTranslationMode);
+
+function ThoughtTranslationRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("thought-translation")}
+      description="Translate agent reasoning into your Response language using the text generation model. Immersive replaces the original with a toggle; Bilingual shows both."
+      resetAction={
+        settings.thoughtTranslation !== DEFAULT_UNIFIED_SETTINGS.thoughtTranslation ? (
+          <SettingResetButton
+            label="thought translation"
+            onClick={() =>
+              updateSettings({ thoughtTranslation: DEFAULT_UNIFIED_SETTINGS.thoughtTranslation })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={settings.thoughtTranslation}
+          onValueChange={(value) => {
+            if (isThoughtTranslationMode(value)) updateSettings({ thoughtTranslation: value });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Thought translation">
+            <SelectValue>{THOUGHT_TRANSLATION_LABELS[settings.thoughtTranslation]}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {ThoughtTranslationMode.literals.map((value) => (
+              <SelectItem key={value} value={value}>
+                {THOUGHT_TRANSLATION_LABELS[value]}
               </SelectItem>
             ))}
           </SelectPopup>

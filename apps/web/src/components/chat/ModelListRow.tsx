@@ -10,6 +10,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import type { ModelRowEffortDisplay } from "./ComposerModelEffort";
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
@@ -30,6 +31,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   showInstanceBadge: boolean;
   showNewBadge?: boolean;
   unavailable?: boolean;
+  effort?: ModelRowEffortDisplay | null;
   jumpLabel?: string | null;
   disabledReason?: string | null;
   onToggleFavorite: (instanceId: ProviderInstanceId, slug: string) => void;
@@ -43,7 +45,6 @@ export const ModelListRow = memo(function ModelListRow(props: {
   const row = (
     <ComboboxItem
       hideIndicator
-      selectedFill={false}
       index={props.index}
       value={modelPickerModelKey(props.instanceId, props.slug)}
       disabled={Boolean(props.disabledReason)}
@@ -66,9 +67,12 @@ export const ModelListRow = memo(function ModelListRow(props: {
         indicatorBackground="var(--popover)"
         badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
       />
-      <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
         <div
-          className="min-w-0 truncate text-sm font-normal leading-snug"
+          className={cn(
+            "min-w-0 truncate text-sm leading-snug",
+            props.isSelected ? "font-medium" : "font-normal",
+          )}
           // Names the row in full on hover only when it is cut off.
           onPointerEnter={(event) => {
             const name = event.currentTarget;
@@ -79,7 +83,15 @@ export const ModelListRow = memo(function ModelListRow(props: {
           {/* The logo is decorative, so name the provider for screen readers. */}
           <span className="sr-only">, {props.providerDisplayName}</span>
         </div>
-        {props.isSelected ? <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+        {props.effort ? (
+          <span
+            data-model-row-effort
+            data-effort-tier={props.effort.tier}
+            className="shrink-0 font-medium text-muted-foreground text-sm leading-snug"
+          >
+            {props.effort.label}
+          </span>
+        ) : null}
         {props.subProvider ? (
           <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">
             {props.subProvider}
@@ -87,7 +99,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
         ) : null}
         {props.showNewBadge ? (
           <span
-            className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-3xs font-bold uppercase leading-none tracking-wide text-update-foreground"
+            className="shrink-0 rounded-full border border-border/70 bg-muted/50 px-1.5 py-0.5 font-medium text-2xs text-muted-foreground leading-none"
             aria-label="New model"
           >
             New
@@ -133,6 +145,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
           </TooltipPopup>
         </Tooltip>
         {props.jumpLabel ? <Kbd>{props.jumpLabel}</Kbd> : null}
+        {props.isSelected ? (
+          <CheckIcon className="size-4 shrink-0 text-foreground" aria-hidden="true" />
+        ) : null}
       </div>
     </ComboboxItem>
   );

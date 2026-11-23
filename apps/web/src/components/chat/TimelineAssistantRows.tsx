@@ -100,6 +100,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                 headingLevelOffset={MESSAGE_HEADING_LEVEL}
                 onUseArtifactTemplate={ctx.onUseArtifactTemplate}
                 onRunShellCommand={ctx.onRunShellCommand}
+                onCiteCodeBlock={ctx.onCiteCodeBlock}
                 onImageExpand={ctx.onImageExpand}
               />
             </AssistantCitationSource>
@@ -160,6 +161,7 @@ export function SentMessageTimelineRow({
           headingLevelOffset={MESSAGE_HEADING_LEVEL}
           onUseArtifactTemplate={ctx.onUseArtifactTemplate}
           onRunShellCommand={ctx.onRunShellCommand}
+          onCiteCodeBlock={ctx.onCiteCodeBlock}
           onImageExpand={ctx.onImageExpand}
         />
       </AssistantCitationSource>

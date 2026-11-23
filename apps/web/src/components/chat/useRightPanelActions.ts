@@ -191,19 +191,23 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     }
   };
   const closePreviewPanelStable = useStableCallback(closePreviewPanel);
-  const togglePreviewPanel = () => {
-    if (!activeThreadRef || !browserAvailable) return;
-    if (previewPanelOpen) {
-      closePreviewPanel();
-      return;
-    }
-    if (!canOperatePreview) return;
+  const openBrowserSurface = () => {
+    if (!activeThreadRef || !browserAvailable || !canOperatePreview) return;
     const activeTabId = activePreviewState.activeTabId;
     if (activeTabId) {
       useRightPanelStore.getState().openBrowser(activeThreadRef, activeTabId);
     } else {
       createBrowserSurface();
     }
+  };
+  const openBrowserSurfaceStable = useStableCallback(openBrowserSurface);
+  const togglePreviewPanel = () => {
+    if (!activeThreadRef || !browserAvailable) return;
+    if (previewPanelOpen) {
+      closePreviewPanel();
+      return;
+    }
+    openBrowserSurface();
   };
   const togglePreviewPanelStable = useStableCallback(togglePreviewPanel);
   const activateRightPanelSurface = (surface: RightPanelSurface) => {
@@ -350,6 +354,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onOpenToolDiffStable,
     onOpenTurnDiffStable,
     onToggleDiffStable,
+    openBrowserSurfaceStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,
     toggleRightPanelMaximizedStable,

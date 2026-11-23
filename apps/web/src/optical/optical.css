@@ -496,6 +496,29 @@ html[data-optical-motion="off"] [data-optical-prism-box="1"]::before {
   line-height: 16px;
 }
 
+.optical-effort__title {
+  margin-inline-end: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.optical-effort__right {
+  margin-inline-start: auto;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.optical-effort__right .optical-effort__value {
+  margin-inline-start: 0;
+}
+
 .optical-effort__auto {
   border-radius: 999px;
   padding: 0 6px;
@@ -1387,6 +1410,69 @@ html:not([data-optical-motion="off"]) [data-optical-tier="xhigh"] {
 
 :root:not(.dark) [data-optical-tier="xhigh"] {
   color: #7c3aed;
+}
+
+/* Effort word tier colors: shared by the model trigger, model rows, and effort section header. */
+[data-effort-tier="low"] {
+  color: #60a5fa;
+}
+
+[data-effort-tier="medium"] {
+  color: #4d93f8;
+}
+
+[data-effort-tier="high"] {
+  color: #7c86ff;
+}
+
+[data-effort-tier="xhigh"] {
+  color: #9b7bf7;
+}
+
+[data-effort-tier="auto"] {
+  color: #93c5fd;
+}
+
+:root:not(.dark) [data-effort-tier="low"],
+:root:not(.dark) [data-effort-tier="medium"],
+:root:not(.dark) [data-effort-tier="auto"] {
+  color: #2563eb;
+}
+
+:root:not(.dark) [data-effort-tier="high"] {
+  color: #4f46e5;
+}
+
+:root:not(.dark) [data-effort-tier="xhigh"] {
+  color: #7c3aed;
+}
+
+html[data-optical-spectrum="cobalt"] [data-effort-tier] {
+  color: #38bdf8;
+}
+
+:root:not(.dark)[data-optical-spectrum="cobalt"] [data-effort-tier] {
+  color: #2563eb;
+}
+
+html[data-optical-spectrum="iris"] [data-effort-tier] {
+  color: #a78bfa;
+}
+
+:root:not(.dark)[data-optical-spectrum="iris"] [data-effort-tier] {
+  color: #7c3aed;
+}
+
+html[data-optical-spectrum="amber"] [data-effort-tier] {
+  color: #f59e0b;
+}
+
+:root:not(.dark)[data-optical-spectrum="amber"] [data-effort-tier] {
+  color: #d97706;
+}
+
+html[data-optical-spectrum="mono"] [data-effort-tier] {
+  color: var(--foreground);
 }
 
 html[data-optical-spectrum="mono"] [data-chat-provider-model-picker-icon] > * {

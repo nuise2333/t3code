@@ -106,6 +106,28 @@ describe("command permissions", () => {
     }),
   );
 
+  it.effect("requires the destination operate grant to translate reasoning text", () =>
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const translate = createCommandPermissions(runtime, WS_METHODS.serverTranslateThought);
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthOrchestrationReadScope],
+          permissions: [AuthOrchestrationReadScope],
+        }),
+      );
+      expect(registry.get(translate.permissionAtom(env))).toBe(false);
+      expect((yield* translate.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+        "EnvironmentAuthorizationError",
+      );
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(registry.get(translate.permissionAtom(env))).toBe(true);
+      yield* translate.authorize(registry, env);
+    }),
+  );
+
   it.effect("requires the destination preview grant to close a browser tab", () =>
     Effect.gen(function* () {
       const registry = yield* setup;

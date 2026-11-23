@@ -10,7 +10,11 @@ import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
-import { ComposerEffortColumn, describeComposerEffort } from "./ComposerModelEffort";
+import {
+  ComposerEffortColumn,
+  describeComposerEffort,
+  resolveModelRowEffort,
+} from "./ComposerModelEffort";
 import type { TraitsSelectionInput } from "./TraitsPicker";
 
 // Shaped like Devin over ACP: its session mode comes first, and its reasoning id is its own.
@@ -106,6 +110,10 @@ it("draws an agent's reasoning as bars and keeps its mode out of the levels", as
   const status = screen.getByRole("status");
   expect(status.element().querySelector("[data-composer-effort-glyph]")).not.toBeNull();
   await expect.element(status).toHaveTextContent("");
+  expect(resolveModelRowEffort(traitsInput([], () => {}))).toEqual({
+    label: "Medium",
+    tier: "medium",
+  });
 
   const levels = screen.getByRole("radiogroup", { name: "Thinking" });
   await expect.element(levels.getByRole("radio")).toHaveLength(3);
@@ -148,6 +156,7 @@ it("steps the optical effort track with the arrow keys and leaves it with Up and
   );
   const track = screen.getByRole("slider", { name: "Thinking" });
   await expect.element(track).toHaveAttribute("aria-valuetext", "Medium");
+  await expect.element(screen.getByText("Thinking")).toBeVisible();
 
   await userEvent.tab();
   await expect.element(track).toHaveFocus();
