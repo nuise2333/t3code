@@ -100,6 +100,23 @@ function startClientAppearance(): void {
       }
     }
     if (
+      previous?.opticalMotionLevel !== settings.opticalMotionLevel ||
+      previous.opticalAmbientIntensity !== settings.opticalAmbientIntensity ||
+      previous.opticalTargetFps !== settings.opticalTargetFps ||
+      previous.opticalHomeRipple !== settings.opticalHomeRipple ||
+      previous.opticalSmoothCaret !== settings.opticalSmoothCaret ||
+      previous.opticalSpectrum !== settings.opticalSpectrum
+    ) {
+      root.dataset.opticalMotion = settings.opticalMotionLevel;
+      root.dataset.opticalAmbient = String(settings.opticalAmbientIntensity / 100);
+      root.dataset.opticalFps = settings.opticalTargetFps;
+      root.dataset.opticalHomeRipple = settings.opticalHomeRipple ? "1" : "0";
+      root.dataset.opticalSmoothCaret = settings.opticalSmoothCaret ? "1" : "0";
+      root.dataset.opticalSpectrum = settings.opticalSpectrum;
+      // Optical controllers listen for this instead of observing the root's attributes.
+      window.dispatchEvent(new CustomEvent("t3:optical-settings-changed"));
+    }
+    if (
       previous?.fontFamilySans !== settings.fontFamilySans ||
       previous.fontFamilyCode !== settings.fontFamilyCode ||
       previous.fontFamilyComposer !== settings.fontFamilyComposer ||

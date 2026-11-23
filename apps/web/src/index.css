@@ -3,6 +3,7 @@
 @import "tailwindcss";
 @import "./reader/reader.css";
 @import "./reader/editor/readerEditor.css";
+@import "./optical/optical.css";
 
 @custom-variant dark (&:is(.dark, .dark *));
 @custom-variant light (&:not(.dark, .dark *));

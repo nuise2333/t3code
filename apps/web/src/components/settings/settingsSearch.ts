@@ -336,6 +336,48 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["transparent transparency solid menus dialogs composer"],
   },
   {
+    id: "optical-scene-preset",
+    title: "Optical preset",
+    to: "/settings/appearance",
+    searchTerms: ["optical webgl physics preset full deep focus silent eco prism"],
+  },
+  {
+    id: "optical-motion-level",
+    title: "Motion physics",
+    to: "/settings/appearance",
+    searchTerms: ["optical spring physics motion level tier off subtle standard ultra prism"],
+  },
+  {
+    id: "optical-ambient-intensity",
+    title: "Ambient optical intensity",
+    to: "/settings/appearance",
+    searchTerms: ["optical webgl glow aura rim intensity brightness prism"],
+  },
+  {
+    id: "optical-spectrum",
+    title: "Optical spectrum",
+    to: "/settings/appearance",
+    searchTerms: ["optical prism color spectrum cobalt iris amber mono follow theme"],
+  },
+  {
+    id: "optical-home-ripple",
+    title: "Interactive home ripple",
+    to: "/settings/appearance",
+    searchTerms: ["optical webgl ripple glyph matrix horizon glow empty draft prism"],
+  },
+  {
+    id: "optical-smooth-caret",
+    title: "Elastic smooth caret",
+    to: "/settings/appearance",
+    searchTerms: ["optical caret cursor composer typing smooth elastic prism"],
+  },
+  {
+    id: "optical-target-fps",
+    title: "Optical frame cap",
+    to: "/settings/appearance",
+    searchTerms: ["optical fps refresh rate 60 120 180 native performance gpu"],
+  },
+  {
     id: "diff-color-scheme",
     title: "Diff colors",
     to: "/settings/diffs",

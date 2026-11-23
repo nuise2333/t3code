@@ -173,6 +173,23 @@ export const PanelAnimationDurationMs = Schema.Int.check(
 export type PanelAnimationDurationMs = typeof PanelAnimationDurationMs.Type;
 const DEFAULT_PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 0;
 
+export const OpticalMotionLevel = Schema.Literals(["off", "subtle", "standard", "ultra"]);
+export type OpticalMotionLevel = typeof OpticalMotionLevel.Type;
+const DEFAULT_OPTICAL_MOTION_LEVEL: OpticalMotionLevel = "ultra";
+
+/** Percent of full strength; the client scales it to 0..1. */
+export const OpticalAmbientIntensity = Schema.Literals([0, 35, 70, 100]);
+export type OpticalAmbientIntensity = typeof OpticalAmbientIntensity.Type;
+const DEFAULT_OPTICAL_AMBIENT_INTENSITY: OpticalAmbientIntensity = 100;
+
+export const OpticalTargetFps = Schema.Literals(["60", "120", "180", "native"]);
+export type OpticalTargetFps = typeof OpticalTargetFps.Type;
+const DEFAULT_OPTICAL_TARGET_FPS: OpticalTargetFps = "120";
+
+export const OpticalSpectrum = Schema.Literals(["follow", "cobalt", "iris", "amber", "mono"]);
+export type OpticalSpectrum = typeof OpticalSpectrum.Type;
+const DEFAULT_OPTICAL_SPECTRUM: OpticalSpectrum = "follow";
+
 export const MIN_INTERFACE_FONT_SIZE = 12;
 export const MAX_INTERFACE_FONT_SIZE = 20;
 export const InterfaceFontSize = Schema.Int.check(
@@ -467,6 +484,20 @@ export const ClientSettingsSchema = Schema.Struct({
   // Zero avoids per-frame layout work from width/height transitions.
   panelAnimationDurationMs: PanelAnimationDurationMs.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PANEL_ANIMATION_DURATION_MS)),
+  ),
+  opticalMotionLevel: OpticalMotionLevel.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_OPTICAL_MOTION_LEVEL)),
+  ),
+  opticalAmbientIntensity: OpticalAmbientIntensity.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_OPTICAL_AMBIENT_INTENSITY)),
+  ),
+  opticalTargetFps: OpticalTargetFps.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_OPTICAL_TARGET_FPS)),
+  ),
+  opticalHomeRipple: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  opticalSmoothCaret: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  opticalSpectrum: OpticalSpectrum.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_OPTICAL_SPECTRUM)),
   ),
   browserDefaultViewport: PreviewViewportSetting.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_VIEWPORT)),
@@ -2201,6 +2232,12 @@ export const ClientSettingsPatch = Schema.Struct({
   loadBalancingWeights: Schema.optionalKey(LoadBalancingWeights),
   appearanceContrast: Schema.optionalKey(AppearanceContrast),
   panelAnimationDurationMs: Schema.optionalKey(PanelAnimationDurationMs),
+  opticalMotionLevel: Schema.optionalKey(OpticalMotionLevel),
+  opticalAmbientIntensity: Schema.optionalKey(OpticalAmbientIntensity),
+  opticalTargetFps: Schema.optionalKey(OpticalTargetFps),
+  opticalHomeRipple: Schema.optionalKey(Schema.Boolean),
+  opticalSmoothCaret: Schema.optionalKey(Schema.Boolean),
+  opticalSpectrum: Schema.optionalKey(OpticalSpectrum),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
   browserDefaultAppearance: Schema.optionalKey(PreviewAppearancePreference),

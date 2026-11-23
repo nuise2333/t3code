@@ -75,6 +75,10 @@ import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
 import { useWorktreeSetup } from "./chat/useWorktreeSetup";
 import { useChatShortcuts } from "./chat/useChatShortcuts";
 import { ChatBannerLane } from "./chat/ChatBannerLane";
+import { OpticalHomeRipple } from "../optical/OpticalHomeRipple";
+import { OpticalConversationAura } from "../optical/OpticalConversationAura";
+import { triggerLiftoffVeil } from "../optical/motionEngine";
+import { useOpticalCompletionCaustic } from "../optical/streamChoreography";
 import * as Schema from "effect/Schema";
 import {
   AuthOrchestrationOperateScope,
@@ -3299,7 +3303,37 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const onWorktreeSetupWorkLocallyStable = useStableCallback(onWorktreeSetupWorkLocally);
-  const onComposerSendStable = useStableCallback(onSend);
+  const [opticalLiftoffSignal, setOpticalLiftoffSignal] = useState(0);
+  const parsedOpticalWorkStartedAt = activeWorkStartedAt ? Date.parse(activeWorkStartedAt) : NaN;
+  const opticalWorkStartedAtMs = Number.isFinite(parsedOpticalWorkStartedAt)
+    ? parsedOpticalWorkStartedAt
+    : null;
+  useOpticalCompletionCaustic({
+    isWorking,
+    workStartedAtMs: opticalWorkStartedAtMs,
+    threadKey: activeThreadKey,
+    hasError: Boolean(timelineThreadError),
+    composerOverlayElement,
+  });
+  const onComposerSendStable = useStableCallback((...args: Parameters<typeof onSend>) => {
+    const hasPayload =
+      promptRef.current.trim().length > 0 ||
+      composerImagesRef.current.length > 0 ||
+      composerFilesRef.current.length > 0 ||
+      composerTerminalContextsRef.current.length > 0;
+    if (hasPayload) {
+      setOpticalLiftoffSignal((n) => n + 1);
+      if (isDraftHeroState) {
+        const rect = composerOverlayElement
+          ?.querySelector<HTMLElement>('[data-slot="composer-host"]')
+          ?.getBoundingClientRect();
+        const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+        const cy = rect ? rect.top + rect.height / 2 : window.innerHeight * 0.62;
+        triggerLiftoffVeil(cx, cy);
+      }
+    }
+    return onSend(...args);
+  });
   const sendPreviewAnnotation = (
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
@@ -3724,6 +3758,30 @@ export default function ChatView(props: ChatViewProps) {
               {...conversationArea}
               className="relative flex min-h-0 flex-1 flex-col bg-background"
             >
+              {isDraftHeroState ? (
+                <OpticalHomeRipple
+                  calmZoneSelector='[data-optical-calm-zone="1"]'
+                  liftoffSignal={opticalLiftoffSignal}
+                  className="z-0"
+                />
+              ) : (
+                <OpticalConversationAura
+                  isWorking={isWorking}
+                  runIsLive={
+                    (isWorking && activeRuntime?.status !== "waiting") || phase === "connecting"
+                  }
+                  isConnecting={phase === "connecting"}
+                  awaitingDecision={
+                    activePendingApproval !== null ||
+                    activePendingUserInput !== null ||
+                    activeThreadShell?.hasPendingUserInput === true
+                  }
+                  hasError={Boolean(timelineThreadError)}
+                  workStartedAt={opticalWorkStartedAtMs}
+                  liftoffSignal={opticalLiftoffSignal}
+                  className="z-0"
+                />
+              )}
               <WorkspaceMutationIdContext value={workspaceMutationId}>
                 <ThreadTimeline
                   pendingApprovals={pendingApprovals}
@@ -3879,6 +3937,7 @@ export default function ChatView(props: ChatViewProps) {
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full">
                       <div
+                        data-optical-calm-zone="1"
                         className="pb-4 group-has-data-[composer-shoulder-tab]/composer-stack:pb-0"
                         style={
                           forceExpandedMobileComposer
@@ -4268,6 +4327,7 @@ export default function ChatView(props: ChatViewProps) {
                     providers: providerStatuses,
                     sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
                     contextWindow: activeContextWindow,
+                    isStreaming: isWorking,
                   }}
                 />
 

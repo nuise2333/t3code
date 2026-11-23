@@ -12,7 +12,9 @@ import {
   ClientSettingsPatch,
   ClientServerSettingsPatch,
   ClaudeSettings,
+  DEFAULT_CLIENT_SETTINGS,
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_UNIFIED_SETTINGS,
   globalIdleCompaction,
   idleCompactionPatch,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
@@ -372,6 +374,52 @@ describe("ClientSettings quit confirmation", () => {
 
     expect(settings.confirmQuit).toBe(mode);
     expect(encodeClientSettings(settings).confirmQuit).toBe(mode);
+  });
+});
+
+describe("ClientSettings optical", () => {
+  it("defaults to the full optical scene and keeps choices through patches and persistence", () => {
+    const defaults = {
+      opticalMotionLevel: "ultra",
+      opticalAmbientIntensity: 100,
+      opticalTargetFps: "120",
+      opticalHomeRipple: true,
+      opticalSmoothCaret: true,
+      opticalSpectrum: "follow",
+    };
+    expect(decodeClientSettings({})).toMatchObject(defaults);
+    expect(DEFAULT_CLIENT_SETTINGS).toMatchObject(defaults);
+    expect(DEFAULT_UNIFIED_SETTINGS).toMatchObject(defaults);
+    expect(decodeClientSettingsPatch({})).toEqual({});
+    for (const choices of [
+      {
+        opticalMotionLevel: "off",
+        opticalAmbientIntensity: 0,
+        opticalTargetFps: "60",
+        opticalHomeRipple: false,
+        opticalSmoothCaret: false,
+        opticalSpectrum: "mono",
+      },
+      { opticalMotionLevel: "subtle", opticalAmbientIntensity: 35, opticalTargetFps: "native" },
+      { opticalMotionLevel: "standard", opticalAmbientIntensity: 70, opticalTargetFps: "180" },
+    ]) {
+      expect(decodeClientSettingsPatch(choices)).toEqual(choices);
+      expect(encodeClientSettings(decodeClientSettings(choices))).toMatchObject(choices);
+    }
+  });
+
+  it.each([
+    { opticalMotionLevel: "max" },
+    { opticalAmbientIntensity: 50 },
+    { opticalAmbientIntensity: "100" },
+    { opticalTargetFps: 120 },
+    { opticalTargetFps: "240" },
+    { opticalHomeRipple: "true" },
+    { opticalSmoothCaret: 1 },
+    { opticalSpectrum: "rainbow" },
+  ])("rejects %o as a patch and as stored settings", (invalid) => {
+    expect(() => decodeClientSettingsPatch(invalid)).toThrow();
+    expect(() => decodeClientSettings(invalid)).toThrow();
   });
 });
 

@@ -23,6 +23,8 @@ import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { OpticalContextVial } from "../../optical/OpticalContextVial";
+import { useOpticalConfig } from "../../optical/config";
 
 const PACE_LABEL: Record<LimitPace, string> = {
   ahead: "Ahead of pace",
@@ -35,6 +37,7 @@ export interface ThreadDetailsUsageInput {
   readonly providers: readonly ServerProvider[];
   readonly sources: UsageLimitSourceSnapshots;
   readonly contextWindow: ContextWindowSnapshot | null;
+  readonly isStreaming?: boolean | undefined;
 }
 
 type UsageTone = "error" | "warning" | null;
@@ -83,7 +86,14 @@ export function ThreadDetailsUsage({
 }
 
 /** The thread's context window. The bar fills as context is used; the tick marks auto-compaction. */
-export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowSnapshot }) {
+export function ThreadDetailsContext({
+  usage,
+  isStreaming = false,
+}: {
+  readonly usage: ContextWindowSnapshot;
+  readonly isStreaming?: boolean | undefined;
+}) {
+  const opticalConfig = useOpticalConfig();
   const maxTokens = usage.maxTokens != null && usage.maxTokens > 0 ? usage.maxTokens : null;
   const used =
     maxTokens !== null && usage.usedPercentage !== null
@@ -95,45 +105,62 @@ export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowS
       ? (threshold / maxTokens) * 100
       : null;
   const usedTokens = formatContextWindowTokens(usage.usedTokens);
+  const showVial = opticalConfig.ambientIntensity > 0 && used !== null;
+  const contextRow = (
+    <div className="grid min-w-0 flex-1 grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
+      <UsageRow
+        label="Context"
+        fill={used}
+        tone={used === null ? null : used >= 90 ? "error" : used >= 80 ? "warning" : null}
+        tick={tick}
+        muted
+        value={
+          maxTokens !== null
+            ? `${usedTokens} / ${formatContextWindowTokens(maxTokens)}`
+            : usedTokens
+        }
+        ariaValue={used !== null ? `${used}% used` : `${usedTokens} tokens used`}
+        tooltip={
+          <>
+            <span className="text-foreground">
+              {used !== null ? `Context: ${used}% used` : `Context: ${usedTokens} tokens used`}
+            </span>
+            {maxTokens !== null ? (
+              <span className="text-muted-foreground">
+                {usage.usedTokens.toLocaleString("en-US")} of {maxTokens.toLocaleString("en-US")}{" "}
+                tokens
+              </span>
+            ) : null}
+            {threshold !== null && threshold > 0 ? (
+              <span className="text-muted-foreground">
+                {formatContextWindowCompactionMessage(threshold)}
+              </span>
+            ) : null}
+          </>
+        }
+      />
+    </div>
+  );
   return (
     <ThreadDetailsSection
       headingId="thread-details-context-heading"
       title="Context window"
       showHeading={false}
     >
-      <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
-        <UsageRow
-          label="Context"
-          fill={used}
-          tone={used === null ? null : used >= 90 ? "error" : used >= 80 ? "warning" : null}
-          tick={tick}
-          muted
-          value={
-            maxTokens !== null
-              ? `${usedTokens} / ${formatContextWindowTokens(maxTokens)}`
-              : usedTokens
-          }
-          ariaValue={used !== null ? `${used}% used` : `${usedTokens} tokens used`}
-          tooltip={
-            <>
-              <span className="text-foreground">
-                {used !== null ? `Context: ${used}% used` : `Context: ${usedTokens} tokens used`}
-              </span>
-              {maxTokens !== null ? (
-                <span className="text-muted-foreground">
-                  {usage.usedTokens.toLocaleString("en-US")} of {maxTokens.toLocaleString("en-US")}{" "}
-                  tokens
-                </span>
-              ) : null}
-              {threshold !== null && threshold > 0 ? (
-                <span className="text-muted-foreground">
-                  {formatContextWindowCompactionMessage(threshold)}
-                </span>
-              ) : null}
-            </>
-          }
-        />
-      </div>
+      {showVial ? (
+        <div className="flex items-center gap-2 pl-2">
+          <OpticalContextVial
+            fill={used / 100}
+            usedPercent={used}
+            isStreaming={isStreaming}
+            isCritical={used >= 85}
+            className="h-14 w-8 shrink-0"
+          />
+          {contextRow}
+        </div>
+      ) : (
+        contextRow
+      )}
     </ThreadDetailsSection>
   );
 }

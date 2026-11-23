@@ -1,6 +1,7 @@
-import type { ComponentProps } from "react";
+import { useEffect, type ComponentProps } from "react";
 
 import { cn } from "~/lib/utils";
+import { markOpticalPrismDirty } from "~/optical/OpticalRuntimeHost";
 
 function Shell({
   contextRow = false,
@@ -33,7 +34,15 @@ function Shell({
 const outlineClasses =
   "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:border after:border-(--chat-composer-outline) dark:after:inset-shadow-2xs dark:after:inset-shadow-(color:--chat-composer-highlight)";
 
-function Host({ className, ...props }: ComponentProps<"div">) {
+function Host({ className, children, ...props }: ComponentProps<"div">) {
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- notifies the global prism rim canvas controller when a composer host mounts or unmounts
+  useEffect(() => {
+    markOpticalPrismDirty();
+    return () => {
+      markOpticalPrismDirty();
+    };
+  }, []);
+
   return (
     <div
       data-slot="composer-host"
@@ -45,7 +54,16 @@ function Host({ className, ...props }: ComponentProps<"div">) {
         className,
       )}
       {...props}
-    />
+    >
+      {/* Dedicated overlay carries the prism rim canvas/fallback and completion caustic without colliding with Host's ::before/::after glass & outline rules. */}
+      <div
+        aria-hidden="true"
+        data-optical-prism-box="1"
+        data-optical-composer-fx="1"
+        className="pointer-events-none absolute inset-0 z-20 rounded-[inherit]"
+      />
+      {children}
+    </div>
   );
 }
 

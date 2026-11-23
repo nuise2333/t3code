@@ -2,8 +2,9 @@ import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipel
 import { MessageId, type RunId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
-import { memo, use, useState } from "react";
+import { memo, use, useRef, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
+import { useStreamingInkChoreography } from "../../optical/streamChoreography";
 import ChatMarkdown from "../ChatMarkdown";
 import { GitForkIcon, ReplyIcon } from "lucide-react";
 import { captureAssistantMessageOpening } from "~/lib/assistantTextSelection";
@@ -46,6 +47,8 @@ const NO_VCS_STATUS = Atom.make(AsyncResult.initial());
 
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
+  const markdownContainerRef = useRef<HTMLDivElement>(null);
+  useStreamingInkChoreography(markdownContainerRef, Boolean(row.message.streaming));
   // The timeline holds a streaming message's row while only its text grows.
   const liveText = useAssistantMessageText(
     row.message.streaming ? ctx.threadRef : null,
@@ -66,6 +69,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
         )}
         <BotReplyIndent bot={bot}>
           <div
+            ref={markdownContainerRef}
             data-thread-find-text="true"
             className={
               bot !== null && !isMostlyMedia(messageText)

@@ -6,6 +6,11 @@ import {
   type ChatWidth,
   type EffortDisplay,
   type EnvironmentIdentificationMode,
+  type OpticalAmbientIntensity,
+  type OpticalMotionLevel,
+  type OpticalSpectrum,
+  type OpticalTargetFps,
+  type UnifiedSettings,
   MAX_APPEARANCE_CONTRAST,
   MAX_GLASS_OPACITY,
   MAX_PANEL_ANIMATION_DURATION_MS,
@@ -22,6 +27,7 @@ import { useCustomThemes } from "../../hooks/useCustomThemes";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { useTheme } from "../../hooks/useTheme";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ThemeLibrary } from "./ThemeSettings";
@@ -85,6 +91,94 @@ const EFFORT_DISPLAY_LABELS: Record<EffortDisplay, string> = {
   label: "Word",
   bars: "Bars",
 };
+
+const OPTICAL_MOTION_OPTIONS: ReadonlyArray<readonly [OpticalMotionLevel, string]> = [
+  ["off", "Off"],
+  ["subtle", "Subtle"],
+  ["standard", "Standard"],
+  ["ultra", "Ultra"],
+];
+
+const OPTICAL_AMBIENT_OPTIONS: ReadonlyArray<readonly [OpticalAmbientIntensity, string]> = [
+  [0, "Off (0%)"],
+  [35, "Subtle (35%)"],
+  [70, "Balanced (70%)"],
+  [100, "Full (100%)"],
+];
+
+const OPTICAL_SPECTRUM_OPTIONS: ReadonlyArray<readonly [OpticalSpectrum, string]> = [
+  ["follow", "Follow theme"],
+  ["cobalt", "Cobalt"],
+  ["iris", "Iris"],
+  ["amber", "Amber"],
+  ["mono", "Monochrome"],
+];
+
+const OPTICAL_TARGET_FPS_OPTIONS: ReadonlyArray<readonly [OpticalTargetFps, string]> = [
+  ["60", "60 fps"],
+  ["120", "120 fps"],
+  ["180", "180 fps"],
+  ["native", "Native"],
+];
+
+type OpticalScenePreset = Pick<
+  UnifiedSettings,
+  | "opticalMotionLevel"
+  | "opticalAmbientIntensity"
+  | "opticalHomeRipple"
+  | "opticalSmoothCaret"
+  | "opticalTargetFps"
+>;
+
+const OPTICAL_SCENE_PRESETS: ReadonlyArray<readonly [string, OpticalScenePreset]> = [
+  [
+    "Full Optical",
+    {
+      opticalMotionLevel: "ultra",
+      opticalAmbientIntensity: 100,
+      opticalHomeRipple: true,
+      opticalSmoothCaret: true,
+      opticalTargetFps: "120",
+    },
+  ],
+  [
+    "Deep Focus",
+    {
+      opticalMotionLevel: "subtle",
+      opticalAmbientIntensity: 35,
+      opticalHomeRipple: false,
+      opticalSmoothCaret: true,
+      opticalTargetFps: "120",
+    },
+  ],
+  [
+    "Silent Eco",
+    {
+      opticalMotionLevel: "off",
+      opticalAmbientIntensity: 0,
+      opticalHomeRipple: false,
+      opticalSmoothCaret: false,
+      opticalTargetFps: "60",
+    },
+  ],
+];
+
+function matchesOpticalScenePreset(settings: OpticalScenePreset, preset: OpticalScenePreset) {
+  return (
+    settings.opticalMotionLevel === preset.opticalMotionLevel &&
+    settings.opticalAmbientIntensity === preset.opticalAmbientIntensity &&
+    settings.opticalHomeRipple === preset.opticalHomeRipple &&
+    settings.opticalSmoothCaret === preset.opticalSmoothCaret &&
+    settings.opticalTargetFps === preset.opticalTargetFps
+  );
+}
+
+function optionLabel<Value>(
+  options: ReadonlyArray<readonly [Value, string]>,
+  value: Value,
+): string | undefined {
+  return options.find(([optionValue]) => optionValue === value)?.[1];
+}
 
 export function AppearanceSettingsPanel() {
   const {
@@ -478,6 +572,256 @@ export function AppearanceSettingsPanel() {
                 }
                 aria-label="Keep composer context visible in active threads"
               />
+            }
+          />
+        </AdvancedSettings>
+      </SettingsSection>
+
+      <SettingsSection id="appearance-optical" title="Optical UI & Physics">
+        <SettingsRow
+          {...searchableSetting("optical-scene-preset")}
+          description="WebGL2 optical lighting, ripple fields, and damped-spring physics. Respects system reduced motion."
+          control={
+            <div className="flex flex-wrap items-center gap-1.5">
+              {OPTICAL_SCENE_PRESETS.map(([label, preset]) => {
+                const active = matchesOpticalScenePreset(settings, preset);
+                return (
+                  <Button
+                    aria-pressed={active}
+                    key={label}
+                    onClick={() => updateSettings(preset)}
+                    size="xs"
+                    variant={active ? "default" : "outline"}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+            </div>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("optical-motion-level")}
+          description="Set how much spring motion the interface uses."
+          resetAction={
+            settings.opticalMotionLevel !== DEFAULT_UNIFIED_SETTINGS.opticalMotionLevel ? (
+              <SettingResetButton
+                label="motion physics"
+                onClick={() =>
+                  updateSettings({
+                    opticalMotionLevel: DEFAULT_UNIFIED_SETTINGS.opticalMotionLevel,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="w-full sm:w-40">
+              <Select
+                value={settings.opticalMotionLevel}
+                onValueChange={(value) => {
+                  const option = OPTICAL_MOTION_OPTIONS.find(
+                    ([optionValue]) => optionValue === value,
+                  );
+                  if (option) updateSettings({ opticalMotionLevel: option[0] });
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Motion physics">
+                  <SelectValue>
+                    {optionLabel(OPTICAL_MOTION_OPTIONS, settings.opticalMotionLevel)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {OPTICAL_MOTION_OPTIONS.map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("optical-ambient-intensity")}
+          description="Set the strength of ambient glow and rim light."
+          resetAction={
+            settings.opticalAmbientIntensity !==
+            DEFAULT_UNIFIED_SETTINGS.opticalAmbientIntensity ? (
+              <SettingResetButton
+                label="ambient optical intensity"
+                onClick={() =>
+                  updateSettings({
+                    opticalAmbientIntensity: DEFAULT_UNIFIED_SETTINGS.opticalAmbientIntensity,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="w-full sm:w-40">
+              <Select
+                value={String(settings.opticalAmbientIntensity)}
+                onValueChange={(value) => {
+                  const option = OPTICAL_AMBIENT_OPTIONS.find(
+                    ([optionValue]) => String(optionValue) === value,
+                  );
+                  if (option) updateSettings({ opticalAmbientIntensity: option[0] });
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full min-w-0"
+                  aria-label="Ambient optical intensity"
+                >
+                  <SelectValue>
+                    {optionLabel(OPTICAL_AMBIENT_OPTIONS, settings.opticalAmbientIntensity)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {OPTICAL_AMBIENT_OPTIONS.map(([value, label]) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("optical-spectrum")}
+          description="Choose the color of optical light, or let it follow the theme."
+          resetAction={
+            settings.opticalSpectrum !== DEFAULT_UNIFIED_SETTINGS.opticalSpectrum ? (
+              <SettingResetButton
+                label="optical spectrum"
+                onClick={() =>
+                  updateSettings({ opticalSpectrum: DEFAULT_UNIFIED_SETTINGS.opticalSpectrum })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="w-full sm:w-40">
+              <Select
+                value={settings.opticalSpectrum}
+                onValueChange={(value) => {
+                  const option = OPTICAL_SPECTRUM_OPTIONS.find(
+                    ([optionValue]) => optionValue === value,
+                  );
+                  if (option) updateSettings({ opticalSpectrum: option[0] });
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Optical spectrum">
+                  <SelectValue>
+                    {optionLabel(OPTICAL_SPECTRUM_OPTIONS, settings.opticalSpectrum)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {OPTICAL_SPECTRUM_OPTIONS.map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("optical-home-ripple")}
+          description="Let the pointer ripple the glyph field on an empty draft."
+          resetAction={
+            settings.opticalHomeRipple !== DEFAULT_UNIFIED_SETTINGS.opticalHomeRipple ? (
+              <SettingResetButton
+                label="interactive home ripple"
+                onClick={() =>
+                  updateSettings({
+                    opticalHomeRipple: DEFAULT_UNIFIED_SETTINGS.opticalHomeRipple,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.opticalHomeRipple}
+              onCheckedChange={(checked) => updateSettings({ opticalHomeRipple: Boolean(checked) })}
+              aria-label="Interactive home ripple"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("optical-smooth-caret")}
+          description="Glide the composer caret between positions as you type."
+          resetAction={
+            settings.opticalSmoothCaret !== DEFAULT_UNIFIED_SETTINGS.opticalSmoothCaret ? (
+              <SettingResetButton
+                label="elastic smooth caret"
+                onClick={() =>
+                  updateSettings({
+                    opticalSmoothCaret: DEFAULT_UNIFIED_SETTINGS.opticalSmoothCaret,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.opticalSmoothCaret}
+              onCheckedChange={(checked) =>
+                updateSettings({ opticalSmoothCaret: Boolean(checked) })
+              }
+              aria-label="Elastic smooth caret"
+            />
+          }
+        />
+        <AdvancedSettings targetIds={[searchableSetting("optical-target-fps").id]}>
+          <SettingsRow
+            {...searchableSetting("optical-target-fps")}
+            description="Cap how often optical effects redraw. Lower caps use less GPU."
+            resetAction={
+              settings.opticalTargetFps !== DEFAULT_UNIFIED_SETTINGS.opticalTargetFps ? (
+                <SettingResetButton
+                  label="optical frame cap"
+                  onClick={() =>
+                    updateSettings({
+                      opticalTargetFps: DEFAULT_UNIFIED_SETTINGS.opticalTargetFps,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <div className="w-full sm:w-40">
+                <Select
+                  value={settings.opticalTargetFps}
+                  onValueChange={(value) => {
+                    const option = OPTICAL_TARGET_FPS_OPTIONS.find(
+                      ([optionValue]) => optionValue === value,
+                    );
+                    if (option) updateSettings({ opticalTargetFps: option[0] });
+                  }}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="w-full min-w-0"
+                    aria-label="Optical frame cap"
+                  >
+                    <SelectValue>
+                      {optionLabel(OPTICAL_TARGET_FPS_OPTIONS, settings.opticalTargetFps)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {OPTICAL_TARGET_FPS_OPTIONS.map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </div>
             }
           />
         </AdvancedSettings>

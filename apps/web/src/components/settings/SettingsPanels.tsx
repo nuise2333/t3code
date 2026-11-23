@@ -474,6 +474,24 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
       ? ["Panel animations"]
       : []),
+    ...(settings.opticalMotionLevel !== DEFAULT_UNIFIED_SETTINGS.opticalMotionLevel
+      ? ["Motion physics"]
+      : []),
+    ...(settings.opticalAmbientIntensity !== DEFAULT_UNIFIED_SETTINGS.opticalAmbientIntensity
+      ? ["Ambient optical intensity"]
+      : []),
+    ...(settings.opticalSpectrum !== DEFAULT_UNIFIED_SETTINGS.opticalSpectrum
+      ? ["Optical spectrum"]
+      : []),
+    ...(settings.opticalHomeRipple !== DEFAULT_UNIFIED_SETTINGS.opticalHomeRipple
+      ? ["Interactive home ripple"]
+      : []),
+    ...(settings.opticalSmoothCaret !== DEFAULT_UNIFIED_SETTINGS.opticalSmoothCaret
+      ? ["Elastic smooth caret"]
+      : []),
+    ...(settings.opticalTargetFps !== DEFAULT_UNIFIED_SETTINGS.opticalTargetFps
+      ? ["Optical frame cap"]
+      : []),
     ...(settings.environmentIdentificationMode !==
     DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
       ? ["Environment identification"]
@@ -679,6 +697,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
+      opticalMotionLevel: DEFAULT_UNIFIED_SETTINGS.opticalMotionLevel,
+      opticalAmbientIntensity: DEFAULT_UNIFIED_SETTINGS.opticalAmbientIntensity,
+      opticalTargetFps: DEFAULT_UNIFIED_SETTINGS.opticalTargetFps,
+      opticalHomeRipple: DEFAULT_UNIFIED_SETTINGS.opticalHomeRipple,
+      opticalSmoothCaret: DEFAULT_UNIFIED_SETTINGS.opticalSmoothCaret,
+      opticalSpectrum: DEFAULT_UNIFIED_SETTINGS.opticalSpectrum,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
