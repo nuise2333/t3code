@@ -3,6 +3,7 @@ import {
   T3_CHAT_THEME,
   T3_CODE_LIGHT_THEME_COLORS,
   T3_CODE_DARK_THEME_COLORS,
+  getThemeAppearances,
   getThemeColorsForAppearance,
   MOBILE_DEFAULT_THEME_ID,
   MOBILE_THEME_IDS as SHARED_MOBILE_THEME_IDS,
@@ -22,22 +23,44 @@ export type MobileThemeAppearance = ThemeAppearance;
 export type MobileThemeMode = MobileThemeAppearance | "system";
 export type MobileThemeIds = Readonly<Record<MobileThemeAppearance, MobileThemeId>>;
 
+const ALL_APPEARANCES: ReadonlyArray<MobileThemeAppearance> = ["light", "dark"];
+
+export function getMobileThemeAppearances(
+  themeId: MobileThemeId,
+): ReadonlyArray<MobileThemeAppearance> {
+  if (themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you") {
+    return ALL_APPEARANCES;
+  }
+  const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId);
+  return theme ? getThemeAppearances(theme) : ALL_APPEARANCES;
+}
+
 export const MOBILE_THEME_OPTIONS: ReadonlyArray<{
   readonly id: MobileThemeId;
   readonly label: string;
+  readonly appearances: ReadonlyArray<MobileThemeAppearance>;
 }> = [
-  { id: DEFAULT_MOBILE_THEME_ID, label: "T3 Code" },
-  { id: "material-you", label: "Material You" },
-  ...BUILT_IN_THEMES.map((theme) => ({ id: theme.id as MobileThemeId, label: theme.label })),
+  { id: DEFAULT_MOBILE_THEME_ID, label: "T3 Code", appearances: ALL_APPEARANCES },
+  { id: "material-you", label: "Material You", appearances: ALL_APPEARANCES },
+  ...BUILT_IN_THEMES.map((theme) => ({
+    id: theme.id as MobileThemeId,
+    label: theme.label,
+    appearances: getThemeAppearances(theme),
+  })),
 ];
 
 export type MobileThemeVariable = keyof ReturnType<typeof createMobileThemeVariables>;
 export type MobileThemeVariables = Readonly<Record<MobileThemeVariable, string>>;
 
-function normalizeMobileThemeId(value: unknown): MobileThemeId {
-  return typeof value === "string" && (MOBILE_THEME_IDS as readonly string[]).includes(value)
-    ? (value as MobileThemeId)
-    : DEFAULT_MOBILE_THEME_ID;
+function normalizeMobileThemeId(value: unknown, appearance?: MobileThemeAppearance): MobileThemeId {
+  const normalized =
+    typeof value === "string" && (MOBILE_THEME_IDS as readonly string[]).includes(value)
+      ? (value as MobileThemeId)
+      : DEFAULT_MOBILE_THEME_ID;
+  if (appearance !== undefined && !getMobileThemeAppearances(normalized).includes(appearance)) {
+    return DEFAULT_MOBILE_THEME_ID;
+  }
+  return normalized;
 }
 
 export function normalizeMobileThemeMode(value: unknown): MobileThemeMode {
@@ -49,16 +72,15 @@ export function resolveMobileThemeIds(preferences: {
   readonly lightThemeId?: unknown;
   readonly darkThemeId?: unknown;
 }): MobileThemeIds {
-  const legacyThemeId = normalizeMobileThemeId(preferences.themeId);
   return {
     light:
       preferences.lightThemeId === undefined
-        ? legacyThemeId
-        : normalizeMobileThemeId(preferences.lightThemeId),
+        ? normalizeMobileThemeId(preferences.themeId, "light")
+        : normalizeMobileThemeId(preferences.lightThemeId, "light"),
     dark:
       preferences.darkThemeId === undefined
-        ? legacyThemeId
-        : normalizeMobileThemeId(preferences.darkThemeId),
+        ? normalizeMobileThemeId(preferences.themeId, "dark")
+        : normalizeMobileThemeId(preferences.darkThemeId, "dark"),
   };
 }
 
@@ -68,9 +90,12 @@ export function createMobileThemeSelectionPatch(
   selectedAppearance: MobileThemeAppearance,
   value: MobileThemeId,
 ) {
+  const accepted = getMobileThemeAppearances(value).includes(selectedAppearance)
+    ? value
+    : themeIds[selectedAppearance];
   const nextThemeIds: MobileThemeIds = {
-    light: selectedAppearance === "light" ? value : themeIds.light,
-    dark: selectedAppearance === "dark" ? value : themeIds.dark,
+    light: selectedAppearance === "light" ? accepted : themeIds.light,
+    dark: selectedAppearance === "dark" ? accepted : themeIds.dark,
   };
   return {
     lightThemeId: nextThemeIds.light,
@@ -81,8 +106,8 @@ export function createMobileThemeSelectionPatch(
 
 export function createMobileThemePairPatch(value: MobileThemeId) {
   return {
-    lightThemeId: value,
-    darkThemeId: value,
+    lightThemeId: normalizeMobileThemeId(value, "light"),
+    darkThemeId: normalizeMobileThemeId(value, "dark"),
     themeId: value,
   };
 }

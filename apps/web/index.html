@@ -122,6 +122,38 @@
               chrome: "oklch(0.225975 0.031062 293.741)",
             },
           },
+          "obsidian-dark": {
+            dark: {
+              background: "#0e0e11",
+              foreground: "#f2f2f5",
+              accent: "#5b89d6",
+              chrome: "#0e0e11",
+            },
+          },
+          "warm-charcoal": {
+            dark: {
+              background: "#141413",
+              foreground: "#f2efe9",
+              accent: "#d97757",
+              chrome: "#141413",
+            },
+          },
+          "daylight-crystal": {
+            light: {
+              background: "#f4f7fb",
+              foreground: "#0f172a",
+              accent: "#2563eb",
+              chrome: "#f4f7fb",
+            },
+          },
+          "warm-alabaster": {
+            light: {
+              background: "#f6f4ee",
+              foreground: "#181715",
+              accent: "#b55233",
+              chrome: "#f6f4ee",
+            },
+          },
         };
         const BUILT_IN_THEME_MODES = Object.fromEntries(
           Object.entries(BUILT_IN_THEME_PALETTES).map(([id, palettes]) => [
@@ -138,6 +170,10 @@
           "ocean",
           "ember",
           "iris",
+          "obsidian-dark",
+          "warm-charcoal",
+          "daylight-crystal",
+          "warm-alabaster",
           "t3-chat-dark",
           "t3-grove",
           "t3-ocean",
@@ -248,7 +284,11 @@
             themeModes !== null;
           const theme = isKnownTheme && storedTheme ? storedTheme : "system";
           const isThemed = isKnownTheme && themeModes !== null;
-          const baseAppearance = customTheme ? customTheme.appearance : "light";
+          const baseAppearance = customTheme
+            ? customTheme.appearance
+            : builtInModes && builtInModes.length === 1
+              ? builtInModes[0]
+              : "light";
           const systemMode = prefersDark ? "dark" : "light";
           const storedAppearanceMode = window.localStorage.getItem(
             THEME_APPEARANCE_MODE_STORAGE_KEY,

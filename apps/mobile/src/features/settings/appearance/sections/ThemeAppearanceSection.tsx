@@ -114,6 +114,7 @@ const PreviewOrb = memo(function PreviewOrb(props: {
 });
 
 function ThemeCard(props: {
+  readonly appearances: ReadonlyArray<MobileThemeAppearance>;
   readonly disabled: boolean;
   readonly darkSelected: boolean;
   readonly label: string;
@@ -122,6 +123,7 @@ function ThemeCard(props: {
   readonly onSelect: (appearance: MobileThemeAppearance) => void;
   readonly themeId: MobileThemeId;
 }) {
+  const singleAppearance = props.appearances.length === 1 ? props.appearances[0]! : null;
   const choice = (appearance: MobileThemeAppearance, selected: boolean) => (
     <Pressable
       accessibilityHint={`Sets the ${appearance} appearance only`}
@@ -153,20 +155,28 @@ function ThemeCard(props: {
   return (
     <View className="min-w-36 flex-1 basis-[47%] gap-3 rounded-[24px] border border-border bg-grouped-card px-2 py-4">
       <Pressable
-        accessibilityHint="Sets both light and dark appearances"
+        accessibilityHint={
+          singleAppearance
+            ? `Sets the ${singleAppearance} appearance`
+            : "Sets both light and dark appearances"
+        }
         accessibilityLabel={`${props.label} theme`}
         accessibilityRole="button"
         accessibilityState={{
           disabled: props.disabled,
-          selected: props.lightSelected && props.darkSelected,
+          selected: singleAppearance
+            ? singleAppearance === "light"
+              ? props.lightSelected
+              : props.darkSelected
+            : props.lightSelected && props.darkSelected,
         }}
         className="absolute inset-0 rounded-[24px] active:bg-subtle"
         disabled={props.disabled}
-        onPress={props.onSelectBoth}
+        onPress={singleAppearance ? () => props.onSelect(singleAppearance) : props.onSelectBoth}
       />
       <View className="flex-row items-center justify-center gap-2 py-1" pointerEvents="box-none">
-        {choice("light", props.lightSelected)}
-        {choice("dark", props.darkSelected)}
+        {props.appearances.includes("light") ? choice("light", props.lightSelected) : null}
+        {props.appearances.includes("dark") ? choice("dark", props.darkSelected) : null}
       </View>
       <Text
         className="min-w-0 flex-1 px-1 text-lg font-t3-medium"
@@ -321,6 +331,7 @@ export function ThemeAppearanceSection() {
             (theme) => theme.id !== "material-you" || systemColorsAvailable,
           ).map((theme) => (
             <ThemeCard
+              appearances={theme.appearances}
               disabled={!isReady}
               key={theme.id}
               label={theme.label}

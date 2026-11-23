@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { contextChipAccent, contextChipPresentation } from "./composerChipPresentation";
 import {
   flattenThemeColor,
+  getMobileThemeAppearances,
   getMobileThemeVariables,
   MOBILE_THEME_IDS,
   type MobileThemeVariables,
@@ -64,7 +65,7 @@ function chipSurfaces(theme: MobileThemeVariables) {
 }
 
 const BUILT_IN_THEMES = MOBILE_THEME_IDS.filter((id) => id !== "material-you").flatMap((id) =>
-  (["light", "dark"] as const).map((appearance) => ({
+  getMobileThemeAppearances(id).map((appearance) => ({
     name: `${id} ${appearance}`,
     theme: getMobileThemeVariables(id, appearance),
   })),

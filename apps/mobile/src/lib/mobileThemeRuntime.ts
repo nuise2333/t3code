@@ -1,15 +1,16 @@
+import type { UniwindConfig } from "uniwind";
+
 import { resolveTextScaleVariables } from "./appearancePreferences";
-import { BUILT_IN_THEME_IDS, type BuiltInThemeId } from "@t3tools/shared/themePalettes";
+import { BUILT_IN_THEMES, getThemeAppearances } from "@t3tools/shared/themePalettes";
 import {
   DEFAULT_MOBILE_THEME_ID,
+  getMobileThemeAppearances,
   type MobileThemeAppearance,
   type MobileThemeId,
   type MobileThemeMode,
 } from "./mobileTheme";
 
-export type MobileUniwindThemeName =
-  | MobileThemeAppearance
-  | `${BuiltInThemeId}-${MobileThemeAppearance}`;
+export type MobileUniwindThemeName = UniwindConfig["themes"][number];
 
 export interface MobileThemeRuntimeState {
   readonly baseFontSize: number;
@@ -20,7 +21,7 @@ export interface MobileThemeRuntimeState {
 export type MobileThemeRuntimeOperation =
   | {
       readonly kind: "update-text-variables";
-      readonly themeName: "light" | "dark" | MobileUniwindThemeName;
+      readonly themeName: MobileUniwindThemeName;
       readonly variables: Readonly<Record<string, number>>;
     }
   | {
@@ -29,22 +30,25 @@ export type MobileThemeRuntimeOperation =
       readonly themeMode: MobileThemeMode;
     };
 
-const UNIWIND_THEME_NAMES: ReadonlyArray<"light" | "dark" | MobileUniwindThemeName> = [
+const UNIWIND_THEME_NAMES: ReadonlyArray<MobileUniwindThemeName> = [
   "light",
   "dark",
-  ...BUILT_IN_THEME_IDS.flatMap((themeId) => [
-    `${themeId}-light` as const,
-    `${themeId}-dark` as const,
-  ]),
+  ...BUILT_IN_THEMES.flatMap((theme) =>
+    getThemeAppearances(theme).map(
+      (appearance) => `${theme.id}-${appearance}` as MobileUniwindThemeName,
+    ),
+  ),
 ];
 
 export function getMobileUniwindThemeName(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
 ): MobileUniwindThemeName {
-  return themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you"
+  return themeId === DEFAULT_MOBILE_THEME_ID ||
+    themeId === "material-you" ||
+    !getMobileThemeAppearances(themeId).includes(appearance)
     ? appearance
-    : `${themeId}-${appearance}`;
+    : (`${themeId}-${appearance}` as MobileUniwindThemeName);
 }
 
 export function createMobileThemeRuntimeOperations(

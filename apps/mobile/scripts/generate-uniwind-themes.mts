@@ -3,7 +3,11 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import tailwindColors from "tailwindcss/colors";
-import { BUILT_IN_THEME_IDS, type BuiltInThemeId } from "@t3tools/shared/themePalettes";
+import {
+  BUILT_IN_THEMES,
+  getThemeAppearances,
+  type BuiltInThemeId,
+} from "@t3tools/shared/themePalettes";
 
 import {
   createMobileThemeVariables,
@@ -157,8 +161,8 @@ const ADAPTIVE_COLORS: Readonly<Record<string, readonly [light: string, dark: st
   "--color-adaptive-zinc-600-300": [color("zinc", 600), color("zinc", 300)],
 };
 
-export const customThemeNames = BUILT_IN_THEME_IDS.flatMap((themeId) =>
-  APPEARANCES.map((appearance) => `${themeId}-${appearance}`),
+export const customThemeNames = BUILT_IN_THEMES.flatMap((theme) =>
+  getThemeAppearances(theme).map((appearance) => `${theme.id}-${appearance}`),
 );
 
 const adaptiveVariablesFor = (appearance: MobileThemeAppearance) =>
@@ -227,9 +231,12 @@ export const renderUniwindThemesCSS = () => {
         ...clerkVariablesFor(appearance),
       }),
     ),
-    ...BUILT_IN_THEME_IDS.flatMap((themeId) =>
-      APPEARANCES.map((appearance) =>
-        renderVariant(`${themeId}-${appearance}`, variablesFor(themeId, appearance)),
+    ...BUILT_IN_THEMES.flatMap((theme) =>
+      getThemeAppearances(theme).map((appearance) =>
+        renderVariant(
+          `${theme.id}-${appearance}`,
+          variablesFor(theme.id as BuiltInThemeId, appearance),
+        ),
       ),
     ),
   ];

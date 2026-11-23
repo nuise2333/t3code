@@ -18,7 +18,7 @@ function contrast(a: string, b: string) {
 const cases = MOBILE_THEME_OPTIONS.flatMap((theme) => {
   if (theme.id === "material-you") return [];
   const themeId = theme.id;
-  return (["light", "dark"] as const).map((appearance) => ({
+  return theme.appearances.map((appearance) => ({
     label: theme.label,
     themeId,
     appearance,

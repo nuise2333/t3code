@@ -2,19 +2,19 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import indexHtml from "../index.html?raw";
 import {
+  BUILT_IN_THEMES,
   CUSTOM_THEMES_STORAGE_KEY,
   ENVIRONMENT_THEMES_STORAGE_KEY,
   getDefaultThemeColors,
   getThemeColorsForMode,
+  getThemeModes,
   invalidateCustomThemes,
   isKnownThemePreference,
+  OBSIDIAN_DARK_THEME,
   publishedThemeDefinitions,
   resolveThemeAppearance,
   T3_CHAT_THEME,
-  EMBER_THEME,
   GROVE_THEME,
-  IRIS_THEME,
-  OCEAN_THEME,
   THEME_APPEARANCE_MODE_STORAGE_KEY,
   THEME_FOLLOW_SYSTEM_STORAGE_KEY,
   toCanonicalThemeColor,
@@ -310,9 +310,8 @@ describe("index.html boot script", () => {
   });
 
   it("keeps every built-in boot splash in sync with the real palettes", () => {
-    for (const theme of [T3_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
-      expect(theme.appearance).toBe("light");
-      for (const mode of ["light", "dark"] as const) {
+    for (const theme of BUILT_IN_THEMES) {
+      for (const mode of getThemeModes(theme)) {
         const colors = getThemeColorsForMode(theme, mode);
         expect(colors).not.toBeNull();
         const boot = runBootScript({
@@ -331,6 +330,16 @@ describe("index.html boot script", () => {
         expect(boot.metaContent).toBe(colors!.chrome);
       }
     }
+
+    const singleDarkBoot = runBootScript({
+      storage: { [THEME_STORAGE_KEY]: OBSIDIAN_DARK_THEME.id },
+      prefersDark: false,
+    });
+    expect(singleDarkBoot.themeId).toBe(OBSIDIAN_DARK_THEME.id);
+    expect(singleDarkBoot.isDark).toBe(true);
+    expect(singleDarkBoot.bootVariables["--boot-background"]).toBe(
+      OBSIDIAN_DARK_THEME.colors.canvas,
+    );
   });
 
   it("applies the matching half of an automatic mix to the splash", () => {
