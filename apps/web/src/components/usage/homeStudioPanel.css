@@ -1,0 +1,113 @@
+/*
+ * Home studio panel sizing. The headline layer grows upward from a composer centred under the top
+ * bar, so the panel gets what is left of the half-height above it. 13.5rem is the rest of that
+ * half: the top bar and a 0.75rem gap under it, the headline rows, the panel's margins, and the
+ * part of the resting composer above the centre line.
+ */
+[data-home-studio="panel"] {
+  --home-studio-lift: 0px;
+  max-height: calc(50dvh - 13.5rem - var(--home-studio-lift));
+  margin-bottom: var(--home-studio-lift);
+}
+
+/*
+ * The mascots stand on the composer's top edge: resting pixels reach 27px above it, and the crab
+ * and cat rest in its rightmost 10rem, where their 96px hit boxes cover whatever is behind them.
+ * An unset data-optical-mascot reads as "crab". A narrow lane has no room beside them, so the
+ * panel lifts clear of their heads; a wide lane narrows the panel until only its padding reaches
+ * their corner, and just the mini crabs, which walk the whole edge, still need a lift.
+ */
+html:not([data-optical-mascot="off"]) [data-home-studio="panel"] {
+  --home-studio-lift: 0.75rem;
+}
+
+@container home-studio-lane (min-width: 45rem) {
+  html:not([data-optical-mascot="off"]) [data-home-studio="panel"] {
+    --home-studio-lift: 0px;
+    max-width: calc(100% - 19rem);
+  }
+  html[data-optical-mascot="minis"] [data-home-studio="panel"] {
+    --home-studio-lift: 0.5rem;
+  }
+}
+
+/* Home studio panel motion. An unset data-optical-motion reads as "off": nothing animates. */
+
+@keyframes home-studio-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes home-studio-swap {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes home-studio-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes home-studio-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+html[data-optical-motion="subtle"] [data-home-studio-motion] {
+  animation: home-studio-fade 200ms ease-out both;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"]) {
+  & [data-home-studio-motion="rise"] {
+    animation: home-studio-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--home-studio-index, 0) * 24ms);
+  }
+  & [data-home-studio-motion="swap"] {
+    animation: home-studio-swap 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  & [data-home-studio-motion="fade"] {
+    animation: home-studio-fade 220ms ease-out both;
+  }
+  & [data-home-studio-motion="grow"] {
+    transform-origin: 50% 100%;
+    animation: home-studio-grow 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+html:is(
+    [data-optical-motion="subtle"],
+    [data-optical-motion="standard"],
+    [data-optical-motion="ultra"]
+  )
+  [data-home-studio-tip] {
+  transition: opacity 100ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-home-studio-motion] {
+    animation: none !important;
+  }
+  [data-home-studio-tip] {
+    transition: none !important;
+  }
+}

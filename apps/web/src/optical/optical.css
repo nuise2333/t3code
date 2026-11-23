@@ -471,3 +471,1188 @@ html[data-optical-motion="off"] [data-optical-prism-box="1"]::before {
     transition: none !important;
   }
 }
+
+/* Reasoning-effort track. The knob and fill read --effort-p, which a spring writes per frame
+   only while the knob moves; stars and the sweep run only while the picker is open and a level
+   above the energy threshold is picked. */
+
+.optical-effort {
+  --effort-r: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 4px 8px;
+  user-select: none;
+}
+
+.optical-effort__head {
+  /* Clip, not hidden: the top level's glow would otherwise widen the effort column's scroller. */
+  overflow-x: clip;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.optical-effort__auto {
+  border-radius: 999px;
+  padding: 0 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 16px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 14%, transparent);
+  cursor: pointer;
+}
+
+.optical-effort__auto:hover {
+  color: var(--foreground);
+}
+
+.optical-effort__value {
+  position: relative;
+  z-index: 0;
+  margin-inline-start: auto;
+  font-weight: 600;
+  color: var(--foreground);
+  animation: optical-effort-rise 240ms cubic-bezier(0.2, 0.85, 0.25, 1);
+}
+
+.optical-effort__value.is-auto {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  background: linear-gradient(90deg, #e7edf8 0%, #c8d6ee 52%, #aebfd8 100%);
+  background-clip: text;
+  color: transparent;
+}
+
+:root:not(.dark) .optical-effort__value.is-auto {
+  background-image: linear-gradient(90deg, #1e3a8a 0%, #2563eb 52%, #6d28d9 100%);
+}
+
+.optical-effort__value.is-glowing {
+  animation:
+    optical-effort-rise 240ms cubic-bezier(0.2, 0.85, 0.25, 1),
+    optical-effort-bloom 400ms var(--optical-ease-out) forwards;
+}
+
+.optical-effort__value.is-glowing::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 50%;
+  width: 52px;
+  height: 26px;
+  border-radius: 999px;
+  background: radial-gradient(
+    ellipse,
+    var(--effort-glow, rgba(168, 85, 247, 0.85)),
+    transparent 75%
+  );
+  filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  animation: optical-effort-flash 400ms var(--optical-ease-out) forwards;
+}
+
+.optical-effort__track {
+  position: relative;
+  height: calc(var(--effort-r) * 2);
+  border-radius: 999px;
+  background: rgba(128, 128, 145, 0.18);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.24),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+  transition: box-shadow 200ms;
+}
+
+.optical-effort__track:focus-visible {
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.24),
+    0 0 0 2px var(--ring);
+}
+
+.optical-effort[data-energy="1"] .optical-effort__track {
+  box-shadow:
+    0 0 calc(var(--effort-energy, 0) * 16px) rgba(168, 85, 247, 0.5),
+    inset 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+.optical-effort__track.is-locked {
+  opacity: 0.45;
+  filter: saturate(0.25);
+  cursor: not-allowed;
+}
+
+.optical-effort__fill,
+.optical-effort__energy,
+.optical-effort__stars {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: calc(var(--effort-r) + (100% - var(--effort-r) * 2) * var(--effort-p, 0));
+  border-radius: var(--effort-r) 0 0 var(--effort-r);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.optical-effort__fill {
+  background: var(--effort-fill-bg, #4d93f8);
+}
+
+.optical-effort__energy {
+  opacity: var(--effort-energy, 0);
+  background: linear-gradient(90deg, #3b1178, #6d28d9 30%, #9333ea 62%, #c084fc);
+}
+
+.optical-effort__sweep {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 18%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 82%
+  );
+  transform: translateX(100%);
+}
+
+.optical-effort[data-energy="1"] .optical-effort__sweep {
+  animation: optical-effort-sweep 2.4s linear infinite;
+}
+
+.optical-effort__star {
+  position: absolute;
+  inset-inline: 0;
+  height: 3px;
+  margin-top: -1.5px;
+  animation-name: optical-effort-star;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.optical-effort__star::before {
+  content: "";
+  position: absolute;
+  left: 100%;
+  top: 0;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: #f5f3ff;
+  box-shadow: 0 0 5px rgba(216, 180, 254, 0.95);
+  opacity: var(--effort-star-b, 1);
+  transform: scale(var(--effort-star-b, 1));
+}
+
+.optical-effort__ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.optical-effort__tick {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--effort-r) + (100% - var(--effort-r) * 2) * var(--effort-tick, 0));
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.28);
+  transition: background-color 120ms;
+}
+
+:root:not(.dark) .optical-effort__tick {
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.optical-effort__tick.is-on,
+:root:not(.dark) .optical-effort__tick.is-on {
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.optical-effort__knob {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--effort-r) + (100% - var(--effort-r) * 2) * var(--effort-p, 0));
+  width: calc(var(--effort-r) * 2);
+  height: calc(var(--effort-r) * 2);
+  margin: calc(var(--effort-r) * -1) 0 0 calc(var(--effort-r) * -1);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 1px 5px rgba(0, 0, 0, 0.34),
+    0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+}
+
+.optical-effort[data-energy="1"] .optical-effort__knob {
+  box-shadow:
+    0 1px 5px rgba(0, 0, 0, 0.34),
+    0 0 calc(var(--effort-energy, 0) * 12px) rgba(216, 180, 254, 0.8);
+}
+
+.optical-effort__crystal-host,
+.optical-effort__crystal {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+@keyframes optical-effort-sweep {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes optical-effort-star {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0;
+  }
+  6%,
+  94% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(-100%, 0, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes optical-effort-rise {
+  0% {
+    transform: translateY(20%) scale(0.98);
+    opacity: 0.15;
+  }
+  60% {
+    opacity: 1;
+  }
+  85% {
+    transform: translateY(-2%) scale(1.01);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes optical-effort-bloom {
+  0% {
+    text-shadow: 0 0 8px var(--effort-glow, #c084fc);
+  }
+  30% {
+    text-shadow:
+      0 0 14px var(--effort-glow, #c084fc),
+      0 0 3px #fff;
+  }
+  100% {
+    text-shadow: none;
+  }
+}
+
+@keyframes optical-effort-flash {
+  0% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(0.65);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.5);
+    filter: blur(14px);
+  }
+}
+
+html[data-optical-motion="off"] .optical-effort *,
+html[data-optical-motion="off"] .optical-effort *::before,
+html[data-optical-motion="off"] .optical-effort *::after {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .optical-effort *,
+  .optical-effort *::before,
+  .optical-effort *::after {
+    animation: none !important;
+  }
+}
+
+/* Visible thinking: the reasoning spark, the thought rail with its comet tip, the tool rail with
+   its running marker, and the caret riding the last streamed character. Each loop runs only
+   while its row streams, at steps() so it repaints at a fixed low rate. */
+
+:root {
+  --optical-tip: #2563eb;
+  --optical-tip-glow: 0 0 6px rgba(37, 99, 235, 0.55);
+  --optical-thought-rule: color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+:root.dark {
+  --optical-tip: #7ca8ff;
+  --optical-tip-glow: 0 0 8px rgba(124, 168, 255, 0.75), 0 0 2px rgba(255, 255, 255, 0.6);
+}
+
+html[data-optical-spectrum="iris"] {
+  --optical-tip: #8b5cf6;
+}
+
+html[data-optical-spectrum="amber"] {
+  --optical-tip: #d97706;
+}
+
+html[data-optical-spectrum="mono"] {
+  --optical-tip: var(--muted-foreground);
+  --optical-tip-glow: none;
+}
+
+:root.dark[data-optical-spectrum="iris"] {
+  --optical-tip: #c4b5fd;
+}
+
+:root.dark[data-optical-spectrum="amber"] {
+  --optical-tip: #fcd34d;
+}
+
+.optical-thinking-spark {
+  color: var(--optical-tip);
+  opacity: 0.82;
+  transition: opacity 180ms ease;
+}
+
+:is([data-optical-live="1"], [data-optical-tool-state="running"]) .optical-thinking-spark {
+  opacity: 1;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is([data-optical-live="1"], [data-optical-tool-state="running"])
+  .optical-thinking-spark {
+  animation: optical-spark-orbit 2.4s steps(36) infinite;
+}
+
+@keyframes optical-spark-orbit {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translate3d(0, -1.2px, 0) rotate(18deg) scale(1.14);
+    opacity: 1;
+  }
+}
+
+html:not([data-optical-motion="off"]) .optical-thought-body {
+  position: relative;
+  padding-inline-start: 10px;
+  border-inline-start: 1px solid var(--optical-thought-rule);
+  font-size: 12.5px;
+  line-height: 1.56;
+  color: var(--muted-foreground);
+}
+
+html:not([data-optical-motion="off"]) .optical-thought-body .chat-markdown {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+html:not([data-optical-motion="off"])
+  .optical-thought-body[data-optical-thought-streaming="1"]::after {
+  content: "";
+  position: absolute;
+  left: -2.5px;
+  bottom: 2px;
+  width: 4px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--optical-tip);
+  box-shadow: var(--optical-tip-glow);
+  pointer-events: none;
+  animation: optical-comet-tip 1.1s steps(18) infinite;
+}
+
+@keyframes optical-comet-tip {
+  0%,
+  100% {
+    opacity: 0.78;
+    transform: scaleY(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1.12);
+  }
+}
+
+html:not([data-optical-motion="off"]) [data-optical-rail="1"] [data-work-entry-id]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 1px;
+  background: var(--optical-thought-rule);
+  pointer-events: none;
+}
+
+html:not([data-optical-motion="off"])
+  [data-optical-rail="1"]
+  [data-work-entry-id][data-optical-tool-state="running"]::before {
+  left: -0.5px;
+  inset-block: 4px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--optical-tip);
+  box-shadow: var(--optical-tip-glow);
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  [data-optical-rail="1"]
+  [data-work-entry-id][data-optical-tool-state="running"]::before {
+  animation: optical-comet-tip 1.1s steps(18) infinite;
+}
+
+html:not([data-optical-motion="off"]) [data-optical-tool-state="running"] svg {
+  color: var(--optical-tip);
+  opacity: 1;
+}
+
+/* Stream tail caret. */
+
+[data-optical-tail-host="1"] {
+  position: relative;
+}
+
+.optical-stream-tail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--optical-tip);
+  box-shadow: var(--optical-tip-glow);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.optical-stream-tail[data-visible] {
+  opacity: 1;
+  animation: optical-tail-breathe 1.1s steps(18) infinite;
+}
+
+.optical-stream-tail[data-gliding] {
+  transition: transform 90ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes optical-tail-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+html[data-optical-motion="subtle"] :is(.optical-stream-tail, .optical-thought-body)::after,
+html[data-optical-motion="subtle"] .optical-stream-tail,
+html[data-optical-motion="subtle"] [data-optical-rail="1"] [data-work-entry-id]::before {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .optical-thinking-spark,
+  .optical-stream-tail,
+  .optical-thought-body::after,
+  [data-optical-rail="1"] [data-work-entry-id]::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Background window: every looping animation holds still, and translucent overlays drop their
+   blur, so an unfocused window paints nothing. */
+
+html[data-optical-win-blur="1"]
+  :is(
+    .optical-thinking-spark,
+    .optical-stream-tail,
+    .optical-effort__star,
+    .optical-effort__sweep,
+    [data-optical-stop="1"],
+    [data-optical-row-running="1"]
+  ),
+html[data-optical-win-blur="1"]
+  :is(
+    .optical-thought-body,
+    [data-optical-rail="1"] [data-work-entry-id],
+    [data-optical-stop="1"],
+    [data-optical-row-running="1"]
+  )::before,
+html[data-optical-win-blur="1"] :is(.optical-thought-body, [data-optical-stop="1"])::after,
+html[data-optical-win-blur="1"] .live-tool-shine {
+  animation-play-state: paused !important;
+}
+
+html[data-optical-win-blur="1"] :is([data-slot="menu-popup"], [data-slot="popover-popup"]) {
+  backdrop-filter: none !important;
+}
+
+/* Sidebar: a running thread gets a cool wash and a spectrum rail on its leading edge. */
+
+:root {
+  --optical-run-wash: linear-gradient(
+    90deg,
+    rgba(37, 99, 235, 0.1),
+    rgba(124, 58, 237, 0.045) 55%,
+    transparent
+  );
+  --optical-run-rail: linear-gradient(180deg, #2563eb, #7c3aed);
+}
+
+:root.dark {
+  --optical-run-wash: linear-gradient(
+    90deg,
+    rgba(49, 134, 255, 0.11),
+    rgba(92, 198, 252, 0.04) 55%,
+    transparent
+  );
+  --optical-run-rail: linear-gradient(
+    180deg,
+    #fbbc04,
+    #ea4335 16%,
+    #9b72cb 34%,
+    #5cc6fc 58%,
+    #3186ff
+  );
+}
+
+html[data-optical-spectrum="mono"] {
+  --optical-run-rail: linear-gradient(180deg, var(--muted-foreground), var(--foreground));
+}
+
+html:not([data-optical-motion="off"]) [data-optical-row-running="1"] {
+  background-image: var(--optical-run-wash);
+}
+
+html:not([data-optical-motion="off"]) [data-optical-row-running="1"]::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  left: 2px;
+  inset-block: 7px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--optical-run-rail);
+  box-shadow: 0 0 6px rgba(49, 134, 255, 0.35);
+  pointer-events: none;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  [data-optical-row-running="1"]::before {
+  animation: optical-run-rail 2.8s steps(28) infinite;
+}
+
+@keyframes optical-run-rail {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Stop button: a thin spectrum ring orbits the stop square while a turn runs. */
+
+html:not([data-optical-motion="off"]) [data-optical-stop="1"] {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: 0 0 12px -2px rgba(66, 133, 244, 0.42);
+}
+
+html:not([data-optical-motion="off"]) [data-optical-stop="1"]::before {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  inset: -38%;
+  background: conic-gradient(#4285f4, #9b72cb, #ea4335, #fbbc04, #34a853, #4285f4);
+}
+
+html:not([data-optical-motion="off"]) [data-optical-stop="1"]::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 2px;
+  border-radius: inherit;
+  background: var(--popover, #0f131d);
+}
+
+html:not([data-optical-motion="off"]) [data-optical-stop="1"] svg {
+  color: var(--foreground);
+  transition: scale 140ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+html:not([data-optical-motion="off"]) [data-optical-stop="1"]:hover svg {
+  scale: 1.08;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  [data-optical-stop="1"]::before {
+  animation: optical-orbit-spin 1.9s steps(38) infinite;
+}
+
+html[data-optical-spectrum="mono"] [data-optical-stop="1"]::before {
+  background: conic-gradient(var(--muted-foreground), var(--foreground), var(--muted-foreground));
+}
+
+@keyframes optical-orbit-spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+/* Send and stop: lift on hover, a sprung press. */
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is([data-optical-send="1"], [data-optical-stop="1"]) {
+  transition-property: translate, scale, background-color, box-shadow, filter;
+  transition-duration: 140ms;
+  transition-timing-function: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is([data-optical-send="1"], [data-optical-stop="1"]):enabled:hover {
+  translate: 0 -1px;
+  scale: 1;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is([data-optical-send="1"], [data-optical-stop="1"]):enabled:active {
+  translate: 0;
+  scale: 0.92;
+}
+
+/* "subtle" keeps color feedback but no movement; "off" keeps neither. */
+
+html:is([data-optical-motion="subtle"], [data-optical-motion="off"])
+  :is(button, [role="button"]):is(:hover, :active) {
+  scale: none;
+  translate: none;
+}
+
+/* Liftoff bubble: the message just sent rises into place. */
+
+html[data-optical-motion="ultra"] [data-optical-liftoff-bubble="1"] {
+  animation: optical-liftoff-bubble 420ms cubic-bezier(0.18, 1, 0.32, 1) both;
+}
+
+@keyframes optical-liftoff-bubble {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.985);
+  }
+}
+
+/* Cards that join the composer stack (queued messages, questions) rise in. */
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is([data-thread-queue="true"] > :not(.sr-only), :has(> [data-pending-user-input-toggle])) {
+  animation: optical-card-in 200ms var(--optical-ease-out) both;
+}
+
+@keyframes optical-card-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.985);
+  }
+}
+
+/* Menus and popovers open through a lens: a sprung scale with a slight overshoot, and their
+   first rows rising in a short stagger. */
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is([data-slot="menu-popup"], [data-slot="popover-popup"]) {
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is([data-slot="menu-popup"], [data-slot="popover-popup"])[data-starting-style] {
+  scale: 0.95;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is([data-slot="menu-popup"], [data-slot="popover-popup"])[data-ending-style] {
+  transition-duration: 120ms;
+  transition-timing-function: cubic-bezier(0.32, 0, 0.67, 0);
+}
+
+html[data-optical-motion="ultra"] [data-slot="menu-popup"] [data-slot="menu-item"] {
+  animation: optical-row-stagger 180ms var(--optical-ease-out) both;
+}
+
+html[data-optical-motion="ultra"] [data-slot="menu-popup"] [data-slot="menu-item"]:nth-child(2) {
+  animation-delay: 16ms;
+}
+
+html[data-optical-motion="ultra"] [data-slot="menu-popup"] [data-slot="menu-item"]:nth-child(3) {
+  animation-delay: 32ms;
+}
+
+html[data-optical-motion="ultra"] [data-slot="menu-popup"] [data-slot="menu-item"]:nth-child(4) {
+  animation-delay: 48ms;
+}
+
+html[data-optical-motion="ultra"] [data-slot="menu-popup"] [data-slot="menu-item"]:nth-child(5) {
+  animation-delay: 64ms;
+}
+
+html[data-optical-motion="ultra"] [data-slot="menu-popup"] [data-slot="menu-item"]:nth-child(6) {
+  animation-delay: 80ms;
+}
+
+html[data-optical-motion="ultra"] [data-slot="menu-popup"] [data-slot="menu-item"]:nth-child(7) {
+  animation-delay: 96ms;
+}
+
+html[data-optical-motion="ultra"] [data-slot="menu-popup"] [data-slot="menu-item"]:nth-child(8) {
+  animation-delay: 112ms;
+}
+
+html[data-optical-motion="ultra"]
+  [data-slot="menu-popup"]
+  [data-slot="menu-item"]:nth-child(n + 9) {
+  animation-delay: 128ms;
+}
+
+@keyframes optical-row-stagger {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-optical-liftoff-bubble="1"],
+  [data-thread-queue="true"] > *,
+  [data-slot="menu-item"],
+  [data-optical-row-running="1"]::before,
+  [data-optical-stop="1"]::before {
+    animation: none !important;
+  }
+}
+
+/* Sonar: one ping on the turn a timeline jump landed on. */
+
+html:not([data-optical-motion="off"]) [data-optical-sonar="1"] {
+  animation: optical-sonar 700ms ease-out both;
+}
+
+@keyframes optical-sonar {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+  24% {
+    box-shadow:
+      0 0 0 1px rgba(37, 99, 235, 0.48),
+      0 0 22px -4px rgba(37, 99, 235, 0.26);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(37, 99, 235, 0),
+      0 0 22px -4px rgba(37, 99, 235, 0);
+  }
+}
+
+:root.dark [data-optical-sonar="1"] {
+  animation-name: optical-sonar-dark;
+}
+
+@keyframes optical-sonar-dark {
+  0% {
+    box-shadow: 0 0 0 0 rgba(92, 198, 252, 0);
+  }
+  24% {
+    box-shadow:
+      0 0 0 1px rgba(92, 198, 252, 0.42),
+      0 0 22px -4px rgba(92, 198, 252, 0.22);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(92, 198, 252, 0),
+      0 0 22px -4px rgba(92, 198, 252, 0);
+  }
+}
+
+/* Model fiber: a ring of light runs through the spectrum once when the model changes. */
+
+html[data-optical-motion="ultra"] [data-optical-fiber="1"] {
+  animation: optical-fiber 450ms cubic-bezier(0.24, 0.82, 0.32, 1) both;
+}
+
+@keyframes optical-fiber {
+  0% {
+    box-shadow:
+      0 0 0 1.5px rgba(66, 133, 244, 0.85),
+      0 0 14px -2px rgba(66, 133, 244, 0.5);
+  }
+  35% {
+    box-shadow:
+      0 0 0 1.5px rgba(155, 114, 203, 0.8),
+      0 0 14px -2px rgba(155, 114, 203, 0.45);
+  }
+  70% {
+    box-shadow:
+      0 0 0 1.5px rgba(234, 67, 53, 0.55),
+      0 0 12px -2px rgba(251, 188, 4, 0.35);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1.5px rgba(251, 188, 4, 0),
+      0 0 12px -2px rgba(251, 188, 4, 0);
+  }
+}
+
+html[data-optical-spectrum="mono"] [data-optical-fiber="1"] {
+  animation-name: optical-fiber-mono;
+}
+
+@keyframes optical-fiber-mono {
+  0% {
+    box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--foreground) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 1.5px transparent;
+  }
+}
+
+/* Disclosure panels: content drops in 5px as the height opens and lifts away as it closes. */
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  [data-slot="collapsible-panel"]
+  > * {
+  transition:
+    opacity 155ms ease-out,
+    translate 155ms ease-out;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  [data-slot="collapsible-panel"]:is([data-starting-style], [data-ending-style])
+  > * {
+  opacity: 0;
+  translate: 0 -5px;
+}
+
+/* Model glyph: the provider icon in the model trigger brightens with the reasoning tier, turns
+   violet at the top tier, and the tier label pulses once when it changes. */
+
+html:not([data-optical-motion="off"])
+  [data-chat-provider-model-picker-icon]:has(~ [data-optical-tier="medium"])
+  > * {
+  filter: drop-shadow(0 0 2px rgba(102, 157, 246, 0.45));
+}
+
+html:not([data-optical-motion="off"])
+  [data-chat-provider-model-picker-icon]:has(~ [data-optical-tier="high"])
+  > * {
+  filter: drop-shadow(0 0 3.5px rgba(102, 157, 246, 0.75));
+}
+
+html:not([data-optical-motion="off"])
+  [data-chat-provider-model-picker-icon]:has(~ [data-optical-tier="xhigh"])
+  > * {
+  filter: drop-shadow(0 0 4.5px rgba(155, 123, 247, 0.85));
+}
+
+html:not([data-optical-motion="off"]) [data-optical-tier="xhigh"] {
+  color: #9b7bf7;
+}
+
+:root:not(.dark) [data-optical-tier="xhigh"] {
+  color: #7c3aed;
+}
+
+html[data-optical-spectrum="mono"] [data-chat-provider-model-picker-icon] > * {
+  filter: none !important;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"]) [data-optical-tier] {
+  animation: optical-tier-pulse 280ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+@keyframes optical-tier-pulse {
+  0% {
+    transform: scale(0.84) rotate(-8deg);
+  }
+  60% {
+    transform: scale(1.12) rotate(3deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* Folded code blocks show their first lines under a fade. */
+
+.chat-markdown-codeblock[data-code-folded="true"] > :not(.chat-markdown-codeblock-header) {
+  max-height: 156px;
+  overflow: hidden;
+  mask-image: linear-gradient(#000 56%, transparent);
+}
+
+/* The sticky header needs an opaque fill; dark blocks are a translucent input tint over the page. */
+:root.dark .chat-markdown-codeblock-header {
+  background-color: color-mix(in srgb, var(--input) 32%, var(--background));
+}
+
+/* Sidebar glide pill: rides from the old current thread to the new one, then fades. */
+
+.optical-sidebar-glide {
+  position: fixed;
+  z-index: 30;
+  border-radius: var(--radius-md, 6px);
+  /* Above the sidebar, so it stays translucent and never hides the row text it crosses. */
+  background: color-mix(in srgb, var(--sidebar-row-active, var(--accent)) 55%, transparent);
+  box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.22);
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.optical-sidebar-glide[data-from-running="1"]::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  inset-block: 7px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--optical-run-rail);
+  animation: optical-glide-run-out 180ms ease-out forwards;
+}
+
+@keyframes optical-glide-run-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Animated icons: hovering a control moves the part of its glyph that names the action. Rotate
+   and translate stay apart from the hover scale the micro-interaction layer applies. */
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is(button, [role="button"], a)
+  > svg:is(
+    .lucide-settings,
+    .lucide-settings-2,
+    .lucide-plus,
+    .lucide-x,
+    .lucide-search,
+    .lucide-pin
+  ) {
+  transition:
+    rotate 260ms cubic-bezier(0.34, 1.4, 0.64, 1),
+    translate 220ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is(button, [role="button"], a):is(:hover, :focus-visible)
+  > svg:is(.lucide-settings, .lucide-settings-2) {
+  rotate: 65deg;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is(button, [role="button"], a):is(:hover, :focus-visible)
+  > svg:is(.lucide-plus, .lucide-x) {
+  rotate: 90deg;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is(button, [role="button"], a):is(:hover, :focus-visible)
+  > svg.lucide-search {
+  rotate: -11deg;
+}
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  :is(button, [role="button"], a):is(:hover, :focus-visible)
+  > svg.lucide-pin {
+  translate: 0 2px;
+}
+
+/* A copy confirmation draws its check instead of popping in. */
+
+html:is([data-optical-motion="standard"], [data-optical-motion="ultra"])
+  [aria-label="Copied"]
+  svg.lucide-check
+  path {
+  stroke-dasharray: 24;
+  animation: optical-check-draw 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes optical-check-draw {
+  from {
+    stroke-dashoffset: 24;
+    opacity: 0.35;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+/* Pixel companions standing on the composer's top edge (mascotRig.ts paints the canvases). */
+
+.optical-mascot {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(100% - 9px);
+  z-index: 22;
+  height: 84px;
+  overflow: visible;
+  pointer-events: none;
+  user-select: none;
+}
+
+.optical-mascot .optical-mascot-actor {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 96px;
+  height: 84px;
+  cursor: grab;
+  outline: none;
+  pointer-events: auto;
+  touch-action: none;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.optical-mascot .optical-mascot-actor::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  z-index: 0;
+  width: 44px;
+  height: 8px;
+  border-radius: 999px;
+  background: radial-gradient(
+    50% 50% at 50% 50%,
+    rgb(0 0 0 / 0.42) 0%,
+    rgb(0 0 0 / 0.16) 58%,
+    transparent
+  );
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+html:not(.dark) .optical-mascot .optical-mascot-actor::after {
+  background: radial-gradient(
+    50% 50% at 50% 50%,
+    rgb(15 23 42 / 0.2) 0%,
+    rgb(15 23 42 / 0.07) 58%,
+    transparent
+  );
+}
+
+.optical-mascot :is(.optical-mascot-actor, .optical-mascot-mini):is(:active, [data-direct="1"]) {
+  transition: none !important;
+  will-change: transform;
+}
+
+.optical-mascot :is(.optical-mascot-actor, .optical-mascot-mini):is(:active, [data-dragging="1"]) {
+  cursor: grabbing !important;
+}
+
+.optical-mascot .optical-mascot-canvas {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 96px;
+  height: 84px;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.optical-mascot .optical-mascot-minis {
+  position: absolute;
+  left: 12px;
+  bottom: 1px;
+  z-index: 20;
+  display: none;
+  align-items: flex-end;
+  height: 32px;
+  pointer-events: none;
+}
+
+.optical-mascot .optical-mascot-mini {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 40px;
+  height: 32px;
+  image-rendering: pixelated;
+  transition: transform 160ms steps(2, end);
+}
+
+.optical-mascot .optical-mascot-fx {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 42;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.optical-mascot .optical-mascot-habitat {
+  position: absolute;
+  right: 10px;
+  bottom: 2px;
+  z-index: 14;
+  width: 24px;
+  height: 30px;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* Peek: the pair ducks behind the composer while a menu, picker, card or queue is open. */
+.optical-mascot[data-optical-mascot-peek="1"] {
+  z-index: 6 !important;
+}
+
+.optical-mascot[data-optical-mascot-peek="1"]
+  :is(.optical-mascot-actor, .optical-mascot-minis, canvas) {
+  cursor: default !important;
+  pointer-events: none !important;
+}
+
+.optical-mascot[data-optical-mascot-peek="1"] .optical-mascot-minis,
+.optical-mascot[data-optical-mascot-peek="1"] .optical-mascot-actor::after {
+  opacity: 0 !important;
+}
+
+/* The rig drops to 0fps on its own; these keep the CSS glides still too. */
+html[data-optical-motion="off"] .optical-mascot :is(.optical-mascot-actor, .optical-mascot-mini),
+html[data-optical-win-blur="1"] .optical-mascot :is(.optical-mascot-actor, .optical-mascot-mini) {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .optical-mascot :is(.optical-mascot-actor, .optical-mascot-mini) {
+    transition: none !important;
+  }
+}

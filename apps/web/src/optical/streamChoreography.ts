@@ -26,6 +26,7 @@ const MAX_UNSEEN_APPEND_CHARS = 28;
 const CAUSTIC_ATTR = "data-optical-caustic";
 const CAUSTIC_HOLD_MS = 920;
 const IGNORE_SELECTOR = "[data-optical-ignore], script, style";
+const TAIL_HOST_ATTR = "data-optical-tail-host";
 const CONTEXT_SELECTOR = `pre, table, .${CHUNK_CLASS}`;
 const OBSERVE_OPTIONS = { childList: true, characterData: true, subtree: true } as const;
 
@@ -287,6 +288,69 @@ function createStreamInkHighlighter(): StreamInkHighlighter {
   return { supported, enqueue, flush };
 }
 
+interface StreamTail {
+  readonly schedule: () => void;
+  readonly detach: () => void;
+}
+
+/**
+ * A caret that rides the last streamed character. Its position is measured at most once per
+ * frame, only after the text changed, and it is removed the moment streaming stops.
+ */
+function createStreamTail(container: HTMLElement): StreamTail {
+  const caret = document.createElement("span");
+  caret.className = "optical-stream-tail";
+  caret.setAttribute("aria-hidden", "true");
+  caret.setAttribute("data-optical-ignore", "");
+  container.setAttribute(TAIL_HOST_ATTR, "1");
+  container.append(caret);
+  let frame = 0;
+
+  const lastTextNode = (): Text | null => {
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) =>
+        node.parentElement?.closest(IGNORE_SELECTOR) || !/\S/.test(node.nodeValue ?? "")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    });
+    walker.currentNode = container;
+    return walker.lastChild() as Text | null;
+  };
+
+  const place = () => {
+    frame = 0;
+    const node = lastTextNode();
+    if (!node || node.parentElement?.closest("pre")) {
+      caret.removeAttribute("data-visible");
+      return;
+    }
+    const end = node.data.trimEnd().length;
+    const range = document.createRange();
+    range.setStart(node, Math.max(0, end - 1));
+    range.setEnd(node, end);
+    const rects = range.getClientRects();
+    const rect = rects[rects.length - 1];
+    if (!rect) return;
+    const host = container.getBoundingClientRect();
+    caret.style.height = `${Math.round(rect.height)}px`;
+    caret.style.transform = `translate3d(${(rect.right - host.left + 1.5).toFixed(1)}px, ${(rect.top - host.top).toFixed(1)}px, 0)`;
+    // The first placement jumps; later ones glide.
+    if (caret.hasAttribute("data-visible")) caret.setAttribute("data-gliding", "");
+    caret.setAttribute("data-visible", "");
+  };
+
+  return {
+    schedule: () => {
+      if (!frame && !document.hidden) frame = requestAnimationFrame(place);
+    },
+    detach: () => {
+      if (frame) cancelAnimationFrame(frame);
+      caret.remove();
+      container.removeAttribute(TAIL_HOST_ATTR);
+    },
+  };
+}
+
 /**
  * Choreographs one streaming message: ink-fades appended characters, lifts new prose blocks
  * in, and scans new code blocks and tables. Returns a detach that undoes all of it.
@@ -300,6 +364,7 @@ function observeStreamingContainer(container: HTMLElement): () => void {
   const transientClasses = new Map<Element, { readonly name: string; readonly timer: number }>();
   let lastScanAt = -Infinity;
   let observing = false;
+  let tail: StreamTail | null = null;
 
   const markTransient = (element: Element, name: string, holdMs: number) => {
     if (transientClasses.has(element)) return;
@@ -313,6 +378,8 @@ function observeStreamingContainer(container: HTMLElement): () => void {
 
   const clearArtifacts = () => {
     ink.flush();
+    tail?.detach();
+    tail = null;
     for (const [element, { name, timer }] of transientClasses) {
       window.clearTimeout(timer);
       element.classList.remove(name);
@@ -362,6 +429,7 @@ function observeStreamingContainer(container: HTMLElement): () => void {
     }
     const now = performance.now();
     let newBlocks = 0;
+    tail?.schedule();
 
     // A parent that also lost an element is being re-rendered; its new children are not new text.
     const rerendered = new Set<Node>();
@@ -466,6 +534,8 @@ function observeStreamingContainer(container: HTMLElement): () => void {
     observing = enabled;
     if (enabled) {
       recordLengths(container, 24);
+      tail = createStreamTail(container);
+      tail.schedule();
       observer.observe(container, OBSERVE_OPTIONS);
     } else {
       observer.disconnect();

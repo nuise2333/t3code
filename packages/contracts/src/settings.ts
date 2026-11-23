@@ -190,6 +190,11 @@ export const OpticalSpectrum = Schema.Literals(["follow", "cobalt", "iris", "amb
 export type OpticalSpectrum = typeof OpticalSpectrum.Type;
 const DEFAULT_OPTICAL_SPECTRUM: OpticalSpectrum = "follow";
 
+/** "minis" adds the three mini crabs to the crab and cat pair. */
+export const OpticalMascot = Schema.Literals(["crab", "minis", "off"]);
+export type OpticalMascot = typeof OpticalMascot.Type;
+const DEFAULT_OPTICAL_MASCOT: OpticalMascot = "crab";
+
 export const MIN_INTERFACE_FONT_SIZE = 12;
 export const MAX_INTERFACE_FONT_SIZE = 20;
 export const InterfaceFontSize = Schema.Int.check(
@@ -496,8 +501,12 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   opticalHomeRipple: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   opticalSmoothCaret: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  homeStudioPanel: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   opticalSpectrum: OpticalSpectrum.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_OPTICAL_SPECTRUM)),
+  ),
+  opticalMascot: OpticalMascot.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_OPTICAL_MASCOT)),
   ),
   browserDefaultViewport: PreviewViewportSetting.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_VIEWPORT)),
@@ -2237,7 +2246,9 @@ export const ClientSettingsPatch = Schema.Struct({
   opticalTargetFps: Schema.optionalKey(OpticalTargetFps),
   opticalHomeRipple: Schema.optionalKey(Schema.Boolean),
   opticalSmoothCaret: Schema.optionalKey(Schema.Boolean),
+  homeStudioPanel: Schema.optionalKey(Schema.Boolean),
   opticalSpectrum: Schema.optionalKey(OpticalSpectrum),
+  opticalMascot: Schema.optionalKey(OpticalMascot),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
   browserDefaultAppearance: Schema.optionalKey(PreviewAppearancePreference),

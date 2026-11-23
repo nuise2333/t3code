@@ -12,6 +12,8 @@ import { CheckIcon, ChevronRightIcon, ChevronUpIcon, WorkflowIcon } from "lucide
 import { type KeyboardEvent, type ReactNode, use, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
+import { useOpticalConfig } from "~/optical/config";
+import { OpticalEffortSlider } from "~/optical/OpticalEffortSlider";
 import {
   Menu,
   MenuPopup,
@@ -167,10 +169,26 @@ export function describeComposerEffort(
       : display.label;
   if (!word && !glyph && !fast && !display.ultracode && !contextWindow)
     return { suffix: null, detail };
+  const tier = autoDraft
+    ? "auto"
+    : glyph
+      ? glyph.filled >= glyph.count
+        ? glyph.count >= 4
+          ? "xhigh"
+          : "high"
+        : glyph.filled / glyph.count >= 0.6
+          ? "high"
+          : glyph.filled / glyph.count > 0.34
+            ? "medium"
+            : "low"
+      : undefined;
   return {
     detail,
     suffix: (
       <span
+        // Remounts per tier so the change pulse plays once.
+        key={tier}
+        data-optical-tier={tier}
         className={cn(
           "flex shrink-0 items-center gap-1.5 text-muted-foreground group-hover/model-trigger:text-foreground group-data-pressed/model-trigger:text-foreground group-data-popup-open/model-trigger:text-foreground",
           // A word space after the model name: the regular trigger's gap is wider than one.
@@ -351,11 +369,28 @@ function EffortRows(props: {
       </div>
     );
   }
-  const { locked, routing } = props;
+  return (
+    <EffortSelectRows
+      descriptor={control.descriptor}
+      traits={traits}
+      locked={props.locked}
+      routing={props.routing}
+    />
+  );
+}
+
+function EffortSelectRows(props: {
+  descriptor: SelectDescriptor;
+  traits: TraitsSelection;
+  locked: boolean;
+  routing: ComposerEffortRouting;
+}) {
+  const { descriptor, traits, locked, routing } = props;
+  const optical = useOpticalConfig();
   const draftRouting = routing?.kind === "draft" && !locked ? routing : null;
   const auto = draftRouting?.auto === true;
-  const value = auto ? null : traits.selectValue(control.descriptor);
-  const choices = selectableProviderOptionChoices(control.descriptor);
+  const value = auto ? null : traits.selectValue(descriptor);
+  const choices = selectableProviderOptionChoices(descriptor);
   // An "Ultrathink:" prefix selects a level the column does not offer.
   const shown = choices.some((option) => option.id === value);
   const note = draftRouting?.auto
@@ -363,13 +398,32 @@ function EffortRows(props: {
     : routing?.kind === "routed"
       ? `${routing.display.summary}. ${MANUAL_EFFORT_NOTE}`
       : null;
+  const noteRow = note ? (
+    <div className="px-2 pt-1 pb-0.5 text-muted-foreground/80 text-xs">{note}</div>
+  ) : null;
+  const lockedRow = locked ? (
+    <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">{ULTRATHINK_IN_BODY_NOTE}</div>
+  ) : null;
+  // With optical motion off the levels stay a plain list.
+  if (optical.motionLevel !== "off" && choices.length > 1) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        {lockedRow}
+        <OpticalEffortSlider
+          title={descriptor.label}
+          levels={choices}
+          value={shown ? value : null}
+          auto={draftRouting ? { active: auto, onPick: draftRouting.onPickAuto } : null}
+          disabled={locked}
+          onPick={(id) => traits.changeSelect(descriptor, id)}
+        />
+        {noteRow}
+      </div>
+    );
+  }
   return (
     <div role="radiogroup" aria-label={descriptor.label} className="flex flex-col gap-0.5">
-      {locked ? (
-        <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
-          {ULTRATHINK_IN_BODY_NOTE}
-        </div>
-      ) : null}
+      {lockedRow}
       {draftRouting ? (
         <ColumnRow label="Auto" selected={auto} tabStop={!shown} onPick={draftRouting.onPickAuto} />
       ) : null}
@@ -382,12 +436,10 @@ function EffortRows(props: {
           description={option.description}
           isDefault={option.isDefault}
           disabled={locked}
-          onPick={() => traits.changeSelect(control.descriptor, option.id)}
+          onPick={() => traits.changeSelect(descriptor, option.id)}
         />
       ))}
-      {note ? (
-        <div className="px-2 pt-1 pb-0.5 text-muted-foreground/80 text-xs">{note}</div>
-      ) : null}
+      {noteRow}
     </div>
   );
 }

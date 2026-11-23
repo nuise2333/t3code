@@ -7,6 +7,7 @@ import {
   type EffortDisplay,
   type EnvironmentIdentificationMode,
   type OpticalAmbientIntensity,
+  type OpticalMascot,
   type OpticalMotionLevel,
   type OpticalSpectrum,
   type OpticalTargetFps,
@@ -114,6 +115,12 @@ const OPTICAL_SPECTRUM_OPTIONS: ReadonlyArray<readonly [OpticalSpectrum, string]
   ["mono", "Monochrome"],
 ];
 
+const OPTICAL_MASCOT_OPTIONS: ReadonlyArray<readonly [OpticalMascot, string]> = [
+  ["crab", "Crab & cat"],
+  ["minis", "With mini crabs"],
+  ["off", "Off"],
+];
+
 const OPTICAL_TARGET_FPS_OPTIONS: ReadonlyArray<readonly [OpticalTargetFps, string]> = [
   ["60", "60 fps"],
   ["120", "120 fps"],
@@ -128,6 +135,7 @@ type OpticalScenePreset = Pick<
   | "opticalHomeRipple"
   | "opticalSmoothCaret"
   | "opticalTargetFps"
+  | "opticalMascot"
 >;
 
 const OPTICAL_SCENE_PRESETS: ReadonlyArray<readonly [string, OpticalScenePreset]> = [
@@ -139,6 +147,7 @@ const OPTICAL_SCENE_PRESETS: ReadonlyArray<readonly [string, OpticalScenePreset]
       opticalHomeRipple: true,
       opticalSmoothCaret: true,
       opticalTargetFps: "120",
+      opticalMascot: "crab",
     },
   ],
   [
@@ -149,6 +158,7 @@ const OPTICAL_SCENE_PRESETS: ReadonlyArray<readonly [string, OpticalScenePreset]
       opticalHomeRipple: false,
       opticalSmoothCaret: true,
       opticalTargetFps: "120",
+      opticalMascot: "off",
     },
   ],
   [
@@ -159,6 +169,7 @@ const OPTICAL_SCENE_PRESETS: ReadonlyArray<readonly [string, OpticalScenePreset]
       opticalHomeRipple: false,
       opticalSmoothCaret: false,
       opticalTargetFps: "60",
+      opticalMascot: "off",
     },
   ],
 ];
@@ -169,7 +180,8 @@ function matchesOpticalScenePreset(settings: OpticalScenePreset, preset: Optical
     settings.opticalAmbientIntensity === preset.opticalAmbientIntensity &&
     settings.opticalHomeRipple === preset.opticalHomeRipple &&
     settings.opticalSmoothCaret === preset.opticalSmoothCaret &&
-    settings.opticalTargetFps === preset.opticalTargetFps
+    settings.opticalTargetFps === preset.opticalTargetFps &&
+    settings.opticalMascot === preset.opticalMascot
   );
 }
 
@@ -775,6 +787,67 @@ export function AppearanceSettingsPanel() {
               }
               aria-label="Elastic smooth caret"
             />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("home-studio-panel")}
+          description="Show usage stats, a token heatmap, models, and quotas under the new thread headline."
+          resetAction={
+            settings.homeStudioPanel !== DEFAULT_UNIFIED_SETTINGS.homeStudioPanel ? (
+              <SettingResetButton
+                label="new thread usage panel"
+                onClick={() =>
+                  updateSettings({ homeStudioPanel: DEFAULT_UNIFIED_SETTINGS.homeStudioPanel })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.homeStudioPanel}
+              onCheckedChange={(checked) => updateSettings({ homeStudioPanel: Boolean(checked) })}
+              aria-label="New thread usage panel"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("optical-mascot")}
+          description="Pixel companions that stand on the composer and react to your turns. Drag, throw, or poke them."
+          resetAction={
+            settings.opticalMascot !== DEFAULT_UNIFIED_SETTINGS.opticalMascot ? (
+              <SettingResetButton
+                label="pixel companions"
+                onClick={() =>
+                  updateSettings({ opticalMascot: DEFAULT_UNIFIED_SETTINGS.opticalMascot })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="w-full sm:w-40">
+              <Select
+                value={settings.opticalMascot}
+                onValueChange={(value) => {
+                  const option = OPTICAL_MASCOT_OPTIONS.find(
+                    ([optionValue]) => optionValue === value,
+                  );
+                  if (option) updateSettings({ opticalMascot: option[0] });
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Pixel companions">
+                  <SelectValue>
+                    {optionLabel(OPTICAL_MASCOT_OPTIONS, settings.opticalMascot)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {OPTICAL_MASCOT_OPTIONS.map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
           }
         />
         <AdvancedSettings targetIds={[searchableSetting("optical-target-fps").id]}>

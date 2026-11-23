@@ -495,6 +495,7 @@ function LiveActivityRow({
   return (
     <div
       ref={animated ? observeVisibleAnimation : undefined}
+      data-optical-live={animated ? "1" : undefined}
       className="relative min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed"
     >
       <LiveActivityContent
@@ -618,6 +619,7 @@ export function LiveWorkEntryTimelineRow({
     >
       {thoughtLine ? (
         <WorkLogRow
+          data-optical-live={row.active ? "1" : undefined}
           icon={
             <span className="flex size-4 items-center justify-center text-icon-muted">
               <ToolActivityIconView

@@ -163,6 +163,7 @@ function StopGenerationButton({
               onInterrupt();
             }}
             aria-label={stopPhase === "pending" ? "Stopping" : "Stop generation"}
+            data-optical-stop="1"
           />
         }
       >
@@ -423,6 +424,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         (!hasSendableContent && !showResume)
       }
       aria-label={submitStatus ?? submitLabel}
+      data-optical-send="1"
     >
       {stageBackdropVariant ? (
         <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">

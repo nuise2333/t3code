@@ -489,8 +489,14 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.opticalSmoothCaret !== DEFAULT_UNIFIED_SETTINGS.opticalSmoothCaret
       ? ["Elastic smooth caret"]
       : []),
+    ...(settings.homeStudioPanel !== DEFAULT_UNIFIED_SETTINGS.homeStudioPanel
+      ? ["New thread usage panel"]
+      : []),
     ...(settings.opticalTargetFps !== DEFAULT_UNIFIED_SETTINGS.opticalTargetFps
       ? ["Optical frame cap"]
+      : []),
+    ...(settings.opticalMascot !== DEFAULT_UNIFIED_SETTINGS.opticalMascot
+      ? ["Pixel companions"]
       : []),
     ...(settings.environmentIdentificationMode !==
     DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
@@ -702,7 +708,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       opticalTargetFps: DEFAULT_UNIFIED_SETTINGS.opticalTargetFps,
       opticalHomeRipple: DEFAULT_UNIFIED_SETTINGS.opticalHomeRipple,
       opticalSmoothCaret: DEFAULT_UNIFIED_SETTINGS.opticalSmoothCaret,
+      homeStudioPanel: DEFAULT_UNIFIED_SETTINGS.homeStudioPanel,
       opticalSpectrum: DEFAULT_UNIFIED_SETTINGS.opticalSpectrum,
+      opticalMascot: DEFAULT_UNIFIED_SETTINGS.opticalMascot,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,

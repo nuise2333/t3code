@@ -1,4 +1,5 @@
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
+import { ReasoningGlyph } from "~/optical/OpticalThinkingSpark";
 import { type ToolActivityIcon } from "@t3tools/contracts";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
@@ -6,7 +7,6 @@ import { use, useState } from "react";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   BotIcon,
-  BrainIcon,
   CheckIcon,
   CircleAlertIcon,
   EyeIcon,
@@ -236,7 +236,7 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
     case "bot":
       return <BotIcon className={className} aria-hidden />;
     case "brain":
-      return <BrainIcon className={className} aria-hidden />;
+      return <ReasoningGlyph className={className} />;
     case "browser":
     case "computer":
       return <BrowserAppIcon className={className} />;

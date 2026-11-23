@@ -262,9 +262,19 @@ export function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mes
       {modelSwitch ? (
         <ModelSwitchRow environmentId={ctx.activeThreadEnvironmentId} modelSwitch={modelSwitch} />
       ) : null}
-      <UserMessageContent row={row} />
+      <LiftoffBubble createdAt={row.message.createdAt}>
+        <UserMessageContent row={row} />
+      </LiftoffBubble>
     </>
   );
+}
+
+const LIFTOFF_WINDOW_MS = 1500;
+
+/** A message mounted right after it was sent rises in once; a scrolled-back remount does not. */
+function LiftoffBubble(props: { createdAt: string; children: ReactNode }) {
+  const [fresh] = useState(() => Date.now() - Date.parse(props.createdAt) < LIFTOFF_WINDOW_MS);
+  return <div data-optical-liftoff-bubble={fresh ? "1" : undefined}>{props.children}</div>;
 }
 
 function UserMessageContent({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {

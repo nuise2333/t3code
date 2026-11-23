@@ -35,6 +35,17 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 
+/** Blocks this long can be folded by hand; nothing folds on its own. */
+const MIN_CODE_FOLD_LINES = 48;
+
+function countCodeLines(code: string): number {
+  let lines = 1;
+  for (let index = code.indexOf("\n"); index !== -1; index = code.indexOf("\n", index + 1)) {
+    lines += 1;
+  }
+  return code.endsWith("\n") ? lines - 1 : lines;
+}
+
 const THREAD_FIND_IGNORE_PROPS = {
   "data-thread-find-ignore": "",
 } as React.HTMLAttributes<HTMLDivElement>;
@@ -48,6 +59,7 @@ export function MarkdownCodeBlockFrame({
   title,
   actions,
   headerProps,
+  folded,
   children,
 }: {
   as?: React.ElementType;
@@ -58,19 +70,23 @@ export function MarkdownCodeBlockFrame({
   title?: React.ReactNode;
   actions?: React.ReactNode;
   headerProps?: React.HTMLAttributes<HTMLDivElement>;
+  /** Undefined when the block is too short to fold. */
+  folded?: boolean | undefined;
   children: React.ReactNode;
 }) {
   return (
     <Wrapper
       dir="ltr"
-      className="chat-markdown-codeblock my-[0.65rem] text-start overflow-hidden rounded-lg border border-border/70 bg-secondary leading-snug dark:border-transparent dark:bg-input/32"
+      // Clip, not hidden: a hidden overflow makes the block its own scroller and the header could never stick.
+      className="chat-markdown-codeblock my-[0.65rem] scroll-mt-3 text-start overflow-clip rounded-lg border border-border/70 bg-secondary leading-snug dark:border-transparent dark:bg-input/32"
       data-language={language}
       data-wrap={wrapped ? "true" : "false"}
+      data-code-folded={folded === undefined ? undefined : folded ? "true" : "false"}
     >
       <div
         {...headerProps}
         className={cn(
-          "chat-markdown-codeblock-header flex items-center justify-between gap-2 pt-1.5 pr-1.5 pb-0 pl-3 select-none",
+          "chat-markdown-codeblock-header sticky top-0 z-[2] flex items-center justify-between gap-2 bg-secondary pt-1.5 pr-1.5 pb-0 pl-3 select-none",
           headerProps?.className,
         )}
       >
@@ -182,6 +198,18 @@ export function MarkdownCodeBlock({
     !/[\p{Cc}\p{Cf}]/u.test(code.slice(0, -1));
 
   const handleCopy = () => copyToClipboard(code);
+  const lineCount = countCodeLines(code);
+  const foldable = !isStreaming && lineCount >= MIN_CODE_FOLD_LINES;
+  const [folded, setFolded] = useState(false);
+  const foldLabel = folded ? `Expand ${lineCount} lines` : `Fold ${lineCount} lines`;
+  const toggleFold = (event: React.MouseEvent<HTMLElement>) => {
+    const block = event.currentTarget.closest<HTMLElement>(".chat-markdown-codeblock");
+    setFolded(!folded);
+    // Folding a block whose top scrolled away would strand the reader below it.
+    if (!folded && block && block.getBoundingClientRect().top < 0) {
+      block.scrollIntoView({ block: "start" });
+    }
+  };
 
   const copyButton = (
     <Tooltip>
@@ -221,8 +249,20 @@ export function MarkdownCodeBlock({
       theme={theme}
       wrapped={wrapped}
       headerProps={THREAD_FIND_IGNORE_PROPS}
+      folded={foldable ? folded : undefined}
       actions={
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
+          {foldable ? (
+            <Button
+              type="button"
+              variant="ghost-muted"
+              size="xs"
+              aria-pressed={folded}
+              onClick={toggleFold}
+            >
+              {foldLabel}
+            </Button>
+          ) : null}
           {canWrap ? (
             <Tooltip>
               <TooltipTrigger

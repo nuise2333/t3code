@@ -691,6 +691,17 @@ export default function ChatView(props: ChatViewProps) {
     return inserted;
   };
   const citeAssistantTextStable = useStableCallback(citeAssistantText);
+  const askAsideAboutAssistantTextStable = useStableCallback((citation: AssistantCitation) => {
+    const started = composerRef.current?.askAsideAboutAssistantText(citation) ?? false;
+    if (!started) {
+      toastManager.add({
+        type: "info",
+        title: "Finish or clear your draft first",
+        description: "A side question starts from an empty composer.",
+      });
+    }
+    return started;
+  });
   const replyToResponseStable = useStableCallback((response: ResponseContextRecord) => {
     const accepted = composerRef.current?.replyToResponse(response) ?? false;
     if (!accepted) {
@@ -3798,6 +3809,7 @@ export default function ChatView(props: ChatViewProps) {
                   citationRequest={citationRequest}
                   citationHistory={citationHistory}
                   onCiteAssistantText={citeAssistantTextStable}
+                  onAskAsideAboutAssistantText={askAsideAboutAssistantTextStable}
                   onReplyToResponse={replyToResponseStable}
                   {...(activeProject
                     ? { onRunShellCommand: parentPanel?.runShellCommand ?? runShellCommandStable }

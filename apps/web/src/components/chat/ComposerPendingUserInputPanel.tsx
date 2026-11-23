@@ -1,4 +1,5 @@
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
+import { opticalPrismBoxRef } from "~/optical/OpticalRuntimeHost";
 import { markdownProseDirection, textDirection } from "~/textDirection";
 import { memo, use, useEffect, useEffectEvent, useRef, useState } from "react";
 import { BackgroundThreadContext } from "./backgroundThread";
@@ -195,6 +196,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   return (
     <Collapsible
+      ref={opticalPrismBoxRef}
+      data-optical-prism-box="1"
+      data-optical-prism-reflect="bottom"
       dir={promptDirection}
       open={!isCollapsed}
       onOpenChange={(open) => {

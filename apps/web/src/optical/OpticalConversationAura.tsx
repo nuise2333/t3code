@@ -232,6 +232,11 @@ function mountConversationAura(
     wake();
   }
 
+  // A pointer over an unfocused window means the user is back, even before it takes focus.
+  function onPointerReturn() {
+    if (!windowFocused) onWindowFocus();
+  }
+
   function refresh() {
     cfg = readOpticalConfig();
     motionLevel = resolveEffectiveMotionLevel(cfg);
@@ -244,6 +249,8 @@ function mountConversationAura(
   const unsubscribeConfig = subscribeOpticalConfig(refresh);
   window.addEventListener("blur", onWindowBlur);
   window.addEventListener("focus", onWindowFocus);
+  window.addEventListener("pointermove", onPointerReturn, { passive: true });
+  document.documentElement.addEventListener("pointerenter", onPointerReturn);
   document.addEventListener("visibilitychange", onVisibilityChange);
   wake();
 
@@ -264,6 +271,8 @@ function mountConversationAura(
       unsubscribeConfig();
       window.removeEventListener("blur", onWindowBlur);
       window.removeEventListener("focus", onWindowFocus);
+      window.removeEventListener("pointermove", onPointerReturn);
+      document.documentElement.removeEventListener("pointerenter", onPointerReturn);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       glow.reclaim();
       glow.dispose();

@@ -24,13 +24,14 @@ import {
   turnItemNeedsDetailFetch,
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { claudeSkillInvocation } from "@t3tools/shared/toolActivity";
-import { memo, use, useState, type KeyboardEvent } from "react";
+import { memo, use, useRef, useState, type KeyboardEvent } from "react";
 import {
   workEntryDisplayIndicatesToolFailure,
   workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
 } from "../../session-logic";
 import ChatMarkdown from "../ChatMarkdown";
+import { useStreamingInkChoreography } from "../../optical/streamChoreography";
 import { ChatMarkdownAssetImage } from "./ChatMarkdownMedia";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { workGroupImageGallery } from "./markdownImageGallery";
@@ -125,23 +126,32 @@ export function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<Time
   const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
   const isStreaming = (entry: TimelineWorkEntry) =>
     isWorking && entry.runId === latestRunId && entry.toolLifecycleStatus === "inProgress";
+  const streaming = entries.some(isStreaming);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useStreamingInkChoreography(bodyRef, streaming);
   return (
-    <WorkLogDetails followLive={entries.some(isStreaming)}>
-      {entries.map((entry) => (
-        <ChatMarkdown
-          key={entry.id}
-          className="text-foreground"
-          text={entry.detail ?? ""}
-          cwd={ctx.markdownCwd}
-          threadRef={ctx.threadRef ?? undefined}
-          skills={ctx.skills}
-          isStreaming={isStreaming(entry)}
-          headingLevelOffset={MESSAGE_HEADING_LEVEL}
-          onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-          onImageExpand={ctx.onImageExpand}
-          lineBreaks
-        />
-      ))}
+    <WorkLogDetails followLive={streaming}>
+      <div
+        ref={bodyRef}
+        className="optical-thought-body flex flex-col gap-3"
+        data-optical-thought-streaming={streaming ? "1" : undefined}
+      >
+        {entries.map((entry) => (
+          <ChatMarkdown
+            key={entry.id}
+            className="text-foreground"
+            text={entry.detail ?? ""}
+            cwd={ctx.markdownCwd}
+            threadRef={ctx.threadRef ?? undefined}
+            skills={ctx.skills}
+            isStreaming={isStreaming(entry)}
+            headingLevelOffset={MESSAGE_HEADING_LEVEL}
+            onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+            onImageExpand={ctx.onImageExpand}
+            lineBreaks
+          />
+        ))}
+      </div>
     </WorkLogDetails>
   );
 }
@@ -446,6 +456,9 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   return (
     <WorkLogRow
       data-work-entry-id={workEntry.id}
+      data-optical-tool-state={
+        workEntry.toolLifecycleStatus === "inProgress" ? "running" : undefined
+      }
       data-v2-item-type={workEntry.projectedItem?.item.type}
       data-v2-item-visibility={workEntry.projectedItem?.visibility}
       {...rowToggleProps}

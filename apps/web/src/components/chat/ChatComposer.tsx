@@ -1,4 +1,6 @@
 import { VoiceInputSetup } from "./VoiceInputSetup";
+import { useOpticalModelFiber } from "~/optical/modelFiber";
+import { OpticalMascot } from "~/optical/OpticalMascot";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
 import type { ComposerAttachmentInsertion } from "../composerAttachmentInsertion";
@@ -309,6 +311,8 @@ export interface ChatComposerHandle {
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => boolean;
+  /** Starts a /btw side question about the selection; false when the composer already holds a draft. */
+  askAsideAboutAssistantText: (citation: AssistantCitation) => boolean;
   replyToResponse: (response: ResponseContextRecord) => boolean;
   openModelPicker: () => void;
   stepReasoningEffort: (direction: 1 | -1) => void;
@@ -1032,6 +1036,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const pasteAsTextShortcutUntilRef = useRef(0);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
+  useOpticalModelFiber(composerSurfaceRef, `${selectedInstanceId}:${selectedModel}`);
   const providerInputRejectedRef = useRef(false);
   const composerSelectLockRef = useRef(false);
   const composerMenuOpenRef = useRef(false);
@@ -3044,6 +3049,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           "cursor",
           { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
         ),
+      askAsideAboutAssistantText: (citation) => {
+        if (props.sideChatDisabledReason || promptRef.current.trim().length > 0) return false;
+        // No comment anchor: the question itself is the comment, typed after the citation.
+        const started =
+          insertComposerTextStable("/btw ", "end") &&
+          insertComposerTextStable(
+            formatAssistantCitationForComposer(citation, citation.comment),
+            "end",
+          ) &&
+          insertComposerTextStable(" ", "end");
+        if (started) focusComposer();
+        return started;
+      },
       replyToResponse: (response) => {
         // An open question owns the composer, and its answer would not carry the reply.
         if (pendingUserInputs.length > 0 || projectSelectionRequired) return false;
@@ -3424,6 +3442,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         />
       </ComposerBanner.Dock>
       <div className="relative">
+        <OpticalMascot
+          threadKey={draftId ?? activeThreadId ?? "new"}
+          running={phase === "running" || phase === "connecting"}
+          runs={activeThreadRuns}
+          provider={selectedProvider}
+          modelKey={`${selectedInstanceId}:${selectedModel}`}
+          effort={selectedPromptEffort}
+          yieldToUi={
+            composerMenuOpen ||
+            isStashMenuOpen ||
+            isComposerModelPickerOpen ||
+            pendingApprovals.length > 0 ||
+            pendingUserInputs.length > 0
+          }
+        />
         <ComposerSurface.Main
           ref={composerMainSurfaceRef}
           data-inline-resting-controls="true"

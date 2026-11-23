@@ -8,7 +8,9 @@ import { useChatCanvas } from "./ChatCanvasContext";
 import { WorkLogBlock } from "./WorkLog";
 import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
-import { deriveTimelineMinimapItems } from "./timelineMinimapItems";
+import { pulseTimelineTarget } from "../../optical/sonar";
+import { deriveTimelineMinimapItems, type TimelineMinimapItem } from "./timelineMinimapItems";
+import { registerCommands } from "../../shortcuts/dispatcher";
 import {
   type AssistantCitation,
   type EnvironmentId,
@@ -238,6 +240,10 @@ interface MessagesTimelineProps {
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => boolean;
+  onAskAsideAboutAssistantText?: (
+    citation: AssistantCitation,
+    sourceAnchor: AssistantCitationSourceAnchor,
+  ) => boolean;
   onReplyToResponse?: TimelineRowSharedState["onReplyToResponse"];
   isWorking: boolean;
   runlessWorkActive?: boolean;
@@ -363,6 +369,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   citationRequest = null,
   citationHistory = CITED_HISTORY_LOADING,
   onCiteAssistantText,
+  onAskAsideAboutAssistantText,
   onReplyToResponse,
   isWorking,
   runlessWorkActive = false,
@@ -811,6 +818,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const listOpenedOn = nextOpening.mounted ? nextOpening.identity : null;
   const viewportRef = useRef<TimelineViewport | null>(null);
   const navigateTimeline = () => viewportRef.current?.navigate({ releasesFollow: true });
+  const selectMinimapItem = (item: TimelineMinimapItem) => {
+    navigateTimeline();
+    const list = listRef.current;
+    void list
+      ?.scrollToIndex({
+        index: item.rowIndex,
+        animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
+      })
+      .then(() => pulseTimelineTarget(list.getScrollableNode(), item.id));
+  };
   const restoreReady = restoringThreadPosition && rows.length > 0;
   // Z: syncs LegendList's scroll position with which thread it shows. The list
   // is not keyed per thread and reports no "new data" event, and the restore
@@ -902,6 +920,40 @@ const ConversationTimeline = memo(function ConversationTimeline({
         };
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
+  // Where the last turn jump landed, and the scroll-derived turn seen when it did. A short
+  // thread or a pinned bottom may never move the derived turn, so repeated jumps step from here.
+  const lastTurnJump = useRef<{ index: number; seenCurrent: number | null } | null>(null);
+  const stepTurn = useEffectEvent((direction: 1 | -1) => {
+    if (minimapItems.length === 0) return false;
+    const jump = lastTurnJump.current;
+    const scrolled =
+      jump === null ||
+      (minimapCurrentIndex !== jump.seenCurrent && minimapCurrentIndex !== jump.index);
+    const from = scrolled
+      ? (minimapCurrentIndex ?? (direction > 0 ? -1 : minimapItems.length))
+      : jump.index;
+    const index = Math.max(0, Math.min(minimapItems.length - 1, from + direction));
+    const item = minimapItems[index];
+    if (!item) return false;
+    lastTurnJump.current = { index, seenCurrent: minimapCurrentIndex };
+    selectMinimapItem(item);
+    return true;
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the turn-jump keyboard commands with the app dispatcher while this timeline is mounted
+  useEffect(
+    () =>
+      registerCommands({
+        "timeline.previousTurn": (event) => {
+          if (!stepTurn(-1)) return false;
+          event.preventDefault();
+        },
+        "timeline.nextTurn": (event) => {
+          if (!stepTurn(1)) return false;
+          event.preventDefault();
+        },
+      }),
+    [],
+  );
   const [minimapAtEnd, setMinimapAtEnd] = useState(false);
   const handleAnchorReady = (info: { anchorIndex: number | undefined }) => {
     if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -1453,6 +1505,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 viewport={timelineViewportElement}
                 threadRef={citationThreadRef}
                 onCite={onCiteAssistantText}
+                onAskAside={onAskAsideAboutAssistantText}
               />
             ) : null}
             <LegendList<MessagesTimelineRow>
@@ -1512,14 +1565,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               atEnd={minimapAtEnd}
               stripMap={minimapStripMap}
               onWheel={forwardMinimapWheel}
-              onSelect={(item) => {
-                navigateTimeline();
-                void listRef.current?.scrollToIndex({
-                  index: item.rowIndex,
-                  animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-                  viewOffset: TIMELINE_MINIMAP_TARGET_OFFSET,
-                });
-              }}
+              onSelect={selectMinimapItem}
             />
           </TooltipScrollDismissArea>
         </TimelineRowActivityCtx>

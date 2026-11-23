@@ -38,7 +38,9 @@ export function WorkLogBlock({
 export function WorkLogList({ children }: { children: ReactNode }) {
   return (
     <GroupedRows value>
-      <div className="flex min-w-0 flex-col">{children}</div>
+      <div className="flex min-w-0 flex-col" data-optical-rail="1">
+        {children}
+      </div>
     </GroupedRows>
   );
 }

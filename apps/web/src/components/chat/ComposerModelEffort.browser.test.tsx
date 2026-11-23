@@ -5,8 +5,8 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
-import { useState } from "react";
-import { expect, it } from "vite-plus/test";
+import { StrictMode, useState } from "react";
+import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
@@ -74,6 +74,19 @@ function traitsInput(
   };
 }
 
+/** The optical motion level the first render reads; restored on dispose. */
+function opticalMotion(level: "off" | "ultra") {
+  const root = document.documentElement;
+  const previous = root.dataset.opticalMotion;
+  root.dataset.opticalMotion = level;
+  return {
+    [Symbol.dispose]() {
+      if (previous === undefined) delete root.dataset.opticalMotion;
+      else root.dataset.opticalMotion = previous;
+    },
+  };
+}
+
 function Column() {
   const [options, setOptions] = useState<ReadonlyArray<ProviderOptionSelection>>([]);
   const traits = traitsInput(options, (next) => setOptions(next ?? []));
@@ -88,6 +101,7 @@ function Column() {
 }
 
 it("draws an agent's reasoning as bars and keeps its mode out of the levels", async () => {
+  using _motion = opticalMotion("off");
   await using screen = await render(<Column />, { router: false }); // no routes involved
   const status = screen.getByRole("status");
   expect(status.element().querySelector("[data-composer-effort-glyph]")).not.toBeNull();
@@ -121,4 +135,33 @@ it("draws an agent's reasoning as bars and keeps its mode out of the levels", as
     .element(screen.getByRole("button", { name: "Session Mode: Plan" }))
     .toBeInTheDocument();
   await expect.element(page.getByRole("menuitemradio")).not.toBeInTheDocument();
+});
+
+it("steps the optical effort track with the arrow keys and leaves it with Up and Down", async () => {
+  using _motion = opticalMotion("ultra");
+  // StrictMode replays effects, as the app does in dev; the knob must still follow the level.
+  await using screen = await render(
+    <StrictMode>
+      <Column />
+    </StrictMode>,
+    { router: false }, // no routes involved
+  );
+  const track = screen.getByRole("slider", { name: "Thinking" });
+  await expect.element(track).toHaveAttribute("aria-valuetext", "Medium");
+
+  await userEvent.tab();
+  await expect.element(track).toHaveFocus();
+  await userEvent.keyboard("{ArrowRight}");
+  await expect.element(track).toHaveAttribute("aria-valuetext", "High");
+  await userEvent.keyboard("{End}");
+  await vi.waitFor(() =>
+    expect(track.element().style.getPropertyValue("--effort-p")).toBe("1.0000"),
+  );
+  await userEvent.keyboard("{Home}");
+  await expect.element(track).toHaveAttribute("aria-valuetext", "Low");
+
+  await userEvent.keyboard("{ArrowDown}");
+  await expect
+    .element(screen.getByRole("button", { name: "Session Mode: Bypass Permissions" }))
+    .toHaveFocus();
 });

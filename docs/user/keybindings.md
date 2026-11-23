@@ -183,6 +183,12 @@ update an older server to enable it. Select **Retry** if a search fails. It defa
 `mod+f` outside terminals and previews. Press **Enter** or **Shift+Enter** to move between matches,
 and **Escape** to close find.
 
+## Jump between turns
+
+`timeline.previousTurn` (`alt+up`) and `timeline.nextTurn` (`alt+down`) scroll the open thread to
+the previous or next message you sent. They work anywhere except the composer, where `alt+up` edits
+the last queued message, and terminals, browsers, and the reading view.
+
 ## Find on a browser page
 
 `preview.find` (`mod+f` while a browser has focus) searches the open page in the desktop app. It

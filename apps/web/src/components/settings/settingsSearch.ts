@@ -372,6 +372,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["optical caret cursor composer typing smooth elastic prism"],
   },
   {
+    id: "home-studio-panel",
+    title: "New thread usage panel",
+    to: "/settings/appearance",
+    searchTerms: ["home studio usage stats heatmap tokens models quotas new thread draft"],
+  },
+  {
+    id: "optical-mascot",
+    title: "Pixel companions",
+    to: "/settings/appearance",
+    searchTerms: ["optical mascot pet crab cat clawd mini crabs companion pixel"],
+  },
+  {
     id: "optical-target-fps",
     title: "Optical frame cap",
     to: "/settings/appearance",

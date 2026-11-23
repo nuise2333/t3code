@@ -386,6 +386,7 @@ describe("ClientSettings optical", () => {
       opticalHomeRipple: true,
       opticalSmoothCaret: true,
       opticalSpectrum: "follow",
+      opticalMascot: "crab",
     };
     expect(decodeClientSettings({})).toMatchObject(defaults);
     expect(DEFAULT_CLIENT_SETTINGS).toMatchObject(defaults);
@@ -399,8 +400,14 @@ describe("ClientSettings optical", () => {
         opticalHomeRipple: false,
         opticalSmoothCaret: false,
         opticalSpectrum: "mono",
+        opticalMascot: "off",
       },
-      { opticalMotionLevel: "subtle", opticalAmbientIntensity: 35, opticalTargetFps: "native" },
+      {
+        opticalMotionLevel: "subtle",
+        opticalAmbientIntensity: 35,
+        opticalTargetFps: "native",
+        opticalMascot: "minis",
+      },
       { opticalMotionLevel: "standard", opticalAmbientIntensity: 70, opticalTargetFps: "180" },
     ]) {
       expect(decodeClientSettingsPatch(choices)).toEqual(choices);
@@ -417,6 +424,7 @@ describe("ClientSettings optical", () => {
     { opticalHomeRipple: "true" },
     { opticalSmoothCaret: 1 },
     { opticalSpectrum: "rainbow" },
+    { opticalMascot: "dual" },
   ])("rejects %o as a patch and as stored settings", (invalid) => {
     expect(() => decodeClientSettingsPatch(invalid)).toThrow();
     expect(() => decodeClientSettings(invalid)).toThrow();

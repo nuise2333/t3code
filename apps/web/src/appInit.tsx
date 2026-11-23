@@ -105,7 +105,8 @@ function startClientAppearance(): void {
       previous.opticalTargetFps !== settings.opticalTargetFps ||
       previous.opticalHomeRipple !== settings.opticalHomeRipple ||
       previous.opticalSmoothCaret !== settings.opticalSmoothCaret ||
-      previous.opticalSpectrum !== settings.opticalSpectrum
+      previous.opticalSpectrum !== settings.opticalSpectrum ||
+      previous.opticalMascot !== settings.opticalMascot
     ) {
       root.dataset.opticalMotion = settings.opticalMotionLevel;
       root.dataset.opticalAmbient = String(settings.opticalAmbientIntensity / 100);
@@ -113,6 +114,7 @@ function startClientAppearance(): void {
       root.dataset.opticalHomeRipple = settings.opticalHomeRipple ? "1" : "0";
       root.dataset.opticalSmoothCaret = settings.opticalSmoothCaret ? "1" : "0";
       root.dataset.opticalSpectrum = settings.opticalSpectrum;
+      root.dataset.opticalMascot = settings.opticalMascot;
       // Optical controllers listen for this instead of observing the root's attributes.
       window.dispatchEvent(new CustomEvent("t3:optical-settings-changed"));
     }

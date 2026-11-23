@@ -153,8 +153,10 @@ function mountHomeRipple(
       reclaim();
       return;
     }
-    const nextWidth = host.clientWidth;
-    const nextHeight = host.clientHeight;
+    // The field sits behind the visible page; a host stretched past the viewport would only
+    // grow its per-cell buffers without painting anything more.
+    const nextWidth = Math.min(host.clientWidth, window.innerWidth);
+    const nextHeight = Math.min(host.clientHeight, window.innerHeight);
     const nextDpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     if (nextWidth === width && nextHeight === height && nextDpr === dpr) {
       cachedRect = null;

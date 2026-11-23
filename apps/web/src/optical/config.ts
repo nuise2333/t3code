@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 export type OpticalMotionLevel = "off" | "subtle" | "standard" | "ultra";
 export type OpticalTargetFps = "60" | "120" | "180" | "native";
 export type OpticalSpectrum = "follow" | "cobalt" | "iris" | "amber" | "mono";
+export type OpticalMascotMode = "crab" | "minis" | "off";
 /** 0 default, 1 warm, 2 cobalt, 3 iris, 4 amber, 5 mono. */
 export type OpticalSpectrumCode = 0 | 1 | 2 | 3 | 4 | 5;
 export type Rgb = readonly [number, number, number];
@@ -14,6 +15,7 @@ export interface OpticalRuntimeConfig {
   readonly homeRipple: boolean;
   readonly smoothCaret: boolean;
   readonly spectrum: OpticalSpectrum;
+  readonly mascot: OpticalMascotMode;
 }
 
 interface ThemeRippleColors {
@@ -27,6 +29,7 @@ const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 const MOTION_LEVELS = ["off", "subtle", "standard", "ultra"] as const;
 const TARGET_FPS = ["60", "120", "180", "native"] as const;
 const SPECTRA = ["follow", "cobalt", "iris", "amber", "mono"] as const;
+const MASCOT_MODES = ["crab", "minis", "off"] as const;
 const OBSERVED_ROOT_ATTRIBUTES = [
   "class",
   "data-theme-id",
@@ -36,6 +39,7 @@ const OBSERVED_ROOT_ATTRIBUTES = [
   "data-optical-home-ripple",
   "data-optical-smooth-caret",
   "data-optical-spectrum",
+  "data-optical-mascot",
 ];
 const WARM_THEME_PATTERN = /^(?:ember|claude)$|^warm(?:-|$)/u;
 const FALLBACK_MONO_FONT = "ui-monospace, Consolas, monospace";
@@ -47,6 +51,7 @@ const DEFAULT_CONFIG: OpticalRuntimeConfig = {
   homeRipple: true,
   smoothCaret: true,
   spectrum: "follow",
+  mascot: "crab",
 };
 
 const INK_FALLBACK_DARK: Rgb = [146, 148, 156];
@@ -84,6 +89,7 @@ export function readOpticalConfig(): OpticalRuntimeConfig {
     homeRipple: data.opticalHomeRipple !== "0",
     smoothCaret: data.opticalSmoothCaret !== "0",
     spectrum: oneOf(SPECTRA, data.opticalSpectrum, DEFAULT_CONFIG.spectrum),
+    mascot: oneOf(MASCOT_MODES, data.opticalMascot, DEFAULT_CONFIG.mascot),
   };
 }
 
@@ -204,11 +210,27 @@ export function resolveThemeRippleColors(
   if (typeof document === "undefined") return { ink: inkFallback, wave: waveFallback };
   const style = getComputedStyle(document.documentElement);
   const spectrumWave = isDark ? undefined : LIGHT_WAVE_BY_SPECTRUM[spectrumCode];
+  const ink = readThemeColor(style, "--muted-foreground") ?? inkFallback;
+  const wave =
+    spectrumWave ?? readThemeColor(style, isDark ? "--foreground" : "--primary") ?? waveFallback;
+  // Neutral and cobalt light surfaces lean the ink and wave toward a cool slate blue.
+  if (isDark || (spectrumCode !== 0 && spectrumCode !== 2)) return { ink, wave };
   return {
-    ink: readThemeColor(style, "--muted-foreground") ?? inkFallback,
-    wave:
-      spectrumWave ?? readThemeColor(style, isDark ? "--foreground" : "--primary") ?? waveFallback,
+    ink: mixRgb(ink, LIGHT_INK_COOL, LIGHT_COOL_MIX),
+    wave: mixRgb(wave, LIGHT_WAVE_COOL, LIGHT_COOL_MIX * 0.65),
   };
+}
+
+const LIGHT_INK_COOL: Rgb = [74, 90, 118];
+const LIGHT_WAVE_COOL: Rgb = [37, 99, 235];
+const LIGHT_COOL_MIX = 0.68;
+
+function mixRgb(from: Rgb, to: Rgb, amount: number): Rgb {
+  return [
+    Math.round(from[0] + (to[0] - from[0]) * amount),
+    Math.round(from[1] + (to[1] - from[1]) * amount),
+    Math.round(from[2] + (to[2] - from[2]) * amount),
+  ];
 }
 
 export function resolveOpticalMonoFont(): string {
@@ -265,7 +287,7 @@ let snapshotKey = "";
 
 function readConfigSnapshot(): OpticalRuntimeConfig {
   const next = readOpticalConfig();
-  const key = `${next.motionLevel}|${next.ambientIntensity}|${next.targetFps}|${next.homeRipple}|${next.smoothCaret}|${next.spectrum}`;
+  const key = `${next.motionLevel}|${next.ambientIntensity}|${next.targetFps}|${next.homeRipple}|${next.smoothCaret}|${next.spectrum}|${next.mascot}`;
   if (key !== snapshotKey) {
     snapshotKey = key;
     snapshot = next;

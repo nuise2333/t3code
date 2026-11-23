@@ -5,7 +5,7 @@ import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/envir
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { FolderPlusIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
-import { useRef, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { shortcutLabelForCommand } from "~/keybindings";
@@ -54,6 +54,12 @@ import { TriageDraftHero } from "./TriageDraftHero";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveProjectDefaultProviderModelSelection } from "../../providerInstances";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import { HomeStudioPanelSkeleton } from "../usage/HomeStudioPanelFrame";
+
+// Split out so the usage panel never delays the composer's first paint.
+const HomeStudioPanel = lazy(() =>
+  import("../usage/HomeStudioPanel").then((module) => ({ default: module.HomeStudioPanel })),
+);
 
 const ADD_PROJECT_VALUE = "add-project";
 
@@ -97,6 +103,7 @@ export function DraftHeroHeadline({
   const pickerFilter = useComboboxFilter();
   const highlightedPickerValueRef = useRef<string | null>(null);
   const { canPinProjectGroup, toggleProjectGroupPin } = useProjectPin();
+  const showStudioPanel = useClientSettings((settings) => settings.homeStudioPanel);
 
   const environmentLabelById = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
@@ -421,6 +428,11 @@ export function DraftHeroHeadline({
           {isScratchDraft ? projectSelector : orStartWithoutProject}
         </p>
       )}
+      {showStudioPanel ? (
+        <Suspense fallback={<HomeStudioPanelSkeleton />}>
+          <HomeStudioPanel />
+        </Suspense>
+      ) : null}
     </div>
   );
 }
