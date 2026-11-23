@@ -12,7 +12,44 @@ const VERSION = "0.1.0";
 const APP = process.env.ZCODE_APP || "/Applications/ZCode.app";
 const ZCODE_BIN = NodePath.join(APP, "Contents/MacOS/ZCode");
 const ZCODE_CLI = NodePath.join(APP, "Contents/Resources/glm/zcode.cjs");
-const BUILTIN_CONFIG = NodePath.join(APP, "Contents/Resources/config/provider/zcode-builtin.json");
+const BUNDLED_BUILTIN_CONFIG = NodePath.join(
+  APP,
+  "Contents/Resources/config/provider/zcode-builtin.json",
+);
+
+// ZCode refreshes its built-in catalog from its CDN into ~/.zcode/v2/runtime/provider; the
+// bundled copy lags behind it (new models such as GLM-5.4 only appear in the refreshed one).
+function newestBuiltinConfig() {
+  const revisionOf = (file) => Number(readJson(file)?.revision ?? -1);
+  let best = { file: BUNDLED_BUILTIN_CONFIG, revision: revisionOf(BUNDLED_BUILTIN_CONFIG) };
+  const walk = (dir, depth) => {
+    let entries = [];
+    try {
+      entries = NodeFS.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = NodePath.join(dir, entry.name);
+      if (entry.isDirectory() && depth < 4) walk(full, depth + 1);
+      else if (entry.name === "zcode-builtin.json" && revisionOf(full) > best.revision) {
+        best = { file: full, revision: revisionOf(full) };
+      }
+    }
+  };
+  walk(NodePath.join(NodeOS.homedir(), ".zcode/v2/runtime/provider"), 0);
+  return best.file;
+}
+
+function readJson(file) {
+  try {
+    return JSON.parse(NodeFS.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+const BUILTIN_CONFIG = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || newestBuiltinConfig();
 const MODES = [
   { id: "build", name: "Build", description: "Ask before side effects" },
   { id: "plan", name: "Plan", description: "Read-only planning" },
@@ -49,12 +86,11 @@ function resolvePersonalConfig() {
     (t) => t.templateId === templateId,
   );
   if (!template) throw new Error(`Unknown ZCode provider template: ${templateId}`);
-  const models =
-    process.env.ZCODE_ACP_MODELS?.split(",")
-      .map((m) => m.trim())
-      .filter(Boolean) ??
-    template.config.builtinModelIds ??
-    [];
+  const models = process.env.ZCODE_ACP_MODELS?.trim()
+    ? process.env.ZCODE_ACP_MODELS.split(",")
+        .map((m) => m.trim())
+        .filter(Boolean)
+    : defaultTemplateModels(builtin, template);
   const config = {
     schemaVersion: 1,
     config: {
@@ -87,6 +123,73 @@ function resolvePersonalConfig() {
   NodeFS.writeFileSync(tempConfigFile, JSON.stringify(config), { mode: 0o600 });
   return tempConfigFile;
 }
+
+// A coding-plan API key reaches every model the matching individual plan grants, not only the
+// template's short builtin list.
+function defaultTemplateModels(builtin, template) {
+  const models = [...(template.config.builtinModelIds ?? [])];
+  if (template.config.access?.type !== "zhipu-coding-plan-api-key") return models;
+  const planId = template.templateId.startsWith("zai")
+    ? "account:zai-individual-coding-plan"
+    : "account:bigmodel-individual-coding-plan";
+  const rules = builtin.config.modelConfigRules;
+  const disabled = new Set(
+    rules.templateModelRules
+      .filter((r) => r.templateId === template.templateId && r.config?.enabled === false)
+      .map((r) => r.modelId),
+  );
+  for (const rule of rules.builtinProviderModelRules) {
+    if (rule.providerId !== planId || rule.config?.enabled === false) continue;
+    if (disabled.has(rule.modelId) || models.includes(rule.modelId)) continue;
+    models.push(rule.modelId);
+  }
+  return models;
+}
+
+// app-server reports only the selected model as available, so the picker is built from the
+// personal provider config ZCode was started with.
+function personalModelCatalog(configFile) {
+  const rules = readJson(configFile)?.config?.providerConfigRules?.providerRules ?? [];
+  return rules
+    .filter((rule) => rule.enabled !== false)
+    .flatMap((rule) =>
+      (rule.config?.personalModelIds ?? []).map((modelId) => ({
+        providerId: rule.providerId,
+        modelId,
+        providerName: rule.providerName ?? rule.providerId,
+        apiType: rule.config?.api?.type ?? "",
+      })),
+    );
+}
+
+function matchesRule(pattern, value) {
+  try {
+    return new RegExp("^(?:" + pattern + ")$", "i").test(value);
+  } catch {
+    return false;
+  }
+}
+
+function reasoningLevelsFor(modelId, apiType) {
+  const rules = readJson(BUILTIN_CONFIG)?.config?.modelConfigRules;
+  let values = [];
+  for (const rule of [...(rules?.modelRules ?? []), ...(rules?.modelApiRules ?? [])]) {
+    if (rule.apiTypeMatch && !matchesRule(rule.apiTypeMatch, apiType)) continue;
+    if (!matchesRule(rule.modelMatch, modelId)) continue;
+    values = rule.config?.optionSpecs?.reasoningLevel?.values ?? values;
+  }
+  return values;
+}
+
+function pickReasoningLevel(levels, preferred) {
+  if (levels.length === 0) return undefined;
+  if (preferred && levels.includes(preferred)) return preferred;
+  if (levels.includes("high")) return "high";
+  if (levels.includes("enabled")) return "enabled";
+  return levels[levels.length - 1];
+}
+
+let modelCatalog = [];
 
 function lineReader(stream, onMessage) {
   let buf = "";
@@ -133,10 +236,10 @@ function startZcode() {
   const env = {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",
-    ZCODE_BUILTIN_PROVIDER_CONFIG_FILE:
-      process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || BUILTIN_CONFIG,
+    ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: BUILTIN_CONFIG,
     ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: resolvePersonalConfig(),
   };
+  modelCatalog = personalModelCatalog(env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE);
   delete env.ZCODE_ACP_API_KEY;
   zc = NodeChildProcess.spawn(ZCODE_BIN, [ZCODE_CLI, "app-server", "--surface", "desktop"], {
     env,
@@ -191,21 +294,29 @@ function parseModelValue(value) {
 
 function configOptions(session) {
   const settings = session.settings ?? {};
-  const available = settings.model?.available ?? [];
   const current = settings.model?.current;
+  const choices = modelCatalog.map((m) => ({
+    value: modelValue(m),
+    name: m.modelId,
+    description: m.providerName,
+  }));
+  for (const m of settings.model?.available ?? []) {
+    if (choices.some((c) => c.value === modelValue(m.ref))) continue;
+    choices.push({
+      value: modelValue(m.ref),
+      name: m.label ?? m.ref.modelId,
+      ...(m.providerLabel ? { description: m.providerLabel } : {}),
+    });
+  }
   const options = [];
-  if (available.length > 0) {
+  if (choices.length > 0) {
     options.push({
       id: "model",
       name: "Model",
       category: "model",
       type: "select",
-      currentValue: current ? modelValue(current) : modelValue(available[0].ref),
-      options: available.map((m) => ({
-        value: modelValue(m.ref),
-        name: m.label ?? m.ref.modelId,
-        ...(m.providerLabel ? { description: m.providerLabel } : {}),
-      })),
+      currentValue: current ? modelValue(current) : choices[0].value,
+      options: choices,
     });
   }
   const levels = settings.thoughtLevel?.enabled ? (settings.thoughtLevel.available ?? []) : [];
@@ -665,7 +776,17 @@ async function setConfigOption(params) {
   if (params.configId === "model") {
     const ref = parseModelValue(value);
     if (!ref) throw new RpcError(-32602, `Invalid model value ${value}`);
-    await zcRequest("session/setModel", { sessionId: session.id, model: ref });
+    const entry = modelCatalog.find(
+      (m) => m.providerId === ref.providerId && m.modelId === ref.modelId,
+    );
+    const level = pickReasoningLevel(
+      reasoningLevelsFor(ref.modelId, entry?.apiType ?? ""),
+      session.settings?.thoughtLevel?.current,
+    );
+    await zcRequest("session/setModel", {
+      sessionId: session.id,
+      model: { ...ref, ...(level ? { options: { reasoningLevel: level } } : {}) },
+    });
   } else if (params.configId === "thought_level") {
     await zcRequest("session/setThoughtLevel", { sessionId: session.id, thoughtLevel: value });
   } else if (params.configId === "mode") {

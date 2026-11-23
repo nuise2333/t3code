@@ -66,11 +66,13 @@ export function shouldShowInstanceBadge(
     readonly driverKind: ProviderDriverKind;
     readonly accentColor?: string | undefined;
     readonly acpRegistryAgentId?: string | undefined;
+    readonly acpRegistryIconUrl?: string | undefined;
     readonly enabled: boolean;
   },
   entries: Iterable<{
     readonly driverKind: ProviderDriverKind;
     readonly acpRegistryAgentId?: string | undefined;
+    readonly acpRegistryIconUrl?: string | undefined;
     readonly enabled: boolean;
   }>,
 ): boolean {
@@ -80,9 +82,11 @@ export function shouldShowInstanceBadge(
     if (candidate.driverKind !== entry.driverKind) continue;
     // Historical threads still need to distinguish accounts that are all disabled.
     if (entry.enabled && !candidate.enabled) continue;
+    // Local ACP commands have no agent id; their bundled icon already tells them apart.
     if (
       entry.driverKind === "acpRegistry" &&
-      candidate.acpRegistryAgentId !== entry.acpRegistryAgentId
+      (candidate.acpRegistryAgentId ?? candidate.acpRegistryIconUrl) !==
+        (entry.acpRegistryAgentId ?? entry.acpRegistryIconUrl)
     ) {
       continue;
     }

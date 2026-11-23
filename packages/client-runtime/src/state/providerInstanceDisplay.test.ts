@@ -55,6 +55,10 @@ describe("shouldShowInstanceBadge", () => {
   it("distinguishes registry instances whose agent identity is unavailable", () => {
     const entry = { driverKind: acpRegistry, enabled: true };
     expect(shouldShowInstanceBadge(entry, [entry, { ...entry }])).toBe(true);
+    const dsh = { ...entry, acpRegistryIconUrl: "t3-acp-icon:deepseek-harness" };
+    const zcode = { ...entry, acpRegistryIconUrl: "t3-acp-icon:zcode" };
+    expect(shouldShowInstanceBadge(dsh, [dsh, zcode, entry])).toBe(false);
+    expect(shouldShowInstanceBadge(zcode, [zcode, { ...zcode }])).toBe(true);
   });
 
   it("shows the badge when the entry has an accent color", () => {
