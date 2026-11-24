@@ -548,9 +548,10 @@ export function chatMarkdownClipboardPayload(
     const ancestor = range.commonAncestorContainer;
     const ancestorElement =
       ancestor.nodeType === Node.ELEMENT_NODE ? (ancestor as Element) : ancestor.parentElement;
-    const diagramSource = ancestorElement
-      ?.closest("[data-markdown-mermaid]")
-      ?.getAttribute("data-markdown-copy");
+    const diagram = ancestorElement?.closest("[data-markdown-mermaid]");
+    // The source shown when a diagram cannot render is ordinary code to select from.
+    const inShownSource = diagram?.contains(ancestorElement?.closest("pre") ?? null) === true;
+    const diagramSource = inShownSource ? null : diagram?.getAttribute("data-markdown-copy");
     if (diagramSource != null) {
       const text = diagramSource.trim();
       if (!text) continue;
