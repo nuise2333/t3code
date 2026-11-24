@@ -186,7 +186,9 @@ export const readKimiCodeUsageLimits = Effect.fn("readKimiCodeUsageLimits")(func
       return makeUnavailableUsageLimits({
         checkedAt,
         reason: "probeFailed",
-        message: "Kimi Code's sign-in has expired. Sign in to Kimi Code again.",
+        // A timeout or outage looks the same as a rejected token here; never claim the sign-in is gone.
+        message:
+          "Could not refresh Kimi Code's sign-in. Refresh provider status to retry, or sign in to Kimi Code again.",
       });
     }
     token = rotated.value;
