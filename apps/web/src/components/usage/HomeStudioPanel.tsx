@@ -13,6 +13,7 @@ import {
   collectLimitPools,
   displayLimitWindows,
   formatResetsIn,
+  formatUsageBalance,
   paceRemainingPercent,
   type LimitPool,
   type LimitPoolWindow,
@@ -691,6 +692,17 @@ function QuotaCard({ pool, now }: { readonly pool: LimitPool; readonly now: numb
           </div>
         );
       })}
+      {pool.accounts
+        .flatMap((account) => account.limits.balances ?? [])
+        .map((balance) => (
+          <div
+            key={`balance:${balance.currency}`}
+            className="flex items-baseline justify-between gap-1.5 text-2xs"
+          >
+            <span className="text-3xs text-muted-foreground">Balance</span>
+            <span className="font-semibold text-foreground">{formatUsageBalance(balance)}</span>
+          </div>
+        ))}
       {pool.accounts.length > 1 ? (
         <span className="text-3xs text-muted-foreground">
           {pool.accounts.length} accounts pooled

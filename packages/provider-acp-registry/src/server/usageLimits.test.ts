@@ -9,6 +9,8 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 import {
+  dshApiKeyRef,
+  readDeepSeekBalance,
   readKimiCodeUsageLimits,
   readZCodeUsageLimits,
   tokenPlanUsageToWindows,
@@ -176,4 +178,49 @@ describe("ACP Registry agent limits", () => {
       ["5-hour", "session", 50, 300],
     ]);
   });
+  it("reads dsh's stored DeepSeek API key only from its refs section", () => {
+    const credentials = [
+      "version: 1",
+      "records:",
+      "  deepseek-account-platform/default:",
+      "    payload:",
+      "      DEEPSEEK_API_KEY: not-this-one",
+      "refs:",
+      "  DEEPSEEK_API_KEY: sk-test",
+      "  MAGPIE_GATEWAY_KEY: other",
+    ].join("\n");
+    expect(dshApiKeyRef(credentials)).toBe("sk-test");
+    expect(dshApiKeyRef('refs:\n  DEEPSEEK_API_KEY: "bad key"')).toBeUndefined();
+  });
+
+  it.effect("reports DeepSeek's prepaid wallet as balances, not a percentage window", () =>
+    Effect.gen(function* () {
+      const limits = yield* readDeepSeekBalance({ DEEPSEEK_API_KEY: "sk-test" }).pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.sync(() => {
+              expect(request.headers.authorization).toBe("Bearer sk-test");
+              return HttpClientResponse.fromWeb(
+                request,
+                Response.json({
+                  is_available: true,
+                  balance_infos: [
+                    {
+                      currency: "CNY",
+                      total_balance: "41.44",
+                      granted_balance: "1.00",
+                      topped_up_balance: "40.44",
+                    },
+                  ],
+                }),
+              );
+            }),
+          ),
+        ),
+      );
+      expect(limits.windows).toEqual([]);
+      expect(limits.balances).toEqual([{ currency: "CNY", total: 41.44, granted: 1 }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });

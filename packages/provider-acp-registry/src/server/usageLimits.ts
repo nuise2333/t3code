@@ -409,8 +409,68 @@ export const readQwenTokenPlanUsageLimits = Effect.fn("readQwenTokenPlanUsageLim
   return makeUsageLimits({ checkedAt, windows });
 });
 
+const DeepSeekBalance = Schema.Struct({
+  balance_infos: Schema.Array(
+    Schema.Struct({
+      currency: Schema.NonEmptyString,
+      total_balance: Schema.NumberFromString,
+      granted_balance: Schema.optional(Schema.NumberFromString),
+    }),
+  ),
+});
+
+/** The API key dsh keeps under `refs:` in ~/.dsh/.credentials.yaml. */
+export function dshApiKeyRef(credentials: string): string | undefined {
+  const refs = credentials.split(/^refs:\s*$/m)[1];
+  const value = refs?.match(/^\s+DEEPSEEK_API_KEY:\s*["']?([^\s"']+)["']?\s*$/m)?.[1];
+  return value && Option.isSome(decodeHeaderSafe(value)) ? value : undefined;
+}
+
+/** DeepSeek bills a prepaid wallet, so its "limits" are the balance, not a percentage window. */
+export const readDeepSeekBalance = Effect.fn("readDeepSeekBalance")(function* (
+  environment: NodeJS.ProcessEnv,
+) {
+  const checkedAt = DateTime.formatIso(yield* DateTime.now);
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const home = environment.HOME || (yield* HostProcess.HomeDirectory);
+  const fromEnvironment = decodeHeaderSafe(environment.DEEPSEEK_API_KEY?.trim());
+  const apiKey = Option.isSome(fromEnvironment)
+    ? fromEnvironment.value
+    : yield* fs.readFileString(path.join(home, ".dsh", ".credentials.yaml")).pipe(
+        Effect.map(dshApiKeyRef),
+        Effect.orElseSucceed(() => undefined),
+      );
+  if (!apiKey) {
+    return makeUnavailableUsageLimits({
+      checkedAt,
+      reason: "unsupported",
+      message: "Add a DeepSeek API key to dsh to see the account balance.",
+    });
+  }
+  const response = yield* (yield* HttpClient.HttpClient)
+    .pipe(HttpClient.filterStatusOk)
+    .execute(
+      HttpClientRequest.get("https://api.deepseek.com/user/balance").pipe(
+        HttpClientRequest.bearerToken(apiKey),
+      ),
+    )
+    .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(DeepSeekBalance)), withoutRedirects);
+  return {
+    ...makeUsageLimits({ checkedAt, windows: [] }),
+    balances: response.balance_infos.map((info) => ({
+      currency: info.currency,
+      total: info.total_balance,
+      ...(info.granted_balance === undefined ? {} : { granted: info.granted_balance }),
+    })),
+  };
+});
+
 type UsageRead = ReturnType<
-  typeof readKimiCodeUsageLimits | typeof readZCodeUsageLimits | typeof readQwenTokenPlanUsageLimits
+  | typeof readKimiCodeUsageLimits
+  | typeof readZCodeUsageLimits
+  | typeof readQwenTokenPlanUsageLimits
+  | typeof readDeepSeekBalance
 >;
 
 /** The limits reader for an ACP Registry agent that reports them, if any. */
@@ -428,5 +488,6 @@ export function acpRegistryUsageReader(
   if (agentId === "kimi-code") return readKimiCodeUsageLimits;
   if (agentId === "zcode-acp.mjs") return readZCodeUsageLimits;
   if (agentId === "qwen-code") return readQwenTokenPlanUsageLimits;
+  if (agentId === "dsh-acp.mjs") return readDeepSeekBalance;
   return undefined;
 }

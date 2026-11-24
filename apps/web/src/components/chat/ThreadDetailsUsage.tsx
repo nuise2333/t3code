@@ -9,6 +9,7 @@ import {
   collectProviderUsageLimits,
   formatDuration,
   type LimitPace,
+  formatUsageBalance,
   limitsNotice,
   paceOf,
   remainingPercent,
@@ -89,16 +90,37 @@ export function ProviderUsageLimitRows({
           tooltip={<span className="text-foreground">{notice}</span>}
         />
       ) : (
-        limits.windows.map((window) => (
-          <LimitRow
-            key={window.id}
-            window={window}
-            now={now}
-            showResetCountdown={showResetCountdown}
-            tooltipSide={tooltipSide}
-            compactPadding={compactPadding}
-          />
-        ))
+        <>
+          {limits.windows.map((window) => (
+            <LimitRow
+              key={window.id}
+              window={window}
+              now={now}
+              showResetCountdown={showResetCountdown}
+              tooltipSide={tooltipSide}
+              compactPadding={compactPadding}
+            />
+          ))}
+          {(limits.balances ?? []).map((balance) => (
+            <UsageRow
+              key={`balance:${balance.currency}`}
+              label="Balance"
+              fill={null}
+              tone={null}
+              value={formatUsageBalance(balance)}
+              tooltipSide={tooltipSide}
+              compactPadding={compactPadding}
+              tooltip={
+                <span className="text-foreground">
+                  Prepaid balance
+                  {balance.granted
+                    ? `, ${formatUsageBalance({ ...balance, total: balance.granted })} granted`
+                    : ""}
+                </span>
+              }
+            />
+          ))}
+        </>
       )}
     </div>
   );

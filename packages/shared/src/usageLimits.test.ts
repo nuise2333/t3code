@@ -20,6 +20,8 @@ import {
   collectLimitNotices,
   collectLimitPools,
   elapsedShare,
+  formatUsageBalance,
+  limitsNotice,
   applicableUsageWindows,
   exhaustedUsageWindow,
   paceOf,
@@ -1202,6 +1204,15 @@ describe("pooled account columns", () => {
     pool.windows.map((row) =>
       row.columns.map((member) => (member.window ? member.account.key : null)),
     );
+
+  it("treats a prepaid balance without windows as reported limits", () => {
+    const checkedAt = "2026-09-03T11:00:00.000Z";
+    expect(limitsNotice({ checkedAt, windows: [] })).toBe("No limits reported.");
+    expect(
+      limitsNotice({ checkedAt, windows: [], balances: [{ currency: "CNY", total: 41.44 }] }),
+    ).toBeNull();
+    expect(formatUsageBalance({ currency: "CNY", total: 41.44 })).toBe("¥41.44");
+  });
 
   it("gives each ACP Registry agent its own pool, named and iconed after the agent", () => {
     const agent = (name: string, iconUrl: string): LimitAccount => ({

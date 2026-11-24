@@ -758,7 +758,19 @@ export function limitsNotice(limits: ServerProviderUsageLimits): string | null {
   if (limits.unavailable?.reason === "probeFailed") {
     return limits.unavailable.message ?? "Could not read limits.";
   }
-  return limits.windows.length === 0 ? "No limits reported." : null;
+  return limits.windows.length === 0 && !limits.balances?.length ? "No limits reported." : null;
+}
+
+/** A prepaid wallet balance as a short money label, e.g. "¥41.44". */
+export function formatUsageBalance(balance: { readonly currency: string; readonly total: number }) {
+  if (balance.currency === "CNY") return `¥${balance.total.toFixed(2)}`;
+  try {
+    return new Intl.NumberFormat("en", { style: "currency", currency: balance.currency }).format(
+      balance.total,
+    );
+  } catch {
+    return `${balance.total.toFixed(2)} ${balance.currency}`;
+  }
 }
 
 export function remainingPercent(window: ServerProviderUsageWindow): number {

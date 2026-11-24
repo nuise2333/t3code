@@ -4,6 +4,7 @@ import {
   collectExternalUsageLinks,
   collectLimitNotices,
   collectLimitPools,
+  formatUsageBalance,
   cursorUsageWindowDetails,
   displayLimitWindows,
   formatResetsIn,
@@ -586,6 +587,31 @@ function PoolWindowCard({
   );
 }
 
+function BalanceCard({
+  balance,
+}: {
+  readonly balance: NonNullable<LimitPool["accounts"][number]["limits"]["balances"]>[number];
+}) {
+  return (
+    <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)]">
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium text-foreground">Balance</span>
+        <span className="flex items-baseline gap-2">
+          <span className="text-3xl font-semibold text-foreground tabular-nums">
+            {formatUsageBalance(balance)}
+          </span>
+          <span className="text-sm text-muted-foreground">prepaid</span>
+        </span>
+      </div>
+      {balance.granted ? (
+        <p className="text-sm text-muted-foreground tabular-nums">
+          Includes {formatUsageBalance({ ...balance, total: balance.granted })} granted
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
   const color = barColor(pool.driver);
   const label = pool.label ?? providerClients.get(pool.driver)?.label ?? String(pool.driver);
@@ -617,6 +643,11 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
           />
         );
       })}
+      {pool.accounts
+        .flatMap((account) => account.limits.balances ?? [])
+        .map((balance) => (
+          <BalanceCard key={`balance:${balance.currency}`} balance={balance} />
+        ))}
     </section>
   );
 }

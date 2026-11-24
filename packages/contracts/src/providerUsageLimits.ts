@@ -51,6 +51,16 @@ export const ServerProviderUsageLimits = Schema.Struct({
   zeroSpendCap: Schema.optional(Schema.Boolean),
   credentialFingerprint: Schema.optional(TrimmedNonEmptyString),
   resetCredits: Schema.optional(ServerProviderResetCredits),
+  /** Prepaid money left, for providers billed from a wallet instead of a percentage allowance. */
+  balances: Schema.optional(
+    ForwardCompatibleArray(
+      Schema.Struct({
+        currency: TrimmedNonEmptyString,
+        total: Schema.Number,
+        granted: Schema.optional(Schema.Number),
+      }),
+    ),
+  ),
   externalUsage: Schema.optional(
     Schema.Struct({
       label: TrimmedNonEmptyString,
