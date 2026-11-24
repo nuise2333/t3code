@@ -4201,7 +4201,14 @@ it.layer(
           claudeCapabilities({
             models: [
               { value: "default", displayName: "Default", description: "" },
-              { value: "sonnet", displayName: "Sonnet", description: "" },
+              {
+                value: "sonnet",
+                resolvedModel: "claude-sonnet-5-5",
+                displayName: "Sonnet",
+                description: "",
+                supportsEffort: true,
+                supportedEffortLevels: ["medium", "high"],
+              },
               { value: "claude-haiku-4-5[1m]", displayName: "Haiku", description: "" },
               {
                 value: "best",
@@ -4221,6 +4228,19 @@ it.layer(
               },
             ],
           }),
+        );
+        // Catalog models take their effort levels from Claude Code's model list.
+        const sonnetEffort = status.models
+          .find((row) => row.slug === "claude-sonnet-5-5")
+          ?.capabilities?.optionDescriptors?.find((descriptor) => descriptor.id === "effort");
+        assert.ok(sonnetEffort?.type === "select");
+        assert.deepStrictEqual(
+          sonnetEffort.options.map((option) => [option.id, option.isDefault === true]),
+          [
+            ["medium", true],
+            ["high", false],
+            ["ultrathink", false],
+          ],
         );
         const catalogSlugs = new Set(BUNDLED_CLAUDE_MODEL_CATALOG.models.map((m) => m.model.slug));
         const added = status.models.filter((model) => !catalogSlugs.has(model.slug));
@@ -4250,7 +4270,7 @@ it.layer(
         Effect.provide(
           layerMockSpawner((args) => {
             const joined = args.join(" ");
-            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "--version") return { stdout: "2.1.331\n", stderr: "", code: 0 };
             throw new Error(`Unexpected args: ${joined}`);
           }),
         ),

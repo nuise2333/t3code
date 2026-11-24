@@ -145,16 +145,19 @@ it.effect("reuses one Codex skills helper per launch until it idles out", () =>
   }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
 );
 
-it("maps current Codex model capability fields", () => {
+it.each([
+  ["gpt-6-astra", "low", "Low"],
+  ["gpt-test", "super-high", "super-high"],
+])("maps %s capability fields from model/list", (slug, defaultEffort, label) => {
   const capabilities = mapCodexModelCapabilities({
     additionalSpeedTiers: [],
-    defaultReasoningEffort: "super-high",
+    defaultReasoningEffort: defaultEffort!,
     description: "Test model",
     displayName: "GPT Test",
     hidden: false,
     id: "gpt-test",
     isDefault: true,
-    model: "gpt-test",
+    model: slug!,
     availableAccessPrograms: { cyber: ["standard", "daybreakBlue"] },
     defaultServiceTier: "flex",
     serviceTiers: [
@@ -172,7 +175,7 @@ it("maps current Codex model capability fields", () => {
     supportedReasoningEfforts: [
       {
         description: "Maximum reasoning",
-        reasoningEffort: "super-high",
+        reasoningEffort: defaultEffort!,
       },
     ],
   });
@@ -182,8 +185,8 @@ it("maps current Codex model capability fields", () => {
       id: "reasoningEffort",
       label: "Reasoning",
       type: "select",
-      options: [{ id: "super-high", label: "super-high", isDefault: true }],
-      currentValue: "super-high",
+      options: [{ id: defaultEffort, label, isDefault: true }],
+      currentValue: defaultEffort,
     },
     {
       id: "serviceTier",

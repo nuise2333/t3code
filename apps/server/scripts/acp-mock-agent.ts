@@ -162,6 +162,22 @@ function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
         currentValue: currentModelId,
         options: antigravityModels.map((model) => ({ value: model.modelId, name: model.name })),
       },
+      ...(currentModelId === "gemini-test-high" && process.env.T3_ACP_MODEL_THINKING === "1"
+        ? [
+            {
+              configId: "thought_level",
+              category: "thought_level" as const,
+              type: "select" as const,
+              name: "Thinking Level",
+              currentValue: "medium",
+              options: [
+                { value: "low", name: "Low" },
+                { value: "medium", name: "Medium" },
+                { value: "high", name: "High" },
+              ],
+            },
+          ]
+        : []),
       {
         configId: "mode",
         name: "Mode",

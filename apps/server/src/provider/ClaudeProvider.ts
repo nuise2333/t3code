@@ -69,6 +69,7 @@ import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   CLAUDE_EFFORT_LEVELS,
   capClaudeCatalogEffort,
+  withClaudeReportedEffortLevels,
   type ClaudeEffortCapSource,
   type ClaudeEffortLevel,
   type ClaudeModelCatalog,
@@ -791,7 +792,10 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     modelCatalog,
     claudeProviderModels(
       [
-        ...resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
+        ...resolveClaudeModelsForVersion(
+          withClaudeReportedEffortLevels(modelCatalog, capabilities?.models ?? []),
+          parsedVersion,
+        ),
         ...claudeReportedModels(modelCatalog, claudeSettings.customModels, capabilities?.models),
       ],
       claudeSettings.customModels,

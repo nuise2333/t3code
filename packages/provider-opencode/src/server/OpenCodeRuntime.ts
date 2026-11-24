@@ -1,7 +1,8 @@
 import { resolveProviderProbeTimeoutMs } from "@t3tools/provider-core/server/snapshotProbe";
 import * as NodeURL from "node:url";
 
-import type { ChatAttachment, ProviderApprovalDecision } from "@t3tools/contracts";
+import type { ChatAttachment, ModelSelection, ProviderApprovalDecision } from "@t3tools/contracts";
+import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import {
   createOpencodeClient,
   type Agent,
@@ -305,6 +306,15 @@ export const readOpenCodeCatalogModel = Effect.fnUntraced(function* (
   return entry;
 });
 
+/** OpenCode's own "Default" variant entry: no variant, so the model's base options apply. */
+export const OPENCODE_DEFAULT_VARIANT = "default";
+
+/** The variant a selection asks OpenCode for. Every dispatch path reads it here, so "Default" is never sent. */
+export function selectedOpenCodeVariant(selection: ModelSelection): string | undefined {
+  const variant = getModelSelectionStringOptionValue(selection, "variant");
+  return variant === OPENCODE_DEFAULT_VARIANT ? undefined : variant;
+}
+
 export const resolveOpenCodeVariant = Effect.fnUntraced(function* (
   client: OpencodeClient,
   model: ParsedOpenCodeModelSlug | undefined,
@@ -312,6 +322,7 @@ export const resolveOpenCodeVariant = Effect.fnUntraced(function* (
   abortSignal?: AbortSignal,
   cache?: OpenCodeVariantCache,
 ) {
+  if (variant === OPENCODE_DEFAULT_VARIANT) return undefined;
   if (!variant || !model) return variant;
   // Only a confirmed catalog mismatch can invalidate a persisted selection.
   const entry = yield* readOpenCodeCatalogModel(client, model, abortSignal, cache);

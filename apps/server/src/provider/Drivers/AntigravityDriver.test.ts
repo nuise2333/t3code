@@ -94,6 +94,7 @@ const makeHarness = Effect.fn("makeAntigravityDriverHarness")(function* (
       executablePath,
       [
         "#!/bin/sh",
+        "export T3_ACP_MODEL_THINKING=1",
         ...(options.loginRequired
           ? [`printf '%s\\n' ${shellQuote(ANTIGRAVITY_AUTH_STDOUT_PREFIX + authorizationUrl)}`]
           : []),
@@ -309,6 +310,15 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
           "gemini-test-low",
           "gemini-test-high",
         ]);
+        expect(snapshot.models[0]?.capabilities?.optionDescriptors).toEqual([]);
+        expect(snapshot.models[1]?.capabilities?.optionDescriptors?.[0]).toMatchObject({
+          currentValue: "medium",
+          options: [
+            { id: "low", label: "Low" },
+            { id: "medium", label: "Medium", isDefault: true },
+            { id: "high", label: "High" },
+          ],
+        });
         expect(snapshot.models[0]?.aliases).toContain(ANTIGRAVITY_DEFAULT_MODEL);
         expect(snapshot.models.every((model) => model.isLegacy !== true)).toBe(true);
         expect(snapshot.slashCommands.map((command) => command.name)).toEqual(["plan", "logout"]);
@@ -342,9 +352,13 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
           "initialize",
           "auth/login",
           "session/new",
+          "session/set_config_option",
+          "session/set_config_option",
           "initialize",
           "auth/login",
           "session/new",
+          "session/set_config_option",
+          "session/set_config_option",
         ]);
         expect(
           requests

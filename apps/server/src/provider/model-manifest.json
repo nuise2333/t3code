@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-20T04:00:00Z",
+  "updatedAt": "2026-11-23T00:00:00Z",
   "routing": {
     "version": 1,
     "updatedAt": "2026-11-20T04:00:00Z",
@@ -558,7 +558,7 @@
         "chat": "claude-opus-5-5"
       },
       "profiles": {
-        "fable-5": {
+        "effort-medium-ultracode-1m": {
           "capabilities": {
             "optionDescriptors": [
               {
@@ -581,7 +581,7 @@
                   },
                   {
                     "id": "xhigh",
-                    "label": "Extra High"
+                    "label": "Extra"
                   },
                   {
                     "id": "max",
@@ -622,7 +622,7 @@
                   { "id": "low", "label": "Low" },
                   { "id": "medium", "label": "Medium", "isDefault": true },
                   { "id": "high", "label": "High" },
-                  { "id": "xhigh", "label": "Extra High" },
+                  { "id": "xhigh", "label": "Extra" },
                   { "id": "max", "label": "Max" },
                   {
                     "id": "ultracode",
@@ -666,7 +666,7 @@
                   },
                   {
                     "id": "xhigh",
-                    "label": "Extra High"
+                    "label": "Extra"
                   },
                   {
                     "id": "max",
@@ -724,7 +724,7 @@
                   },
                   {
                     "id": "xhigh",
-                    "label": "Extra High"
+                    "label": "Extra"
                   },
                   {
                     "id": "max",
@@ -781,7 +781,7 @@
                   },
                   {
                     "id": "xhigh",
-                    "label": "Extra High",
+                    "label": "Extra",
                     "isDefault": true
                   },
                   {
@@ -805,7 +805,6 @@
           "adapter": {
             "claudeCode": {
               "effortMap": {
-                "xhigh": "max",
                 "ultrathink": null
               },
               "fixedContextWindowTokens": 1000000
@@ -904,10 +903,6 @@
                     "id": "high",
                     "label": "High",
                     "isDefault": true
-                  },
-                  {
-                    "id": "max",
-                    "label": "Max"
                   }
                 ]
               },
@@ -945,7 +940,7 @@
                   },
                   {
                     "id": "xhigh",
-                    "label": "Extra High"
+                    "label": "Extra"
                   },
                   {
                     "id": "max",
@@ -969,7 +964,7 @@
             }
           }
         },
-        "sonnet-5-5": {
+        "fable-5": {
           "capabilities": {
             "optionDescriptors": [
               {
@@ -992,7 +987,7 @@
                   },
                   {
                     "id": "xhigh",
-                    "label": "Extra High"
+                    "label": "Extra"
                   },
                   {
                     "id": "max",
@@ -1014,7 +1009,7 @@
           },
           "adapter": {
             "claudeCode": {
-              "effortMap": { "ultrathink": null },
+              "effortMap": { "ultracode": "xhigh", "ultrathink": null },
               "fixedContextWindowTokens": 1000000
             }
           }
@@ -1072,7 +1067,6 @@
           "adapter": {
             "claudeCode": {
               "effortMap": {
-                "max": "high",
                 "ultrathink": null
               },
               "modelSuffixes": {
@@ -1098,7 +1092,7 @@
                   { "id": "low", "label": "Low" },
                   { "id": "medium", "label": "Medium", "isDefault": true },
                   { "id": "high", "label": "High" },
-                  { "id": "xhigh", "label": "Extra High" },
+                  { "id": "xhigh", "label": "Extra" },
                   { "id": "max", "label": "Max" },
                   {
                     "id": "ultracode",
@@ -1148,7 +1142,7 @@
           "name": "Claude Sonnet 5.5",
           "aliases": ["sonnet", "sonnet-5.5", "claude-sonnet-5.5"],
           "status": "current",
-          "profile": "sonnet-5-5",
+          "profile": "effort-medium-ultracode-1m",
           "adapter": { "claudeCode": { "minVersion": "2.1.284" } }
         },
         {
@@ -1156,7 +1150,7 @@
           "name": "Claude Fable 5.2",
           "aliases": ["fable", "fable-5.2", "claude-fable-5.2"],
           "status": "current",
-          "profile": "fable-5",
+          "profile": "effort-medium-ultracode-1m",
           "adapter": { "claudeCode": { "minVersion": "2.1.321" } }
         },
         {

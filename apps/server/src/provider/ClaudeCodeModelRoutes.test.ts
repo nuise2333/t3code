@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
+import { compileClaudeModelSelection } from "../claudeModelOptions.ts";
 import { makeClaudeCodeModelRoutes } from "./ClaudeCodeModelRoutes.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -12,6 +13,55 @@ import {
 } from "./ClaudeModelCatalog.ts";
 
 describe("Claude Code model routes", () => {
+  it.effect("a turn sends only effort levels Claude Code reports for the model", () =>
+    Effect.gen(function* () {
+      const routes = yield* makeClaudeCodeModelRoutes(
+        () => Effect.succeed("same settings"),
+        "/state",
+      );
+      yield* routes.record([
+        {
+          value: "claude-opus-4-7",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "medium", "high"],
+        },
+      ]);
+      yield* routes.settle;
+      const catalog = yield* routes.route(BUNDLED_CLAUDE_MODEL_CATALOG, "/project");
+      const opus = (effort?: string) =>
+        ({
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-7",
+          ...(effort ? { options: [{ id: "effort", value: effort }] } : {}),
+        }) satisfies ModelSelection;
+      // The bundled default (xhigh) and a stored xhigh both fall to the highest live level.
+      assert.strictEqual(compileClaudeModelSelection(opus(), catalog).effort, "high");
+      assert.strictEqual(compileClaudeModelSelection(opus("xhigh"), catalog).effort, "high");
+      assert.strictEqual(compileClaudeModelSelection(opus("low"), catalog).effort, "low");
+      // Settings that differ from the probe's drop the model routes but never the live levels.
+      const launched = yield* routes.route(BUNDLED_CLAUDE_MODEL_CATALOG, "/project", {
+        env: { AWS_REGION: "us-west-2" },
+      });
+      assert.strictEqual(compileClaudeModelSelection(opus("xhigh"), launched).effort, "high");
+      const otherSettings = yield* makeClaudeCodeModelRoutes(
+        (cwd) => Effect.succeed(cwd === "/state" ? "probe settings" : "project settings"),
+        "/state",
+      );
+      yield* otherSettings.record([
+        {
+          // A routed alias makes the cwd's settings decide, the last branch of route().
+          value: "opus",
+          resolvedModel: "us.anthropic.claude-opus-4-7-v1:0",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "medium", "high"],
+        },
+      ]);
+      yield* otherSettings.settle;
+      const project = yield* otherSettings.route(BUNDLED_CLAUDE_MODEL_CATALOG, "/project");
+      assert.strictEqual(compileClaudeModelSelection(opus(), project).effort, "high");
+    }),
+  );
+
   it.effect(
     "a turn that starts before the first probe settles waits and then gets its routes",
     () =>

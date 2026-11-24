@@ -60,19 +60,36 @@ type ThinkingConfig = NonNullable<ReturnType<typeof antigravityThinkingConfig>>;
 /** Thinking options each model reported when selected; `null` means it has none. */
 export type AntigravityThinkingLevels = ReadonlyMap<string, ThinkingConfig | null>;
 
-function thinkingCapabilities(config: ThinkingConfig | null | undefined, observed: boolean) {
+function thinkingCapabilities(
+  config: ThinkingConfig | null | undefined,
+  defaultValue: string | undefined,
+) {
   const descriptor = config
     ? acpProviderOptionDescriptors({ configOptions: [config], modeState: undefined })[0]
     : undefined;
   if (descriptor?.type !== "select") return EMPTY_MODEL_CAPABILITIES;
-  // Another model's selected level is not this model's default.
-  const { currentValue: _currentValue, ...unobserved } = descriptor;
-  return createModelCapabilities({ optionDescriptors: [observed ? descriptor : unobserved] });
+  // A session's selected level carries over from the previous model, so only a probed default counts.
+  const { currentValue: _currentValue, ...select } = descriptor;
+  const hasDefault = select.options.some((option) => option.id === defaultValue);
+  return createModelCapabilities({
+    optionDescriptors: [
+      hasDefault
+        ? {
+            ...select,
+            currentValue: defaultValue,
+            options: select.options.map((option) =>
+              option.id === defaultValue ? { ...option, isDefault: true } : option,
+            ),
+          }
+        : select,
+    ],
+  });
 }
 
 export function buildAntigravityModelsFromSession(
   setup: SessionSetupResult,
   thinkingLevels: AntigravityThinkingLevels = new Map(),
+  thinkingDefaults: ReadonlyMap<string, string> = new Map(),
 ): ReadonlyArray<ServerProviderModel> {
   const config = setup.configOptions?.find(
     (option) => option.id === "model" || option.category === "model",
@@ -108,10 +125,8 @@ export function buildAntigravityModelsFromSession(
         ...(entry.value === currentValue
           ? { isDefault: true, aliases: [ANTIGRAVITY_DEFAULT_MODEL] }
           : {}),
-        capabilities:
-          observed === undefined
-            ? thinkingCapabilities(currentThinking, false)
-            : thinkingCapabilities(observed, true),
+        // Levels differ per model, so a model never selected yet shows none.
+        capabilities: thinkingCapabilities(observed, thinkingDefaults.get(entry.value)),
       },
     ];
   });
@@ -217,6 +232,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
   // Preserve disk-discovered skills when callbacks replace workspace commands; the registry will not rescan them.
   const discoveredSkills = new Map<string, ServerProvider["skills"]>();
   const thinkingLevels = new Map<string, ThinkingConfig | null>();
+  const thinkingDefaults = new Map<string, string>();
   const observeThinkingLevels = (
     configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | null | undefined,
   ) => {
@@ -397,7 +413,11 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
             label: options.auth?.label ?? "Google account",
           },
           checkedAt: updatedAt,
-          models: buildAntigravityModelsFromSession(started.sessionSetupResult, thinkingLevels),
+          models: buildAntigravityModelsFromSession(
+            started.sessionSetupResult,
+            thinkingLevels,
+            thinkingDefaults,
+          ),
           supportsTextGeneration,
           ...(cwd
             ? {
@@ -422,11 +442,25 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
     configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
   ) {
     observeThinkingLevels(configOptions);
-    const models = buildAntigravityModelsFromSession({ configOptions }, thinkingLevels);
+    const models = buildAntigravityModelsFromSession(
+      { configOptions },
+      thinkingLevels,
+      thinkingDefaults,
+    );
     yield* SubscriptionRef.update(metadata, (state) => {
       if (state.draft.auth.status !== "authenticated") return state;
       return { ...state, draft: { ...state.draft, models } };
     });
+  });
+
+  /** The level each model starts at when chosen in a new session, as the catalog probe read it. */
+  const onThinkingDefaults = Effect.fn("AntigravityProvider.onThinkingDefaults")(function* (
+    defaults: ReadonlyMap<string, string>,
+    configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
+  ) {
+    thinkingDefaults.clear();
+    for (const [model, level] of defaults) thinkingDefaults.set(model, level);
+    yield* onConfigOptionsUpdated(configOptions);
   });
 
   const onAvailableCommands = Effect.fn("AntigravityProvider.onAvailableCommands")(function* (
@@ -493,6 +527,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
     );
     discoveredSkills.clear();
     thinkingLevels.clear();
+    thinkingDefaults.clear();
   });
 
   const snapshotForCwd = Effect.fn("AntigravityProvider.snapshotForCwd")(function* (
@@ -527,6 +562,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
     snapshot: { ...managed, getSnapshot },
     onSessionStarted,
     onConfigOptionsUpdated,
+    onThinkingDefaults,
     onAvailableCommands,
     // The new sign-in may be another account. Clear and republish its limits so a failed read
     // cannot fall back to them; the session start then reads the new account's limits.

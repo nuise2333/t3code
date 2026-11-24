@@ -348,7 +348,7 @@ export const AntigravityDriver: ProviderDriver<
       started: AcpSessionRuntime.AcpSessionRuntimeStartResult,
       runtime: Pick<
         AcpSessionRuntime.AcpSessionRuntime["Service"],
-        "getEvents" | "drainEvents" | "setModel"
+        "getEvents" | "drainEvents" | "setModel" | "setConfigOption" | "getConfigOptions"
       >,
     ) {
       yield* provider.onSessionStarted(started);
@@ -363,13 +363,37 @@ export const AntigravityDriver: ProviderDriver<
           ? provider.onAvailableCommands(event.availableCommands)
           : Effect.void;
       }).pipe(Effect.forkScoped);
-      // Thinking levels differ per model and are reported only for the selected one.
+      // Thinking levels differ per model and are reported only for the selected one. A model
+      // switch keeps the previous level, so each model is entered from the new session's state.
       const configOptions = started.sessionSetupResult.configOptions ?? [];
       const current = configOptions.find((option) => option.id === "model")?.currentValue;
-      if (antigravityThinkingConfig(configOptions) !== undefined && typeof current === "string") {
-        for (const model of [...antigravityModelOptions(configOptions), { value: current }]) {
+      if (typeof current === "string") {
+        const initialThinking = antigravityThinkingConfig(configOptions);
+        const restoreInitial = runtime
+          .setModel(current)
+          .pipe(
+            Effect.andThen(
+              initialThinking
+                ? runtime.setConfigOption(initialThinking.id, initialThinking.currentValue)
+                : Effect.void,
+            ),
+            Effect.ignore,
+          );
+        const defaults = new Map<string, string>();
+        if (initialThinking) defaults.set(current, initialThinking.currentValue);
+        for (const model of antigravityModelOptions(configOptions)) {
+          if (model.value === current) continue;
+          yield* restoreInitial;
           yield* runtime.setModel(model.value).pipe(Effect.ignore);
+          const options = yield* runtime.getConfigOptions;
+          // A failed switch leaves the initial model selected; its level is not this model's.
+          if (options.find((option) => option.id === "model")?.currentValue !== model.value)
+            continue;
+          const thinking = antigravityThinkingConfig(options);
+          if (thinking) defaults.set(model.value, thinking.currentValue);
         }
+        yield* restoreInitial;
+        yield* provider.onThinkingDefaults(defaults, yield* runtime.getConfigOptions);
       }
       yield* runtime.drainEvents;
     }, Effect.scoped);

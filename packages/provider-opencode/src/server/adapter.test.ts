@@ -324,6 +324,7 @@ describe("OpenCodeAdapterV2", () => {
     ["failure", "prompt"],
     ["unset", "prompt"],
     ["unset", "resume"],
+    ["default", "prompt"],
   ] as const)("normalizes reasoning variants for %s inventory at %s dispatch", ([kind, request]) =>
     Effect.gen(function* () {
       const suffix = `variant-${kind}-${request}`;
@@ -360,7 +361,7 @@ describe("OpenCodeAdapterV2", () => {
                               "big-pickle": {
                                 id: "big-pickle",
                                 variants:
-                                  kind === "supported"
+                                  kind === "supported" || kind === "default"
                                     ? { medium: {} }
                                     : kind === "unsupported"
                                       ? { high: {} }
@@ -384,7 +385,9 @@ describe("OpenCodeAdapterV2", () => {
         {
           model: "opencode/big-pickle",
           options: [
-            ...(kind === "unset" ? [] : [{ id: "variant", value: "medium" }]),
+            ...(kind === "unset"
+              ? []
+              : [{ id: "variant", value: kind === "default" ? "default" : "medium" }]),
             { id: "agent", value: "plan" },
           ],
         },
@@ -404,7 +407,8 @@ describe("OpenCodeAdapterV2", () => {
       } else {
         assert.equal(Object.hasOwn(payload, "variant"), false);
       }
-      if (kind === "unset") assert.equal(inventoryCalls, 0);
+      // OpenCode's "Default" entry means no variant, without an inventory read.
+      if (kind === "unset" || kind === "default") assert.equal(inventoryCalls, 0);
     }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
   );
 

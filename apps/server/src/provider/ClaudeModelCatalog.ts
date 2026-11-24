@@ -3,6 +3,7 @@ import {
   type ModelCapabilities,
   type ModelSelection,
   ProviderDriverKind,
+  type ProviderOptionDescriptor,
   type ServerProviderModel,
   type ServerProviderUpdateRequiredModel,
 } from "@t3tools/contracts";
@@ -82,9 +83,7 @@ export function withUltracodeToggle(
   // Ultracode ran at xhigh, so a model that offered it keeps xhigh, and its default moves there.
   const options = effort.options.flatMap(({ isDefault, ...option }) => {
     if (option.id === "ultracode") {
-      return hasXhigh
-        ? []
-        : [{ id: "xhigh", label: "Extra High", ...(isDefault ? { isDefault } : {}) }];
+      return hasXhigh ? [] : [{ id: "xhigh", label: "Extra", ...(isDefault ? { isDefault } : {}) }];
     }
     if (ultracodeByDefault && option.id === "xhigh") return [{ ...option, isDefault: true }];
     return [isDefault && !ultracodeByDefault ? { ...option, isDefault } : option];
@@ -167,7 +166,7 @@ const CLAUDE_EFFORT_LABELS: Readonly<Record<string, string>> = {
   low: "Low",
   medium: "Medium",
   high: "High",
-  xhigh: "Extra High",
+  xhigh: "Extra",
   max: "Max",
 };
 
@@ -271,6 +270,83 @@ export function withClaudeCodeModelRoutes(
     models: catalog.models.map((entry) => {
       const apiModel = apiModels.get(entry.model.slug);
       return apiModel ? { ...entry, apiModel } : entry;
+    }),
+  };
+}
+
+/**
+ * Claude Code's initialize reports each model's effort levels after its own caps; the catalog
+ * keeps only its default (Claude Code's model catalog `runtime.default_effort`), clamped down to
+ * a reported level as Claude Code does.
+ */
+export function withClaudeReportedEffortLevels(
+  catalog: ClaudeModelCatalog,
+  reportedModels: ReadonlyArray<
+    Pick<ClaudeModelInfo, "value" | "resolvedModel" | "supportsEffort" | "supportedEffortLevels">
+  >,
+): ClaudeModelCatalog {
+  const levelsBySlug = new Map<string, ReadonlyArray<string>>();
+  for (const reported of reportedModels) {
+    if (reported.value === "default") continue;
+    // Without a level list, only an explicit "no effort" says anything about this model.
+    if (reported.supportsEffort !== false && reported.supportedEffortLevels === undefined) {
+      continue;
+    }
+    const wireModel = stripClaudeContextWindowSuffix(reported.resolvedModel ?? reported.value);
+    const entry = resolveClaudeCatalogModel(
+      catalog,
+      resolveClaudeReportedModelSlug(catalog, stripClaudeBackendDecoration(wireModel)),
+    );
+    if (!entry || entry.model.isCustom || levelsBySlug.has(entry.model.slug)) continue;
+    levelsBySlug.set(
+      entry.model.slug,
+      reported.supportsEffort === false ? [] : (reported.supportedEffortLevels ?? []),
+    );
+  }
+  if (levelsBySlug.size === 0) return catalog;
+  return {
+    models: catalog.models.map((entry) => {
+      const levels = levelsBySlug.get(entry.model.slug);
+      const descriptors = entry.model.capabilities?.optionDescriptors;
+      if (levels === undefined || !descriptors) return entry;
+      return {
+        ...entry,
+        model: {
+          ...entry.model,
+          capabilities: {
+            ...entry.model.capabilities,
+            optionDescriptors: descriptors.flatMap((descriptor): ProviderOptionDescriptor[] => {
+              if (descriptor.id !== "effort" || descriptor.type !== "select") return [descriptor];
+              if (levels.length === 0) return [];
+              const injected = descriptor.options.filter((option) =>
+                descriptor.promptInjectedValues?.includes(option.id),
+              );
+              const preferred = descriptor.options.find((option) => option.isDefault)?.id;
+              const defaultId = levels.findLast(
+                (level) =>
+                  claudeEffortRank(level) >= 0 &&
+                  claudeEffortRank(level) <= claudeEffortRank(preferred),
+              );
+              return [
+                {
+                  ...descriptor,
+                  options: [
+                    ...levels.map((id) => ({
+                      id,
+                      label:
+                        descriptor.options.find((option) => option.id === id)?.label ??
+                        CLAUDE_EFFORT_LABELS[id] ??
+                        id,
+                      ...(id === defaultId ? { isDefault: true } : {}),
+                    })),
+                    ...injected,
+                  ],
+                },
+              ];
+            }),
+          },
+        },
+      };
     }),
   };
 }

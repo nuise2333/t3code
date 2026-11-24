@@ -248,26 +248,14 @@ function codexAccountEmail(account: CodexSchema.V2GetAccountResponse["account"])
   return account.email;
 }
 
-export function codexDefaultReasoningEffortOverride(model: string): "medium" | undefined {
-  return codexModelFamily(model) === "gpt-6-astra" ? "medium" : undefined;
-}
-
 export function mapCodexModelCapabilities(
   model: CodexSchema.V2ModelListResponse__Model,
 ): ModelCapabilities {
-  const reasoningOptions = model.supportedReasoningEfforts.map(({ reasoningEffort }) =>
-    reasoningEffort ===
-    (codexDefaultReasoningEffortOverride(model.model) ?? model.defaultReasoningEffort)
-      ? {
-          id: reasoningEffort,
-          label: reasoningEffortLabel(reasoningEffort),
-          isDefault: true,
-        }
-      : {
-          id: reasoningEffort,
-          label: reasoningEffortLabel(reasoningEffort),
-        },
-  );
+  const reasoningOptions = model.supportedReasoningEfforts.map(({ reasoningEffort }) => ({
+    id: reasoningEffort,
+    label: reasoningEffortLabel(reasoningEffort),
+    ...(reasoningEffort === model.defaultReasoningEffort ? { isDefault: true } : {}),
+  }));
   const defaultReasoning = reasoningOptions.find((option) => option.isDefault)?.id;
   const serviceTiers =
     model.serviceTiers && model.serviceTiers.length > 0

@@ -18,6 +18,7 @@ import {
   resolveClaudeUpdateRequiredModels,
   scopeClaudeModelCatalog,
   withClaudeCodeModelRoutes,
+  withClaudeReportedEffortLevels,
 } from "./ClaudeModelCatalog.ts";
 
 const manifest = (): ModelManifestData => ({
@@ -74,6 +75,94 @@ const catalogFromManifest = (data: ModelManifestData) =>
   resolveClaudeModelCatalog(resolveProviderCatalog(data, CLAUDE) ?? undefined);
 
 describe("Claude model catalog", () => {
+  const effortOf = (catalog: ClaudeModelCatalog, slug: string) => {
+    const effort = getClaudeCatalogModelCapabilities(catalog, slug).optionDescriptors?.find(
+      (descriptor) => descriptor.id === "effort",
+    );
+    assert.ok(effort?.type === "select");
+    return {
+      levels: effort.options
+        .filter((option) => !effort.promptInjectedValues?.includes(option.id))
+        .map((option) => option.id),
+      defaults: effort.options.filter((option) => option.isDefault).map((option) => option.id),
+    };
+  };
+
+  // Claude Code 2.1.331's bundled model catalog: runtime.effort_levels and runtime.default_effort.
+  it.each([
+    ["claude-opus-5-5", ["low", "medium", "high", "xhigh", "max"], "medium"],
+    ["claude-sonnet-5-5", ["low", "medium", "high", "xhigh", "max"], "medium"],
+    ["claude-fable-5-2", ["low", "medium", "high", "xhigh", "max"], "medium"],
+    ["claude-haiku-5-5", ["low", "medium", "high", "xhigh", "max"], "medium"],
+    ["claude-fable-5-1", ["low", "medium", "high", "xhigh", "max"], "high"],
+    ["claude-fable-5", ["low", "medium", "high", "xhigh", "max"], "high"],
+    ["claude-opus-5", ["low", "medium", "high", "xhigh", "max"], "high"],
+    ["claude-sonnet-5", ["low", "medium", "high", "xhigh", "max"], "high"],
+    ["claude-opus-4-8", ["low", "medium", "high", "xhigh", "max"], "high"],
+    ["claude-opus-4-7", ["low", "medium", "high", "xhigh", "max"], "xhigh"],
+    ["claude-opus-4-6", ["low", "medium", "high", "max"], "high"],
+    ["claude-sonnet-4-6", ["low", "medium", "high", "max"], "high"],
+    ["claude-opus-4-5", ["low", "medium", "high"], "high"],
+  ] as const)("matches Claude Code's effort levels and default for %s", (slug, levels, level) => {
+    assert.deepStrictEqual(effortOf(BUNDLED_CLAUDE_MODEL_CATALOG, slug), {
+      levels: [...levels],
+      defaults: [level],
+    });
+    // Each level reaches Claude Code as itself.
+    for (const id of levels) {
+      assert.strictEqual(normalizeClaudeCatalogEffort(BUNDLED_CLAUDE_MODEL_CATALOG, id, slug), id);
+    }
+  });
+
+  it("takes effort levels from Claude Code's model list and clamps the default to them", () => {
+    const catalog = withClaudeReportedEffortLevels(BUNDLED_CLAUDE_MODEL_CATALOG, [
+      { value: "default", resolvedModel: "claude-opus-5-5", supportedEffortLevels: ["low"] },
+      {
+        value: "opus",
+        resolvedModel: "claude-opus-4-7",
+        supportsEffort: true,
+        supportedEffortLevels: ["low", "medium", "high"],
+      },
+      { value: "claude-sonnet-4-6", supportsEffort: false },
+      { value: "claude-haiku-4-5-20251001" },
+      // Effort on but no list says nothing about the levels.
+      { value: "claude-opus-4-8", supportsEffort: true },
+      // A level from a Claude Code newer than this SDK's types is offered but never the default.
+      {
+        value: "claude-opus-4-6",
+        supportsEffort: true,
+        supportedEffortLevels: ["high", "turbo" as unknown as "max"],
+      },
+    ]);
+    assert.deepStrictEqual(
+      effortOf(catalog, "claude-opus-4-8"),
+      effortOf(BUNDLED_CLAUDE_MODEL_CATALOG, "claude-opus-4-8"),
+    );
+    assert.deepStrictEqual(effortOf(catalog, "claude-opus-4-6"), {
+      levels: ["high", "turbo"],
+      defaults: ["high"],
+    });
+    assert.deepStrictEqual(effortOf(catalog, "claude-opus-4-7"), {
+      levels: ["low", "medium", "high"],
+      defaults: ["high"],
+    });
+    // Ultrathink stays a prompt-injected choice after the reported levels.
+    const opus47 = getClaudeCatalogModelCapabilities(catalog, "claude-opus-4-7");
+    const effort = opus47.optionDescriptors?.find((descriptor) => descriptor.id === "effort");
+    assert.ok(effort?.type === "select");
+    assert.strictEqual(effort.options.at(-1)?.id, "ultrathink");
+    assert.isUndefined(
+      getClaudeCatalogModelCapabilities(catalog, "claude-sonnet-4-6").optionDescriptors?.find(
+        (descriptor) => descriptor.id === "effort",
+      ),
+    );
+    // `default` and models that report nothing keep the catalog.
+    assert.deepStrictEqual(
+      effortOf(catalog, "claude-opus-5-5"),
+      effortOf(BUNDLED_CLAUDE_MODEL_CATALOG, "claude-opus-5-5"),
+    );
+  });
+
   it("resolves capacity from selected options and fixed catalog windows without guessing custom models", () => {
     const source = manifest();
     const profile = source.providers!.claudeAgent!.profiles.synthetic!;

@@ -10,7 +10,11 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import { claudeLocalSettingsDirectory } from "./Drivers/ClaudeHome.ts";
-import { type ClaudeModelCatalog, withClaudeCodeModelRoutes } from "./ClaudeModelCatalog.ts";
+import {
+  type ClaudeModelCatalog,
+  withClaudeCodeModelRoutes,
+  withClaudeReportedEffortLevels,
+} from "./ClaudeModelCatalog.ts";
 
 // Env names that pick the backend, its region, or the model a family alias resolves to.
 const MODEL_SETTINGS_ENV_PREFIXES = [
@@ -71,7 +75,10 @@ export const resolveClaudeModelSettingsKey = Effect.fn("resolveClaudeModelSettin
   );
 });
 
-type ReportedModel = Pick<ClaudeModelInfo, "value" | "resolvedModel">;
+type ReportedModel = Pick<
+  ClaudeModelInfo,
+  "value" | "resolvedModel" | "supportsEffort" | "supportedEffortLevels"
+>;
 
 /**
  * Claude Code's reported model ids, applied to a turn only where its cwd resolves model settings
@@ -104,13 +111,17 @@ export const makeClaudeCodeModelRoutes = Effect.fn("makeClaudeCodeModelRoutes")(
         Effect.timeoutOption("2 minutes"),
         Effect.andThen(Deferred.succeed(firstProbeSettled, undefined)),
       );
-      if (claudeModelSettingsKey(launchSettings ?? {}) !== NO_MODEL_SETTINGS_KEY) return base;
       const { models, settingsKey: probeKey } = yield* Ref.get(reported);
-      const routed = withClaudeCodeModelRoutes(base, models);
+      // Every branch keeps the live effort levels the picker shows, so a turn never sends a
+      // level above the one on screen; only the model id routes depend on matching settings.
+      const withEfforts = withClaudeReportedEffortLevels(base, models);
+      if (claudeModelSettingsKey(launchSettings ?? {}) !== NO_MODEL_SETTINGS_KEY)
+        return withEfforts;
+      const routed = withClaudeCodeModelRoutes(withEfforts, models);
       // Project settings can point an alias at another model, so routes hold only where the
       // cwd resolves the same model settings as the probe's.
-      if (routed === base || probeKey === undefined) return base;
-      return (yield* settingsKey(cwd)) === probeKey ? routed : base;
+      if (routed === withEfforts || probeKey === undefined) return withEfforts;
+      return (yield* settingsKey(cwd)) === probeKey ? routed : withEfforts;
     }),
   };
 });

@@ -674,7 +674,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
       NodeAssert.ok(variantDescriptor && variantDescriptor.type === "select");
       NodeAssert.equal(
         variantDescriptor.options.find((option) => option.isDefault === true)?.id,
-        "medium",
+        "default",
       );
       const agentDescriptor = model.capabilities?.optionDescriptors?.find(
         (descriptor) => descriptor.id === "agent" && descriptor.type === "select",
@@ -879,19 +879,19 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
         ?.capabilities?.optionDescriptors?.[0];
       NodeAssert.deepEqual(
         variant?.type === "select" ? variant.options.map((option) => option.id) : [],
-        ["low", "medium", "high"],
+        ["default", "low", "medium", "high"],
       );
       const goVariant = snapshot.models.find(
         (model) => model.slug === "opencode-go/deepseek-v4.1-flash",
       )?.capabilities?.optionDescriptors?.[0];
       const goVariantIds =
         goVariant?.type === "select" ? goVariant.options.map((option) => option.id) : [];
-      NodeAssert.deepEqual(goVariantIds, ["low", "high", "max"]);
+      // Like OpenCode's own variant list: "Default" (no variant) first, then the model's variants.
+      NodeAssert.deepEqual(goVariantIds, ["default", "low", "high", "max"]);
       NodeAssert.ok(
         goVariant?.type === "select" &&
-          goVariant.currentValue !== undefined &&
-          goVariantIds.includes(goVariant.currentValue),
-        "an OpenCode Go model gets a default reasoning variant it lists",
+          goVariant.currentValue === undefined &&
+          goVariant.options.find((option) => option.isDefault)?.id === "default",
       );
       NodeAssert.equal(runtimeMock.state.sdkClientInputs.length, 0);
     }),

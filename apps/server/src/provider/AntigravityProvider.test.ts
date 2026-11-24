@@ -244,7 +244,7 @@ describe("Antigravity model catalog", () => {
     ]);
   });
 
-  it("offers each model the thinking levels it reported when selected", () => {
+  it("offers each model the thinking levels it reported and only a probed default", () => {
     const thinking = (currentValue: string) =>
       ({
         id: "thinking_level",
@@ -270,22 +270,31 @@ describe("Antigravity model catalog", () => {
               { value: "unseen", name: "Unseen" },
             ],
           },
-          thinking("high"),
+          thinking("low"),
         ],
       },
       new Map([
         ["claude", thinking("low")],
         ["plain", null],
       ]),
+      new Map([["gemini", "high"]]),
     );
     const thinkingOf = (slug: string) =>
       models.find((model) => model.slug === slug)?.capabilities?.optionDescriptors?.[0];
 
-    expect(thinkingOf("gemini")).toMatchObject({ id: "thinking_level", currentValue: "high" });
-    expect(thinkingOf("claude")).toMatchObject({ id: "thinking_level", currentValue: "low" });
+    // The session's selected level carried over from another model; the probed default wins.
+    expect(thinkingOf("gemini")).toMatchObject({
+      id: "thinking_level",
+      currentValue: "high",
+      options: [
+        { id: "low", label: "Low" },
+        { id: "high", label: "High", isDefault: true },
+      ],
+    });
+    expect(thinkingOf("claude")).toMatchObject({ id: "thinking_level" });
+    expect(thinkingOf("claude")).not.toHaveProperty("currentValue");
     expect(thinkingOf("plain")).toBeUndefined();
-    expect(thinkingOf("unseen")).toMatchObject({ id: "thinking_level" });
-    expect(thinkingOf("unseen")).not.toHaveProperty("currentValue");
+    expect(thinkingOf("unseen")).toBeUndefined();
   });
 });
 

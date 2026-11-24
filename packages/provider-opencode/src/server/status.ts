@@ -24,6 +24,7 @@ import {
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
+import { OPENCODE_DEFAULT_VARIANT } from "./OpenCodeRuntime.ts";
 import type { ProbedOpenCode } from "./versionProbe.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 import { ServiceUnavailableError } from "@opencode/protocol/errors";
@@ -185,20 +186,15 @@ function titleCaseSlug(value: string): string {
   return segments.join(" ");
 }
 
-function inferDefaultVariant(
-  providerID: string,
-  variants: ReadonlyArray<string>,
-): string | undefined {
-  if (variants.length === 1) {
-    return variants[0];
-  }
-  if (providerID === "anthropic" || providerID.startsWith("google")) {
-    return variants.includes("high") ? "high" : undefined;
-  }
-  if (providerID === "openai" || providerID === "opencode" || providerID === "opencode-go") {
-    return variants.includes("medium") ? "medium" : variants.includes("high") ? "high" : undefined;
-  }
-  return undefined;
+// Mirrors OpenCode's variant list: "Default" (no variant, the model's base options) then each variant.
+function openCodeVariantOptions(variants: ReadonlyArray<string>) {
+  const listed = variants.filter((id) => id !== OPENCODE_DEFAULT_VARIANT);
+  return listed.length === 0
+    ? []
+    : [
+        { id: OPENCODE_DEFAULT_VARIANT, label: "Default", isDefault: true as const },
+        ...listed.map((id) => ({ id, label: titleCaseSlug(id) })),
+      ];
 }
 
 function inferDefaultAgent(agents: ReadonlyArray<Agent>): string | undefined {
@@ -207,18 +203,6 @@ function inferDefaultAgent(agents: ReadonlyArray<Agent>): string | undefined {
 
 const DEFAULT_OPENCODE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [
-    {
-      id: "variant",
-      label: "Reasoning",
-      type: "select",
-      options: [
-        { id: "low", label: "Low" },
-        { id: "medium", label: "Medium", isDefault: true },
-        { id: "high", label: "High" },
-        { id: "xhigh", label: "Extra High" },
-      ],
-      currentValue: "medium",
-    },
     {
       id: "agent",
       label: "Agent",
@@ -237,13 +221,7 @@ function openCodeCapabilitiesForModel(input: {
   readonly model: ProviderListResponse["all"][number]["models"][string];
   readonly agents: ReadonlyArray<Agent>;
 }): ModelCapabilities {
-  const variantValues = Object.keys(input.model.variants ?? {});
-  const defaultVariant = inferDefaultVariant(input.providerID, variantValues);
-  const variantOptions = variantValues.map((value) =>
-    defaultVariant === value
-      ? { id: value, label: titleCaseSlug(value), isDefault: true as const }
-      : { id: value, label: titleCaseSlug(value) },
-  );
+  const variantOptions = openCodeVariantOptions(Object.keys(input.model.variants ?? {}));
   const primaryAgents = input.agents.filter(
     (agent) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
   );
@@ -262,7 +240,6 @@ function openCodeCapabilitiesForModel(input: {
               label: "Reasoning",
               type: "select" as const,
               options: variantOptions,
-              ...(defaultVariant ? { currentValue: defaultVariant } : {}),
             },
           ]
         : []),
@@ -666,25 +643,10 @@ const OPENCODE_2_PRESENTATION = {
 } as const;
 
 function openCode2ModelCapabilities(model: OpenCode2Model): ModelCapabilities {
-  const variants = model.variants.map((variant) => variant.id);
-  const defaultVariant = inferDefaultVariant(model.providerID, variants);
+  const options = openCodeVariantOptions(model.variants.map((variant) => variant.id));
   return createModelCapabilities({
     optionDescriptors:
-      variants.length === 0
-        ? []
-        : [
-            {
-              id: "variant",
-              label: "Reasoning",
-              type: "select",
-              options: variants.map((id) => ({
-                id,
-                label: titleCaseSlug(id),
-                ...(id === defaultVariant ? { isDefault: true } : {}),
-              })),
-              ...(defaultVariant === undefined ? {} : { currentValue: defaultVariant }),
-            },
-          ],
+      options.length === 0 ? [] : [{ id: "variant", label: "Reasoning", type: "select", options }],
   });
 }
 
