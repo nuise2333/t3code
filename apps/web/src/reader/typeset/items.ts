@@ -148,6 +148,23 @@ const isAsciiAlnum = (cp: number) => isUpper(cp) || isLower(cp) || isDigit(cp);
 const isCodeJoiner = (cp: number) => cp === 0x2e || cp === 0x3a || cp === 0x40 || cp === 0x5f;
 const isCjkSide = (script: ScriptClass) => script === "han" || script === "cjkPunctuation";
 
+// The reference reader's 35 extensions, then ones common in code.
+const FILE_EXTENSIONS = new Set([
+  ..."txt md markdown pdf epub png jpg jpeg gif svg webp html htm css js ts json toml yaml yml csv xml zip dmg app swift rs py sh go c h cpp java rb".split(
+    " ",
+  ),
+  ..."mdx jsonc jsx tsx mjs cjs mts cts scss ini kt cc hpp zsh sql lock log".split(" "),
+]);
+
+/** Whether `text` at `start` holds a known file extension that ends the code word. */
+function isFileExtensionAt(text: string, start: number) {
+  let end = start;
+  while (end < text.length && isAsciiAlnum(text.charCodeAt(end))) end += 1;
+  const next = text.charCodeAt(end);
+  if (end < text.length && (next === 0x5f || next === 0x2e)) return false;
+  return FILE_EXTENSIONS.has(text.slice(start, end).toLowerCase());
+}
+
 function clusterEnd(text: string, start: number) {
   let end = start + (text.codePointAt(start)! > 0xffff ? 2 : 1);
   while (end < text.length) {
@@ -340,7 +357,9 @@ export function buildItems(
       open !== undefined &&
       after.isCode &&
       !breakable &&
-      ((isCodeJoiner(before.cp) && isAsciiAlnum(after.cp)) ||
+      ((isCodeJoiner(before.cp) &&
+        isAsciiAlnum(after.cp) &&
+        !(before.cp === 0x2e && isFileExtensionAt(open.run.text, before.end))) ||
         ((isDigit(before.cp) || isLower(before.cp)) && isUpper(after.cp)))
     ) {
       open.splits.push({ at: before.end, penalty: penalty(CODE_BREAK_PENALTY) });

@@ -62,6 +62,8 @@ describe("item construction", () => {
       "foo:21 |100 Bar.:24.5 |100 baz_:24.5 |100 qux:21",
     );
     expect(describeItems([code("table")])).toBe("table:35");
+    expect(describeItems([code("app.test.ts")])).toBe("app.:24.5 |100 test.ts:45.5");
+    expect(describeItems([code("a.tsx_b")])).toBe("a.:10.5 |100 tsx_:24.5 |100 b:7");
     expect(text("table")).toBe("ta:16 |50- ble:24");
   });
 

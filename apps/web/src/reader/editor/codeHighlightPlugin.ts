@@ -3,7 +3,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 import { languageOfInfoString } from "~/composer-code-languages";
-import { getSyntaxHighlighterPromise } from "~/lib/syntaxHighlighting";
+import { getSyntaxHighlighterPromise, MAX_HIGHLIGHTED_CODE_LENGTH } from "~/lib/syntaxHighlighting";
 
 import { READER_SYNTAX_THEME_NAME } from "../markdown/readerSyntaxTheme";
 import { leafTextOf, replacedRange } from "./inlineSyntaxPlugin";
@@ -54,6 +54,7 @@ async function tokenize(language: string, text: string): Promise<ReadonlyArray<C
 function blockDecorations(node: ProseMirrorNode, pos: number): Decoration[] | null {
   const language = languageOf(node);
   if (language === "") return [];
+  if (leafText(node).length > MAX_HIGHLIGHTED_CODE_LENGTH) return [];
   const leaf = leafTextOf(node, pos);
   const ranges = tokenCache.get(cacheKey(language, leaf.text));
   if (!ranges) return null;
@@ -144,6 +145,7 @@ export function createCodeHighlightPlugin(): Plugin<DecorationSet> {
             const language = languageOf(node);
             if (language === "") continue;
             const text = leafText(node);
+            if (text.length > MAX_HIGHLIGHTED_CODE_LENGTH) continue;
             const key = cacheKey(language, text);
             if (!tokenCache.has(key) && !pending.has(key)) missing.set(key, { language, text });
           }

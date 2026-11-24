@@ -184,4 +184,16 @@ export const ORACLE_CASES: ReadonlyArray<{
       [560, 1, 0, 0.3226, 0.3226, 0.3226],
     ],
   },
+  {
+    // Lines past ratio 4.6 score (1 + badness)^2 unclamped: a TeX-style 1e8 cap picks other breaks.
+    name: "very loose lines",
+    text: "sea out internationalization wind boy big internationalization internationalization internationalization end work oak mile or soul cold two view rain sat up tiny we internationalization road see men can up We internationalization time rock sat took was made so mile view We day at internationalization sand town internationalization wild internationalization May big barn west The internationalization down boy back go internationalization sun from saw made oak We",
+    rows: [
+      [320, 11, 4, 5.6399, -0.2141, 1.226],
+      [480, 7, 2, 1.9964, -0.063, 0.7344],
+      [672, 5, 1, 1.0069, -0.6718, 0.5071],
+      [760, 4, 0, 0.8447, 0.1774, 0.4229],
+      [860, 4, 1, 0.1912, -0.0577, 0.0956],
+    ],
+  },
 ];

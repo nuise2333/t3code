@@ -5,7 +5,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 import type { DiffThemeName } from "~/lib/diffRendering";
 import { languageOfInfoString } from "~/composer-code-languages";
-import { getSyntaxHighlighterPromise } from "~/lib/syntaxHighlighting";
+import { getSyntaxHighlighterPromise, MAX_HIGHLIGHTED_CODE_LENGTH } from "~/lib/syntaxHighlighting";
 import { highlighterLanguageOf } from "./chat/MarkdownCodeBlock.logic";
 
 interface HighlightedBlock {
@@ -15,15 +15,12 @@ interface HighlightedBlock {
 
 const composerCodeBlockHighlightKey = new PluginKey<DecorationSet>("composerCodeBlockHighlight");
 
-// Tokenizing larger fences can stall the main thread.
-const MAX_HIGHLIGHTED_CODE_BLOCK_LENGTH = 20_000;
-
 // Keep mapped colors while typing in long fences, then refresh after a pause.
 const DEFERRED_HIGHLIGHT_CODE_BLOCK_LENGTH = 2_000;
 const DEFERRED_HIGHLIGHT_DELAY_MS = 300;
 
 function shouldHighlightCodeBlock(code: string): boolean {
-  return code.length <= MAX_HIGHLIGHTED_CODE_BLOCK_LENGTH;
+  return code.length <= MAX_HIGHLIGHTED_CODE_LENGTH;
 }
 function blockSignature(node: ProseMirrorNode, theme: DiffThemeName): string {
   return [theme, String(node.attrs.language ?? ""), node.textContent].join("\u0000");

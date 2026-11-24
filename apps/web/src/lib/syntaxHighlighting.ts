@@ -22,6 +22,9 @@ setCustomExtension("xslt", "xml");
  */
 export const PREFERRED_HIGHLIGHTER: HighlighterTypes = "highlights";
 
+/** Code longer than this is shown uncoloured; tokenizing it on the main thread stalls the UI. */
+export const MAX_HIGHLIGHTED_CODE_LENGTH = 20_000;
+
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
 export function getSyntaxHighlighterPromise(language: string): Promise<DiffsHighlighter> {

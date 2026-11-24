@@ -8,6 +8,14 @@ import { Button } from "../ui/button";
 type Pele = typeof import("pele/lazy");
 type PeleLoad = { readonly status: "loaded"; readonly pele: Pele } | { readonly status: "failed" };
 
+// Layout runs on the main thread; larger sources would freeze the page.
+const MAX_DIAGRAM_SOURCE_BYTES = 64 * 1024;
+
+// A UTF-16 unit encodes to at most 3 UTF-8 bytes, so short sources skip the encode.
+const isDiagramSourceTooLarge = (source: string) =>
+  source.length * 3 > MAX_DIAGRAM_SOURCE_BYTES &&
+  new TextEncoder().encode(source).length > MAX_DIAGRAM_SOURCE_BYTES;
+
 let coreLoad: Promise<PeleLoad> | null = null;
 // Each diagram type is its own chunk, so a chat with one flowchart loads only
 // the flowchart parser and layout.
@@ -229,6 +237,14 @@ export function MermaidDiagram({
   const [, setAttempt] = useState(0);
   const [renderError, setRenderError] = useState<string | null>(null);
   const trimmedSource = source.trim();
+  if (isDiagramSourceTooLarge(trimmedSource)) {
+    return (
+      <DiagramError
+        message={`the source is over the ${MAX_DIAGRAM_SOURCE_BYTES / 1024} KB limit.`}
+        source={source}
+      />
+    );
+  }
   const core = use(loadCore());
   const type = core.status === "loaded" ? detectDiagramType(core.pele, trimmedSource) : null;
   const load = core.status === "loaded" && type ? use(loadDiagramType(core.pele, type)) : core;

@@ -3,6 +3,7 @@ import type { ChangeEvent, DragEvent, UIEvent } from "react";
 import { settlePromise } from "@t3tools/client-runtime/state/runtime";
 import { useRef, useState } from "react";
 import { formatBytes } from "../../lib/formatBytes";
+import { MAX_HIGHLIGHTED_CODE_LENGTH } from "../../lib/syntaxHighlighting";
 import { cn } from "../../lib/utils";
 import {
   getCustomThemes,
@@ -32,7 +33,6 @@ import { COLOR_THEME_SEARCH, ThemeSearchSection } from "./ThemeSearchSection";
 const MAX_THEME_FILE_BYTES = 256 * 1024;
 
 /** Highlighting rebuilds markup per keystroke; fall back to plain text for oversized pastes. */
-const MAX_HIGHLIGHTED_JSON_LENGTH = 20_000;
 
 function describeOversizedThemeFile(bytes: number): string | null {
   if (bytes <= MAX_THEME_FILE_BYTES) return null;
@@ -89,7 +89,7 @@ function ThemeJsonEditor({
   onChange: (value: string) => void;
 }) {
   const highlightRef = useRef<HTMLPreElement>(null);
-  const isPlainText = value.length > MAX_HIGHLIGHTED_JSON_LENGTH;
+  const isPlainText = value.length > MAX_HIGHLIGHTED_CODE_LENGTH;
   const highlightedJson = isPlainText ? "" : highlightJson(value);
 
   const syncScroll = (event: UIEvent<HTMLTextAreaElement>) => {
