@@ -661,12 +661,13 @@ export function ComposerControlsBar(props: {
   ) : (
     <>
       {composerModelPicker}
-      {/* Two spacers center the usage pill between the model and the right-hand controls. The measurement
-          counts their minimum, so a tight row sheds controls before the gaps close. */}
+      {/* Two spacers put the usage pill right of center (3:1) between the model and the
+          right-hand controls. The measurement counts their minimum, so a tight row sheds
+          controls before the gaps close. */}
       <div
         data-resting-controls-spacer
         aria-hidden="true"
-        className={cn("flex-1", trailingSlot ? "min-w-8" : "min-w-0")}
+        className={cn("shrink basis-0", trailingSlot ? "min-w-8 grow-3" : "min-w-0 grow")}
       />
       {trailingSlot ? (
         <div data-resting-fixed className="flex shrink-0 items-center empty:hidden">
