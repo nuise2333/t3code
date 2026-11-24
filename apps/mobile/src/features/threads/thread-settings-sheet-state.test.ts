@@ -11,7 +11,11 @@ import {
   rememberModelOptions,
   withRememberedModelOptions,
 } from "../../state/use-model-option-memory";
-import { canCommitPendingModel, pendingModelAfterPress } from "./thread-settings-sheet-state";
+import {
+  canCommitPendingModel,
+  favoritesFirst,
+  pendingModelAfterPress,
+} from "./thread-settings-sheet-state";
 
 function modelOption(
   model: string,
@@ -69,6 +73,14 @@ afterEach(() => {
 });
 
 describe("thread settings sheet state", () => {
+  it("lists favorites in their saved order ahead of other models", () => {
+    const models = ["a", "b", "c", "d"].map((model) => modelOption(model));
+    const ordered = favoritesFirst(models, new Set([models[2]!.key, models[0]!.key]));
+    expect(ordered.map((model) => model.key)).toEqual(
+      [models[2], models[0], models[1], models[3]].map((model) => model!.key),
+    );
+  });
+
   it("preserves in-progress edits when the staged model is pressed again", () => {
     rememberModelOptions("codex", "gpt-next", [{ id: "effort", value: "medium" }]);
     const pending = modelOption("gpt-next", [{ id: "effort", value: "high" }]);

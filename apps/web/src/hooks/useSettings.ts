@@ -535,6 +535,11 @@ export function useToggleEnvironmentModelFavorite(environmentId: EnvironmentId |
   };
 }
 
+export function useReorderEnvironmentModelFavorites(environmentId: EnvironmentId | null) {
+  const save = useUpdateEnvironmentModelPreferences(environmentId);
+  return (order: UnifiedSettings["favorites"]) => save({ setModelFavoritesOrder: order });
+}
+
 const noEnvironmentSettingsAtom = Atom.make<ServerSettings | null>(null);
 
 export function useEnvironmentModelPreferences(environmentId: EnvironmentId | null) {

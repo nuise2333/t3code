@@ -21,6 +21,7 @@ import {
   useEffectEvent,
   useLayoutEffect,
   useRef,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -34,7 +35,11 @@ import {
   UsersIcon,
   type LucideIcon,
 } from "lucide-react";
-import { ModelListRow } from "./ModelListRow";
+import {
+  ModelListRow,
+  type ModelListRowDropPosition,
+  type ModelListRowReorder,
+} from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import type { ModelRowEffortDisplay } from "./ComposerModelEffort";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
@@ -72,6 +77,7 @@ import {
 } from "../../keybindings";
 import {
   useEnvironmentModelPreferences,
+  useReorderEnvironmentModelFavorites,
   useToggleEnvironmentModelFavorite,
 } from "~/hooks/useSettings";
 import { announce } from "~/lib/announce";
@@ -85,7 +91,7 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
+import { moveOrderedKey, providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 
 type ModelPickerItem = {
   slug: string;
@@ -586,6 +592,21 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const keybindings = providedKeybindings ?? serverKeybindings;
   const [searchHeight, setSearchHeight] = useState(0);
   const toggleFavorite = useToggleEnvironmentModelFavorite(props.environmentId);
+  const reorderFavorites = useReorderEnvironmentModelFavorites(props.environmentId);
+  // Holds a dropped order until the saved favorites change, so the row does not snap back.
+  const [pendingFavoriteOrder, setPendingFavoriteOrder] = useState<{
+    basis: typeof favorites;
+    keys: ReadonlyArray<string>;
+  } | null>(null);
+  const favoriteOrder =
+    pendingFavoriteOrder?.basis === favorites
+      ? pendingFavoriteOrder.keys
+      : favorites.map((favorite) => providerModelKey(favorite.provider, favorite.model));
+  const [favoriteDrag, setFavoriteDrag] = useState<{
+    source: string;
+    target: string | null;
+    position: ModelListRowDropPosition;
+  } | null>(null);
 
   const focusSearchInput = () => {
     searchInputRef.current?.focus({ preventScroll: true });
@@ -807,6 +828,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       favoriteModelKeys: favoritesSet,
       groupFavorites: selectedInstanceId !== "favorites",
       instanceOrder: selectedInstanceId === "favorites" ? instanceOrder : [],
+      favoriteOrder: selectedInstanceId === "favorites" ? favoriteOrder : [],
     });
   })();
 
@@ -935,7 +957,72 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       .filter((entry) => shouldShowInstanceBadge(entry, instanceEntries))
       .map((entry) => entry.instanceId),
   );
+  const canReorderFavorites = selectedInstanceId === "favorites" && !isSearching;
+  const dropFavorite = (source: string, target: string, position: ModelListRowDropPosition) => {
+    const shown = visibleModels.map((model) => providerModelKey(model.instanceId, model.slug));
+    const moved = moveOrderedKey(shown, source, target, position);
+    if (!moved) return;
+    const keys = [...moved, ...favoriteOrder.filter((key) => !moved.includes(key))];
+    const favoriteByKey = new Map(
+      favorites.map((favorite) => [providerModelKey(favorite.provider, favorite.model), favorite]),
+    );
+    setPendingFavoriteOrder({ basis: favorites, keys });
+    void reorderFavorites(keys.flatMap((key) => favoriteByKey.get(key) ?? []));
+  };
+  // Pointer events, not native drag: the combobox cancels mousedown to keep the search focused.
+  const startFavoriteDrag = (source: string, event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== 0 || event.pointerType === "touch") return;
+    const startY = event.clientY;
+    let drag: { target: string | null; position: ModelListRowDropPosition } | null = null;
+    const onMove = (move: PointerEvent) => {
+      if (!drag && Math.abs(move.clientY - startY) < 4) return;
+      const row = document
+        .elementFromPoint(move.clientX, move.clientY)
+        ?.closest<HTMLElement>("[data-favorite-drag-key]");
+      const rect = row?.getBoundingClientRect();
+      drag = {
+        target: row?.dataset.favoriteDragKey ?? drag?.target ?? null,
+        position:
+          rect && move.clientY >= rect.top + rect.height / 2
+            ? "after"
+            : rect
+              ? "before"
+              : (drag?.position ?? "before"),
+      };
+      setFavoriteDrag({ source, ...drag });
+    };
+    const finish = (commit: boolean) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      setFavoriteDrag(null);
+      if (!drag) return;
+      // The release may also click the row and pick that model; swallow only that click.
+      const swallowClick = (click: MouseEvent) => click.stopPropagation();
+      window.addEventListener("click", swallowClick, { capture: true, once: true });
+      window.setTimeout(() => window.removeEventListener("click", swallowClick, true));
+      if (commit && drag.target) dropFavorite(source, drag.target, drag.position);
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+  };
+  const favoriteReorderFor = (favoriteKey: string): ModelListRowReorder | undefined =>
+    canReorderFavorites
+      ? {
+          dragKey: favoriteKey,
+          dropIndicator:
+            favoriteDrag?.target === favoriteKey && favoriteDrag.source !== favoriteKey
+              ? favoriteDrag.position
+              : null,
+          onPointerDown: (event) => startFavoriteDrag(favoriteKey, event),
+        }
+      : undefined;
   const modelListExtraData = {
+    favoriteDrag,
+    canReorderFavorites,
     badgedInstanceIds,
     favoritesSet,
     modelJumpLabelByKey,
@@ -1325,6 +1412,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}
                     onToggleFavorite={toggleFavorite}
+                    reorder={favoriteReorderFor(providerModelKey(model.instanceId, model.slug))}
                   />
                 );
               }}

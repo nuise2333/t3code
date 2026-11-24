@@ -14,6 +14,9 @@ export function favoritesFirst(
   for (const model of models) {
     (favoriteKeys.has(model.key) ? favorites : others).push(model);
   }
+  // The set keeps the saved favorites order, which the user can rearrange on web and desktop.
+  const rank = new Map([...favoriteKeys].map((key, index) => [key, index] as const));
+  favorites.sort((left, right) => (rank.get(left.key) ?? 0) - (rank.get(right.key) ?? 0));
   return [...favorites, ...others];
 }
 

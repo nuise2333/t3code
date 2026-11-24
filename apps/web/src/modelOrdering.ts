@@ -61,8 +61,11 @@ export function sortProviderModelItems<T extends ProviderModelItem>(
     readonly favoriteModelKeys?: ReadonlySet<string> | ReadonlyArray<string>;
     readonly groupFavorites?: boolean;
     readonly instanceOrder?: ReadonlyArray<ProviderInstanceId>;
+    /** `providerModelKey`s in the user's saved Favorites order; ranks ahead of instance order. */
+    readonly favoriteOrder?: ReadonlyArray<string>;
   },
 ): T[] {
+  const favoriteOrder = rankByValue(options?.favoriteOrder ?? []);
   const favoriteModelKeys = toSet(options?.favoriteModelKeys);
   const instanceOrder = new Map(
     Arr.map(options?.instanceOrder ?? [], (instanceId, index) => [instanceId, index] as const),
@@ -78,9 +81,24 @@ export function sortProviderModelItems<T extends ProviderModelItem>(
           ),
         ]
       : []),
+    byOptionalRank((item) => favoriteOrder.get(providerModelKey(item.instanceId, item.slug))),
     byOptionalRank((item) => instanceOrder.get(item.instanceId)),
     byOptionalRank((item) => originalOrder.get(providerModelKey(item.instanceId, item.slug))),
   ];
 
   return Arr.sort(items, Order.combineAll(orders));
+}
+
+/** Moves `source` next to `target`; returns null when the drop changes nothing. */
+export function moveOrderedKey(
+  keys: ReadonlyArray<string>,
+  source: string,
+  target: string,
+  position: "before" | "after",
+): string[] | null {
+  if (source === target || !keys.includes(source) || !keys.includes(target)) return null;
+  const rest = keys.filter((key) => key !== source);
+  const targetIndex = rest.indexOf(target) + (position === "after" ? 1 : 0);
+  const next = [...rest.slice(0, targetIndex), source, ...rest.slice(targetIndex)];
+  return next.every((key, index) => key === keys[index]) ? null : next;
 }

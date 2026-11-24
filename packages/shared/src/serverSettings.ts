@@ -415,6 +415,24 @@ function keepRoutingGroupKeys(
   });
 }
 
+type ModelFavoriteEntry = ModelPreferences["favorites"][number];
+
+function orderModelFavorites(
+  favorites: ReadonlyArray<ModelFavoriteEntry>,
+  order: ReadonlyArray<ModelFavoriteEntry>,
+): ModelFavoriteEntry[] {
+  const key = (favorite: ModelFavoriteEntry) => JSON.stringify([favorite.provider, favorite.model]);
+  const unplaced = new Map(favorites.map((favorite) => [key(favorite), favorite] as const));
+  const ordered: ModelFavoriteEntry[] = [];
+  for (const favorite of order) {
+    const existing = unplaced.get(key(favorite));
+    if (!existing) continue;
+    ordered.push(existing);
+    unplaced.delete(key(favorite));
+  }
+  return [...ordered, ...favorites.filter((favorite) => unplaced.has(key(favorite)))];
+}
+
 export function applyServerSettingsPatch(
   current: ServerSettings,
   rawPatch: ServerSettingsPatch,
@@ -426,6 +444,7 @@ export function applyServerSettingsPatch(
   const {
     migrateModelPreferences,
     setModelFavorites,
+    setModelFavoritesOrder,
     setModelsHidden,
     setProviderModelOrder,
     providerModelPreferences,
@@ -485,7 +504,7 @@ export function applyServerSettingsPatch(
         : undefined;
   const initialFavorites =
     patch.favorites ?? current.favorites ?? migrateModelPreferences?.favorites ?? null;
-  const favorites =
+  const toggledFavorites =
     setModelFavorites?.reduce(
       (current, change) => {
         const exists = current.some(
@@ -501,6 +520,10 @@ export function applyServerSettingsPatch(
       },
       [...(initialFavorites ?? [])],
     ) ?? initialFavorites;
+  const favorites =
+    setModelFavoritesOrder && toggledFavorites
+      ? orderModelFavorites(toggledFavorites, setModelFavoritesOrder)
+      : toggledFavorites;
   const initialModelPreferences =
     providerModelPreferences ??
     current.providerModelPreferences ??

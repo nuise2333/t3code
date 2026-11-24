@@ -1010,6 +1010,29 @@ describe("synchronized model preferences", () => {
     expect(first.favorites).toEqual([{ provider, model: "sol" }]);
   });
 
+  it("reorders favorites without dropping ones another client added meanwhile", () => {
+    const starred = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      setModelFavorites: ["sol", "luna", "astra"].map((model) => ({
+        provider,
+        model,
+        favorite: true,
+      })),
+    });
+    const reordered = applyServerSettingsPatch(starred, {
+      setModelFavoritesOrder: [
+        { provider, model: "astra" },
+        { provider, model: "gone" },
+        { provider, model: "sol" },
+        { provider, model: "astra" },
+      ],
+    });
+    expect(reordered.favorites?.map((favorite) => favorite.model)).toEqual([
+      "astra",
+      "sol",
+      "luna",
+    ]);
+  });
+
   it("preserves unrelated models and providers during bulk visibility and order edits", () => {
     const otherProvider = ProviderInstanceId.make("claude_work");
     const initial = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {

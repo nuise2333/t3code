@@ -1,5 +1,5 @@
 import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
-import { memo } from "react";
+import { memo, type PointerEvent } from "react";
 import { CheckIcon, StarIcon } from "lucide-react";
 import { getDisplayModelName } from "./providerIconUtils";
 import { ComboboxItem } from "../ui/combobox";
@@ -11,6 +11,15 @@ import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import type { ModelRowEffortDisplay } from "./ComposerModelEffort";
+
+export type ModelListRowDropPosition = "before" | "after";
+
+export type ModelListRowReorder = {
+  /** Read back by the picker to find the row under the pointer. */
+  dragKey: string;
+  dropIndicator: ModelListRowDropPosition | null;
+  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
+};
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
@@ -35,7 +44,10 @@ export const ModelListRow = memo(function ModelListRow(props: {
   jumpLabel?: string | null;
   disabledReason?: string | null;
   onToggleFavorite: (instanceId: ProviderInstanceId, slug: string) => void;
+  /** Set only where the row's order is the user's to change (Favorites, not searching). */
+  reorder?: ModelListRowReorder | undefined;
 }) {
+  const reorder = props.reorder;
   const model = {
     slug: props.slug,
     name: props.name,
@@ -53,7 +65,18 @@ export const ModelListRow = memo(function ModelListRow(props: {
         props.disabledReason &&
           "data-disabled:pointer-events-auto data-disabled:cursor-not-allowed",
       )}
+      data-favorite-drag-key={reorder?.dragKey}
+      onPointerDown={reorder?.onPointerDown}
     >
+      {reorder?.dropIndicator ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-primary",
+            reorder.dropIndicator === "before" ? "-top-px" : "-bottom-px",
+          )}
+        />
+      ) : null}
       {/* One row shape in every tab: the logo names the provider, so Favorites needs no second line. */}
       <ProviderInstanceIcon
         driverKind={props.driverKind}

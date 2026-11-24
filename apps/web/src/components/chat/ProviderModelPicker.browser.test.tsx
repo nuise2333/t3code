@@ -243,6 +243,63 @@ it("opens on the active provider when every favorite belongs to a disabled provi
   await expect.element(page.getByRole("option", { name: /Codex model/ })).toBeVisible();
 });
 
+it("reorders favorites by dragging a row above another", async () => {
+  const entries = deriveProviderInstanceEntries(
+    ["Codex", "Claude", "Grok"].map((name) => ({
+      instanceId: ProviderInstanceId.make(name.toLowerCase()),
+      driver: ProviderDriverKind.make(name.toLowerCase()),
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready" as const,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [
+        { slug: name.toLowerCase(), name: `${name} model`, isCustom: false, capabilities: {} },
+      ],
+      slashCommands: [],
+      skills: [],
+    })),
+  );
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    favorites: entries.map((entry) => ({
+      provider: entry.instanceId,
+      model: entry.models[0]!.slug,
+    })),
+  });
+  using _settings = {
+    [Symbol.dispose]: () => __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS),
+  };
+
+  const onSelect = vi.fn();
+  await using screen = await render(
+    <ProviderModelPicker
+      environmentId={null}
+      activeInstanceId={entries[0]!.instanceId}
+      model="codex"
+      lockedProvider={null}
+      instanceEntries={entries}
+      modelOptionsByInstance={new Map(entries.map((entry) => [entry.instanceId, entry.models]))}
+      triggerAriaLabel="Choose model"
+      onInstanceModelChange={onSelect}
+    />,
+  );
+  await screen.getByRole("button", { name: "Choose model" }).click();
+  const optionNames = () =>
+    Array.from(document.querySelectorAll('[role="option"]'), (option) =>
+      ["Codex", "Claude", "Grok"].find((name) => option.textContent?.includes(`${name} model`)),
+    );
+  await vi.waitFor(() => expect(optionNames()).toEqual(["Codex", "Claude", "Grok"]));
+  await userEvent.dragAndDrop(
+    page.getByRole("option", { name: /Grok model/ }),
+    page.getByRole("option", { name: /Codex model/ }),
+    { targetPosition: { x: 20, y: 2 } },
+  );
+  await vi.waitFor(() => expect(optionNames()).toEqual(["Grok", "Codex", "Claude"]));
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
 it("keeps the touch keyboard down while choosing a provider", async () => {
   const entries = deriveProviderInstanceEntries(
     ["Codex", "Claude"].map((name) => ({

@@ -1989,6 +1989,8 @@ export const ServerSettingsPatch = Schema.Struct({
   setModelsHidden: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, hidden: Schema.Boolean })),
   ),
+  // Listed favorites move to the front in this order; unlisted ones keep their order after.
+  setModelFavoritesOrder: Schema.optionalKey(ModelFavorites),
   setProviderModelOrder: Schema.optionalKey(
     Schema.Struct({ provider: ProviderInstanceId, modelOrder: Schema.Array(TrimmedString) }),
   ),
