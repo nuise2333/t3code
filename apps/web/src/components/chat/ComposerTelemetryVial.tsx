@@ -143,7 +143,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
   if (!telemetry || !contextWindow) return null;
 
   const sources = usageLimitSources ?? serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES;
-  // Every enabled agent gets a tab, like Antigravity's; the thread's own one leads.
+  // Every enabled agent gets a tab, like Antigravity's; the thread's own one leads, then agents with data.
   const quotaProviders = providers
     .filter((provider) => provider.enabled)
     .map((provider) => ({
@@ -160,7 +160,8 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
     .toSorted(
       (left, right) =>
         Number(right.instanceId === providerInstanceId) -
-        Number(left.instanceId === providerInstanceId),
+          Number(left.instanceId === providerInstanceId) ||
+        Number(right.limits !== null) - Number(left.limits !== null),
     );
   const shownQuota =
     quotaProviders.find((entry) => entry.instanceId === pickedQuotaInstance) ??
@@ -299,7 +300,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
         side="top"
         align="end"
         sideOffset={8}
-        width="md"
+        width="lg"
         padding="compact"
         {...composerFloatingLayerProps}
       >
@@ -501,11 +502,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                 ) : null}
               </div>
               {quotaProviders.length > 1 ? (
-                <div
-                  role="tablist"
-                  aria-label="Provider quotas"
-                  className="-mx-0.5 flex gap-1 overflow-x-auto px-0.5 pb-0.5 [scrollbar-width:none]"
-                >
+                <div role="tablist" aria-label="Provider quotas" className="flex flex-wrap gap-1">
                   {quotaProviders.map((entry) => {
                     const selected = entry.instanceId === shownQuota.instanceId;
                     return (
@@ -514,13 +511,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                         type="button"
                         role="tab"
                         aria-selected={selected}
-                        onClick={(event) => {
-                          setPickedQuotaInstance(entry.instanceId);
-                          event.currentTarget.scrollIntoView({
-                            block: "nearest",
-                            inline: "nearest",
-                          });
-                        }}
+                        onClick={() => setPickedQuotaInstance(entry.instanceId)}
                         className={cn(
                           "shrink-0 cursor-pointer rounded-md px-2 py-0.5 text-2xs font-medium whitespace-nowrap outline-none transition-colors duration-150 ease-row focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                           selected
