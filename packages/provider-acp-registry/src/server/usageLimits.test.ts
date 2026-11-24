@@ -163,6 +163,7 @@ describe("ACP Registry agent limits", () => {
         per1MonthPercentage: 0.0375,
         per1MonthResetTime: 1797436800000,
         per5HourPercentage: 0.5,
+        per1WeekPercentage: 3.75,
         hasQuotaData: true,
       }).map((window) => [
         window.label,

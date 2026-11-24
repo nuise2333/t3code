@@ -296,6 +296,29 @@ export const readZCodeUsageLimits = Effect.fn("readZCodeUsageLimits")(function* 
 });
 
 const TokenPlanUsage = Schema.Record(Schema.String, Schema.Unknown);
+const QwenSettings = Schema.Struct({
+  env: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  providerMetadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+});
+const decodeQwenSettings = Schema.decodeEffect(Schema.fromJsonString(QwenSettings));
+const BL_ENVIRONMENT = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+] as const;
 const decodeTokenPlanUsage = Schema.decodeEffect(Schema.fromJsonString(TokenPlanUsage));
 const TOKEN_PLAN_WINDOW = /^per(\d+)(Hour|Day|Week|Month)Percentage$/;
 const TOKEN_PLAN_UNIT_MINUTES = { Hour: 60, Day: 24 * 60, Week: 7 * 24 * 60 } as const;
@@ -304,7 +327,8 @@ const TOKEN_PLAN_UNIT_MINUTES = { Hour: 60, Day: 24 * 60, Week: 7 * 24 * 60 } as
 export function tokenPlanUsageToWindows(usage: Readonly<Record<string, unknown>>) {
   return Object.entries(usage).flatMap(([key, value]): ServerProviderUsageWindow[] => {
     const match = TOKEN_PLAN_WINDOW.exec(key);
-    if (!match || typeof value !== "number" || !Number.isFinite(value)) return [];
+    // A used fraction outside 0..1 means bl changed its format; show nothing rather than a guess.
+    if (!match || typeof value !== "number" || !(value >= 0 && value <= 1)) return [];
     const count = Number(match[1]);
     const unit = match[2] as "Hour" | "Day" | "Week" | "Month";
     const reset = usage[`per${count}${unit}ResetTime`];
@@ -345,10 +369,30 @@ export const readQwenTokenPlanUsageLimits = Effect.fn("readQwenTokenPlanUsageLim
     reason: "unsupported",
     message: "Run `bl auth login --console` to see Token Plan limits.",
   });
+  // bl answers for the account it is signed in to, so only a Qwen set up for Token Plan reads it.
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const home = environment.HOME || (yield* HostProcess.HomeDirectory);
+  const qwenSettings = yield* fs
+    .readFileString(path.join(home, ".qwen", "settings.json"))
+    .pipe(Effect.flatMap(decodeQwenSettings), Effect.option);
+  const usesTokenPlan =
+    Boolean(environment.BAILIAN_TOKEN_PLAN_API_KEY?.trim()) ||
+    (Option.isSome(qwenSettings) &&
+      (qwenSettings.value.env?.BAILIAN_TOKEN_PLAN_API_KEY !== undefined ||
+        qwenSettings.value.providerMetadata?.["token-plan"] !== undefined));
+  if (!usesTokenPlan) return makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
+  // bl gets only what it needs to run; the instance's own secrets never reach it.
+  const blEnvironment = Object.fromEntries(
+    BL_ENVIRONMENT.flatMap((name) => {
+      const value = environment[name];
+      return value === undefined ? [] : [[name, value]];
+    }),
+  );
   const output = yield* (yield* ChildProcessSpawner.ChildProcessSpawner)
     .string(
       ChildProcess.make("bl", ["usage", "token-plan", "--output", "json"], {
-        env: environment,
+        env: blEnvironment,
         stdin: "ignore",
         stderr: "ignore",
         forceKillAfter: "1 second",
@@ -358,7 +402,11 @@ export const readQwenTokenPlanUsageLimits = Effect.fn("readQwenTokenPlanUsageLim
   if (Option.isNone(output)) return signIn;
   const usage = yield* decodeTokenPlanUsage(output.value.trim()).pipe(Effect.option);
   if (Option.isNone(usage) || "error" in usage.value) return signIn;
-  return makeUsageLimits({ checkedAt, windows: tokenPlanUsageToWindows(usage.value) });
+  const windows = tokenPlanUsageToWindows(usage.value).map((window) => ({
+    ...window,
+    label: `${window.label} · bl account`,
+  }));
+  return makeUsageLimits({ checkedAt, windows });
 });
 
 type UsageRead = ReturnType<
