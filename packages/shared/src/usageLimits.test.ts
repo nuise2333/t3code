@@ -1203,6 +1203,23 @@ describe("pooled account columns", () => {
       row.columns.map((member) => (member.window ? member.account.key : null)),
     );
 
+  it("gives each ACP Registry agent its own pool, named and iconed after the agent", () => {
+    const agent = (name: string, iconUrl: string): LimitAccount => ({
+      ...account(name, [weekly]),
+      driver: ProviderDriverKind.make("acpRegistry"),
+      iconUrl,
+    });
+    const pools = collectLimitPools(
+      [account("claude", [weekly]), agent("Kimi Code", "kimi.svg"), agent("ZCode", "zcode.svg")],
+      Date.parse("2026-09-03T11:00:00.000Z"),
+    );
+    expect(pools.map((pool) => [pool.label, pool.iconUrl, pool.accounts.length])).toEqual([
+      [null, undefined, 1],
+      ["Kimi Code", "kimi.svg", 1],
+      ["ZCode", "zcode.svg", 1],
+    ]);
+  });
+
   it.each([
     {
       reports: [

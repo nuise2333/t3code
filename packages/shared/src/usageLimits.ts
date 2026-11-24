@@ -301,6 +301,8 @@ export interface LimitAccount {
   readonly email: string | undefined;
   readonly plan: string | undefined;
   readonly accentColor: string | undefined;
+  /** The agent's own icon, for drivers such as ACP Registry that host many agents. */
+  readonly iconUrl?: string | undefined;
   readonly environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
     readonly label: string;
@@ -373,6 +375,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
           : displayName,
       plan: planSources.get(key)?.plan ?? previous.plan ?? next.plan,
       accentColor: previous.accentColor ?? next.accentColor,
+      iconUrl: previous.iconUrl ?? next.iconUrl,
       environments,
       sourceLabel: environments.length > 0 ? null : (previous.sourceLabel ?? next.sourceLabel),
       redeem:
@@ -405,6 +408,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         email: provider.auth.email,
         plan: provider.auth.label,
         accentColor: provider.accentColor,
+        iconUrl: provider.iconUrl,
         environments: [{ environmentId, label }],
         sourceLabel: null,
         redeem: { environmentId, input: { instanceId: provider.instanceId } },
@@ -499,7 +503,11 @@ export interface LimitPoolWindow {
 }
 
 export interface LimitPool {
+  readonly key: string;
   readonly driver: ServerProvider["driver"];
+  /** Set when the pool is one agent of a multi-agent driver; otherwise the driver names it. */
+  readonly label: string | null;
+  readonly iconUrl: string | undefined;
   readonly accounts: readonly LimitAccount[];
   readonly windows: readonly LimitPoolWindow[];
 }
@@ -555,13 +563,19 @@ export function collectLimitPools(
   accounts: readonly LimitAccount[],
   now: number,
 ): readonly LimitPool[] {
-  const byDriver = new Map<ServerProvider["driver"], LimitAccount[]>();
+  // ACP Registry hosts unrelated agents (Kimi, ZCode, Qwen...), each with its own plan: pool per agent.
+  const poolOf = (account: LimitAccount) =>
+    account.driver === "acpRegistry"
+      ? `${account.driver}:${account.displayName ?? account.key}`
+      : String(account.driver);
+  const byPool = new Map<string, LimitAccount[]>();
   for (const account of accounts) {
-    const list = byDriver.get(account.driver);
+    const list = byPool.get(poolOf(account));
     if (list) list.push(account);
-    else byDriver.set(account.driver, [account]);
+    else byPool.set(poolOf(account), [account]);
   }
-  return [...byDriver].map(([driver, members]) => {
+  return [...byPool].map(([key, members]) => {
+    const driver = members[0]!.driver;
     const orderWindow = members
       .flatMap((account) => account.limits.windows)
       .sort((left, right) => WINDOW_KIND_ORDER[left.kind] - WINDOW_KIND_ORDER[right.kind])[0];
@@ -580,7 +594,14 @@ export function collectLimitPools(
         accountSortName(left).localeCompare(accountSortName(right)) ||
         left.key.localeCompare(right.key),
     );
-    return { driver, accounts: sorted, windows: poolWindows(sorted, now) };
+    return {
+      key,
+      driver,
+      label: driver === "acpRegistry" ? (members[0]!.displayName ?? null) : null,
+      iconUrl: members.find((account) => account.iconUrl)?.iconUrl,
+      accounts: sorted,
+      windows: poolWindows(sorted, now),
+    };
   });
 }
 

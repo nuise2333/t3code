@@ -619,7 +619,7 @@ function QuotasTab({
       ) : (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2.5">
           {pools.map((pool) => (
-            <QuotaCard key={pool.driver} pool={pool} now={now} />
+            <QuotaCard key={pool.key} pool={pool} now={now} />
           ))}
         </div>
       )}
@@ -649,7 +649,7 @@ function QuotaCard({ pool, now }: { readonly pool: LimitPool; readonly now: numb
     <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-foreground/3 px-3 py-2.75 tabular-nums">
       <div className="flex items-center justify-between gap-1.5">
         <span className="truncate text-xs font-semibold text-foreground">
-          {providerClients.get(pool.driver)?.label ?? String(pool.driver)}
+          {pool.label ?? providerClients.get(pool.driver)?.label ?? String(pool.driver)}
         </span>
         {windows.length > 0 ? (
           <Badge variant={QUOTA_BADGE_VARIANT[health]} size="sm">
