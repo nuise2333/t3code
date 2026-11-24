@@ -19,7 +19,10 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
+import * as FileSystem from "effect/FileSystem";
+import * as HttpClient from "effect/http/HttpClient";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -64,6 +67,8 @@ import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpRegistryAuth from "./auth.ts";
 import * as AcpRegistryAuthenticationState from "./authenticationState.ts";
+import { acpRegistryUsageReader } from "./usageLimits.ts";
+import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageLimits";
 
 const DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const decodeSettings = Schema.decodeSync(AcpRegistrySettings);
@@ -587,6 +592,7 @@ export const checkAcpRegistryProviderReadiness = Effect.fn(
 
 export type AcpRegistryDriverEnv =
   | AcpRegistryAdapterV2DriverEnv
+  | HttpClient.HttpClient
   | Digest.Digest
   | ProviderHost.ProviderHost;
 
@@ -719,9 +725,35 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
             }),
           );
     });
+    const readUsage = acpRegistryUsageReader(effectiveConfig.agentId);
+    const fileSystem = yield* FileSystem.FileSystem;
+    const pathService = yield* Path.Path;
+    const httpClient = yield* HttpClient.HttpClient;
+    const checkUsageLimits = readUsage
+      ? readUsage(processEnvironment).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, pathService),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.timeout("20 seconds"),
+          Effect.catch(() =>
+            Effect.gen(function* () {
+              return makeUnavailableUsageLimits({
+                checkedAt: DateTime.formatIso(yield* DateTime.now),
+                reason: "probeFailed",
+                message: `Could not read ${displayName ?? "agent"} limits. Refresh provider status to retry.`,
+              });
+            }),
+          ),
+        )
+      : undefined;
+    const withUsageLimits = (provider: ServerProvider) =>
+      checkUsageLimits === undefined || !provider.enabled || !provider.installed
+        ? Effect.succeed(provider)
+        : checkUsageLimits.pipe(Effect.map((usageLimits) => ({ ...provider, usageLimits })));
     const checkProvider = checkAcpRegistryProviderReadiness(readinessInput).pipe(
       Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, catalog),
       Effect.flatMap(withLiveRuntimeState),
+      Effect.flatMap(withUsageLimits),
     );
     const enrichProvider = checkAcpRegistryProviderStatus(
       {
@@ -786,6 +818,7 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
       haveSettingsChanged: haveProviderSnapshotSettingsChanged,
       initialSnapshot: () => checkProvider,
       checkProvider,
+      ...(checkUsageLimits ? { checkUsageLimits } : {}),
       enrichSnapshot: Effect.fn("enrichSnapshot")(function ({
         snapshot,
         getSnapshot,

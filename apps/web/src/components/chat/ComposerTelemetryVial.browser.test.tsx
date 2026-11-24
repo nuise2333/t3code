@@ -160,7 +160,7 @@ it("opens the context vial popover with quotas and runs the compact action", asy
   await expect.element(page.getByText("4% used")).toBeVisible();
   await expect.element(page.getByText("20k / 512k tokens")).toBeVisible();
   await expect.element(page.getByText("Tight")).toBeVisible();
-  // Every enabled agent gets a tab; the thread's provider is shown first.
+  // Every agent that reports limits gets a tab; the thread's provider is shown first.
   const quotaTabs = page.getByRole("tablist", { name: "Provider quotas" });
   await expect
     .element(quotaTabs.getByRole("tab", { name: "Gemini" }))
@@ -169,12 +169,8 @@ it("opens the context vial popover with quotas and runs the compact action", asy
   await expect
     .element(page.getByRole("tabpanel", { name: "Claude" }).getByText("Opus weekly"))
     .toBeVisible();
-  await userEvent.click(quotaTabs.getByRole("tab", { name: "Kiro" }));
-  await expect
-    .element(
-      page.getByRole("tabpanel", { name: "Kiro" }).getByText("No quota data from this agent."),
-    )
-    .toBeVisible();
+  // Agents that report no limits get no tab.
+  await expect.element(quotaTabs.getByRole("tab", { name: "Kiro" })).not.toBeInTheDocument();
   await userEvent.click(quotaTabs.getByRole("tab", { name: "Gemini" }));
   await expect
     .element(page.getByRole("tabpanel", { name: "Gemini" }).getByText("5h window"))

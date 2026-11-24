@@ -509,7 +509,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       >
         {props.effortColumn ? (
           <div className="flex max-h-(--available-height) w-90 max-w-[calc(100vw-2rem)] flex-col overflow-hidden">
-            <div className="flex max-h-86 min-h-40 flex-1 flex-col overflow-hidden">{picker}</div>
+            <div className="flex h-86 min-h-40 flex-col overflow-hidden">{picker}</div>
             <div
               {...(teamSetupColumn ? { "data-model-picker-team-setup": true } : {})}
               data-model-picker-effort

@@ -143,25 +143,25 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
   if (!telemetry || !contextWindow) return null;
 
   const sources = usageLimitSources ?? serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES;
-  // Every enabled agent gets a tab, like Antigravity's; the thread's own one leads, then agents with data.
+  // Every enabled agent that reports limits gets a tab, like Antigravity's; the thread's own one leads.
   const quotaProviders = providers
     .filter((provider) => provider.enabled)
-    .map((provider) => ({
-      instanceId: provider.instanceId,
-      name:
-        provider.displayName?.trim() || providerClients.get(provider.driver)?.label || "Provider",
-      limits: resolveProviderInstanceLimits({
+    .flatMap((provider) => {
+      const providerLimits = resolveProviderInstanceLimits({
         providerInstanceId: provider.instanceId,
         providers,
         sources,
         now,
-      }),
-    }))
+      });
+      if (!providerLimits) return [];
+      const name =
+        provider.displayName?.trim() || providerClients.get(provider.driver)?.label || "Provider";
+      return [{ instanceId: provider.instanceId, name, limits: providerLimits }];
+    })
     .toSorted(
       (left, right) =>
         Number(right.instanceId === providerInstanceId) -
-          Number(left.instanceId === providerInstanceId) ||
-        Number(right.limits !== null) - Number(left.limits !== null),
+        Number(left.instanceId === providerInstanceId),
     );
   const shownQuota =
     quotaProviders.find((entry) => entry.instanceId === pickedQuotaInstance) ??
@@ -517,7 +517,6 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                           selected
                             ? "bg-accent text-foreground"
                             : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                          entry.limits === null && !selected && "text-muted-foreground/60",
                         )}
                       >
                         {entry.name}
@@ -543,19 +542,13 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                           : "pointer-events-none opacity-0",
                       )}
                     >
-                      {entry.limits ? (
-                        <ProviderUsageLimitRows
-                          limits={entry.limits}
-                          now={now}
-                          showResetCountdown
-                          tooltipSide="top"
-                          compactPadding
-                        />
-                      ) : (
-                        <p className="px-1.5 py-1 text-xs text-muted-foreground">
-                          No quota data from this agent.
-                        </p>
-                      )}
+                      <ProviderUsageLimitRows
+                        limits={entry.limits}
+                        now={now}
+                        showResetCountdown
+                        tooltipSide="top"
+                        compactPadding
+                      />
                     </div>
                   );
                 })}
