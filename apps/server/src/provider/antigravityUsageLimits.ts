@@ -281,6 +281,7 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
         : Option.none();
       if (
         Option.isNone(signIn) ||
+        KEYRING_AUTH_METHODS[input.authMethod] === undefined ||
         signIn.value.auth_method !== KEYRING_AUTH_METHODS[input.authMethod]
       ) {
         return makeUnavailableUsageLimits({

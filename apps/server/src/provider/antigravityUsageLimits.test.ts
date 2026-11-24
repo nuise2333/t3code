@@ -700,6 +700,16 @@ describe("Antigravity subscription limits", () => {
         expect((yield* refused.probe).unavailable?.reason).toBe("unsupported");
         expect(refused.requests).toEqual([]);
       }
+      // An entry without a method never matches a method the runtime has no keychain name for.
+      const business = yield* fixture({
+        missingToken: true,
+        authMethod: "oauth-business",
+        keyring: JSON.stringify({
+          token: { access_token: "access-token", expiry: "2099-01-01T00:00:00Z" },
+        }),
+      });
+      expect((yield* business.probe).unavailable?.reason).toBe("unsupported");
+      expect(business.requests).toEqual([]);
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
