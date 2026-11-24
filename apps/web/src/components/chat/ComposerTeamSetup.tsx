@@ -285,7 +285,10 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
       props.currentSelection,
     ),
   );
-  const [naming, setNaming] = useState<string | null>(null);
+  const [naming, setNaming] = useState<{
+    readonly kind: "new" | "rename";
+    readonly value: string;
+  } | null>(null);
   const guidanceId = useId();
   const parallelId = useId();
   const profile = props.teams.find((team) => team.id === profileId);
@@ -294,6 +297,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   const load = (id: string) => {
     const team = props.teams.find((candidate) => candidate.id === id);
     setProfileId(id);
+    setNaming((current) => (current?.kind === "rename" ? null : current));
     setSetup(setupOf(team, props.currentSelection));
   };
 
@@ -344,7 +348,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
     props.onDone();
   };
   const saveAs = () => {
-    const name = naming?.trim();
+    const name = naming?.value.trim();
     if (!name || problem !== null) return;
     const team = teamFrom(
       newRoutingGroupId(
@@ -357,6 +361,15 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
     setProfileId(team.id);
     setNaming(null);
   };
+  const rename = () => {
+    const name = naming?.value.trim();
+    if (!name || !profile || profile.id === CUSTOM_TEAM_ID) return;
+    props.onSaveTeams(
+      props.teams.map((team) => (team.id === profile.id ? { ...team, name } : team)),
+    );
+    setNaming(null);
+  };
+  const submitName = () => (naming?.kind === "rename" ? rename() : saveAs());
   const remove = () => {
     if (!profile || profile.id === CUSTOM_TEAM_ID) return;
     props.onSaveTeams(props.teams.filter((team) => team.id !== profile.id));
@@ -419,6 +432,9 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 <MoreHorizontalIcon />
               </MenuTrigger>
               <MenuPopup align="end">
+                <MenuItem onClick={() => setNaming({ kind: "rename", value: profile?.name ?? "" })}>
+                  Rename profile
+                </MenuItem>
                 <MenuItem variant="destructive" onClick={remove}>
                   Delete profile
                 </MenuItem>
@@ -431,7 +447,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
               size="xs"
               variant="ghost"
               className="justify-self-start"
-              onClick={() => setNaming("")}
+              onClick={() => setNaming({ kind: "new", value: "" })}
             >
               <PlusIcon />
               Save as…
@@ -443,12 +459,17 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 aria-label="Profile name"
                 placeholder="Profile name"
                 maxLength={64}
-                value={naming}
-                onChange={(event) => setNaming(event.target.value)}
+                value={naming.value}
+                onChange={(event) => setNaming({ ...naming, value: event.target.value })}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                     event.preventDefault();
-                    saveAs();
+                    submitName();
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setNaming(null);
                   }
                 }}
               />
@@ -458,10 +479,10 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
               <Button
                 type="button"
                 size="sm"
-                disabled={!naming.trim() || problem !== null}
-                onClick={saveAs}
+                disabled={!naming.value.trim() || (naming.kind === "new" && problem !== null)}
+                onClick={submitName}
               >
-                Save profile
+                {naming.kind === "rename" ? "Rename" : "Save profile"}
               </Button>
             </div>
           )}
