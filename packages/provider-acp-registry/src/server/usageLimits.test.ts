@@ -204,6 +204,19 @@ describe("ACP Registry agent limits", () => {
         ].join("\n"),
       ),
     ).toBeUndefined();
+    // A multi-line string can hide text shaped like a refs block; it never yields that key.
+    expect(
+      dshApiKeyRef(
+        [
+          'note: "first',
+          "refs:",
+          "  DEEPSEEK_API_KEY: sk-other",
+          'end"',
+          "refs:",
+          "  DEEPSEEK_API_KEY: sk-real",
+        ].join("\n"),
+      ),
+    ).not.toBe("sk-other");
     expect(dshApiKeyRef('refs:\n  DEEPSEEK_API_KEY: "bad key"')).toBeUndefined();
   });
 
