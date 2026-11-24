@@ -661,16 +661,7 @@ export function ComposerControlsBar(props: {
   ) : (
     <>
       {composerModelPicker}
-      <div data-resting-fixed className="flex shrink-0 items-center gap-1 empty:hidden">
-        <ComposerThreadAssists
-          environmentId={environmentId}
-          serverThreadId={serverThreadId}
-          draftId={routeKind === "draft" ? draftId : null}
-          thread={props.activeThreadAssists}
-          size={controlSize}
-        />
-      </div>
-      {/* Two spacers center the usage pill between the left and right groups. The measurement
+      {/* Two spacers center the usage pill between the model and the right-hand controls. The measurement
           counts their minimum, so a tight row sheds controls before the gaps close. */}
       <div
         data-resting-controls-spacer
@@ -685,6 +676,16 @@ export function ComposerControlsBar(props: {
       {trailingSlot ? (
         <div data-resting-controls-spacer aria-hidden="true" className="min-w-8 flex-1" />
       ) : null}
+      {/* Token saver and Council sit with permissions on the right, as in Antigravity. */}
+      <div data-resting-fixed className="flex shrink-0 items-center gap-1 empty:hidden">
+        <ComposerThreadAssists
+          environmentId={environmentId}
+          serverThreadId={serverThreadId}
+          draftId={routeKind === "draft" ? draftId : null}
+          thread={props.activeThreadAssists}
+          size={controlSize}
+        />
+      </div>
       <>
         {restingBlockDefs.map((def, index) => {
           const hidden = index >= restingBlockDefs.length - restingHiddenBlockCount;
