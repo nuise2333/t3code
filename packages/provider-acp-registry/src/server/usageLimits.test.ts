@@ -11,6 +11,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import {
   readKimiCodeUsageLimits,
   readZCodeUsageLimits,
+  tokenPlanUsageToWindows,
   zhipuQuotaToWindows,
 } from "./usageLimits.ts";
 
@@ -154,6 +155,24 @@ describe("ACP Registry agent limits", () => {
       ["5-hour", "session", 12, 300],
       ["Weekly", "weekly", 40, 10080],
       ["Tool calls · Monthly", "monthly", 3, undefined],
+    ]);
+  });
+  it("reads Bailian Token Plan windows from the bl CLI's used fractions", () => {
+    expect(
+      tokenPlanUsageToWindows({
+        per1MonthPercentage: 0.0375,
+        per1MonthResetTime: 1797436800000,
+        per5HourPercentage: 0.5,
+        hasQuotaData: true,
+      }).map((window) => [
+        window.label,
+        window.kind,
+        window.usedPercent,
+        window.windowDurationMins,
+      ]),
+    ).toEqual([
+      ["Monthly", "monthly", 3.75, undefined],
+      ["5-hour", "session", 50, 300],
     ]);
   });
 });

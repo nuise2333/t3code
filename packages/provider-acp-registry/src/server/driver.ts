@@ -737,7 +737,8 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, pathService),
           Effect.provideService(HttpClient.HttpClient, httpClient),
-          Effect.timeout("20 seconds"),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.timeout("40 seconds"),
           Effect.catch(() =>
             Effect.gen(function* () {
               return makeUnavailableUsageLimits({

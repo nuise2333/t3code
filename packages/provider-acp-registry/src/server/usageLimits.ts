@@ -17,6 +17,8 @@ import { FetchHttpClient } from "effect/http";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 // Visible ASCII only: tokens go into a header, and a fetch error echoes header values.
 const HeaderSafe = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]+$/));
@@ -293,11 +295,90 @@ export const readZCodeUsageLimits = Effect.fn("readZCodeUsageLimits")(function* 
   return makeUsageLimits({ checkedAt, windows: zhipuQuotaToWindows(response.data?.limits ?? []) });
 });
 
+const TokenPlanUsage = Schema.Record(Schema.String, Schema.Unknown);
+const decodeTokenPlanUsage = Schema.decodeEffect(Schema.fromJsonString(TokenPlanUsage));
+const TOKEN_PLAN_WINDOW = /^per(\d+)(Hour|Day|Week|Month)Percentage$/;
+const TOKEN_PLAN_UNIT_MINUTES = { Hour: 60, Day: 24 * 60, Week: 7 * 24 * 60 } as const;
+
+/** Windows from `bl usage token-plan --output json`: `per<n><Unit>Percentage` is a used fraction. */
+export function tokenPlanUsageToWindows(usage: Readonly<Record<string, unknown>>) {
+  return Object.entries(usage).flatMap(([key, value]): ServerProviderUsageWindow[] => {
+    const match = TOKEN_PLAN_WINDOW.exec(key);
+    if (!match || typeof value !== "number" || !Number.isFinite(value)) return [];
+    const count = Number(match[1]);
+    const unit = match[2] as "Hour" | "Day" | "Week" | "Month";
+    const reset = usage[`per${count}${unit}ResetTime`];
+    const label =
+      count === 1 && unit === "Month"
+        ? "Monthly"
+        : count === 1 && unit === "Week"
+          ? "Weekly"
+          : `${count}-${unit.toLowerCase()}`;
+    return [
+      usageWindow(
+        `per${count}${unit}`,
+        label,
+        unit === "Month"
+          ? "monthly"
+          : unit === "Week"
+            ? "weekly"
+            : unit === "Hour"
+              ? "session"
+              : "other",
+        value * 100,
+        typeof reset === "number" && Number.isFinite(reset)
+          ? DateTime.formatIso(DateTime.makeUnsafe(reset))
+          : undefined,
+        unit === "Month" ? undefined : TOKEN_PLAN_UNIT_MINUTES[unit] * count,
+      ),
+    ];
+  });
+}
+
+/** Qwen Code's Bailian Token Plan limits, read through the signed-in Bailian CLI (`bl`). */
+export const readQwenTokenPlanUsageLimits = Effect.fn("readQwenTokenPlanUsageLimits")(function* (
+  environment: NodeJS.ProcessEnv,
+) {
+  const checkedAt = DateTime.formatIso(yield* DateTime.now);
+  const signIn = makeUnavailableUsageLimits({
+    checkedAt,
+    reason: "unsupported",
+    message: "Run `bl auth login --console` to see Token Plan limits.",
+  });
+  const output = yield* (yield* ChildProcessSpawner.ChildProcessSpawner)
+    .string(
+      ChildProcess.make("bl", ["usage", "token-plan", "--output", "json"], {
+        env: environment,
+        stdin: "ignore",
+        stderr: "ignore",
+        forceKillAfter: "1 second",
+      }),
+    )
+    .pipe(Effect.timeout("30 seconds"), Effect.option);
+  if (Option.isNone(output)) return signIn;
+  const usage = yield* decodeTokenPlanUsage(output.value.trim()).pipe(Effect.option);
+  if (Option.isNone(usage) || "error" in usage.value) return signIn;
+  return makeUsageLimits({ checkedAt, windows: tokenPlanUsageToWindows(usage.value) });
+});
+
+type UsageRead = ReturnType<
+  typeof readKimiCodeUsageLimits | typeof readZCodeUsageLimits | typeof readQwenTokenPlanUsageLimits
+>;
+
 /** The limits reader for an ACP Registry agent that reports them, if any. */
 export function acpRegistryUsageReader(
   agentId: string | undefined,
-): ((environment: NodeJS.ProcessEnv) => ReturnType<typeof readKimiCodeUsageLimits>) | undefined {
+):
+  | ((
+      environment: NodeJS.ProcessEnv,
+    ) => Effect.Effect<
+      Effect.Success<UsageRead>,
+      Effect.Error<UsageRead>,
+      Effect.Services<UsageRead>
+    >)
+  | undefined {
   if (agentId === "kimi-code") return readKimiCodeUsageLimits;
   if (agentId === "zcode-acp.mjs") return readZCodeUsageLimits;
+  if (agentId === "qwen-code") return readQwenTokenPlanUsageLimits;
   return undefined;
 }
