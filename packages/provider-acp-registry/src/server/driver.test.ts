@@ -357,6 +357,17 @@ describe("acpRegistrySnapshotReadiness", () => {
     ]);
   });
 
+  it("drops a plan tag the agent prefixes to every model name", () => {
+    const names = normalizeAcpRegistryLiveConfiguration([], undefined, {
+      currentModelId: "qwen4-max",
+      availableModels: [
+        { modelId: "qwen4-max", name: "[ModelStudio Token Plan] qwen4-max" },
+        { modelId: "beta", name: "[beta]" },
+      ],
+    }).models.map((model) => model.name);
+    expect(names).toEqual(["qwen4-max", "[beta]"]);
+  });
+
   it("projects discovery without claiming authentication when no login methods are advertised", () => {
     const snapshot = buildCheckedAcpRegistrySnapshot({
       ...identity,

@@ -95,10 +95,13 @@ export function normalizeAcpRegistryWebUrl(value: string): string | undefined {
   return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined;
 }
 
+// Agents such as Qwen Code prefix every model with its plan, e.g. "[ModelStudio Token Plan] qwen4-max".
+const PLAN_TAG_PREFIX = /^\[[^\]]{1,60}\]\s+(?=\S)/u;
+
 function normalizedModel(id: string, candidate: AcpRegistryProbeModel): AcpRegistryProbeModel {
   return {
     id,
-    name: boundedText(candidate.name, MAX_NAME_LENGTH) || id,
+    name: boundedText(candidate.name, MAX_NAME_LENGTH).replace(PLAN_TAG_PREFIX, "") || id,
     description:
       candidate.description === null
         ? null
