@@ -10,10 +10,7 @@ import {
   highlightCodeToHast,
 } from "../../lib/incrementalHighlighting";
 import { LRUCache } from "../../lib/lruCache";
-import {
-  getSyntaxHighlighterPromise,
-  MAX_HIGHLIGHTED_CODE_LENGTH,
-} from "../../lib/syntaxHighlighting";
+import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
 import { cn } from "../../lib/utils";
 import {
   hasSpecificPierreIconForFileName,
@@ -23,6 +20,7 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { HighlightedCodeLines } from "./HighlightedCodeLines";
 import {
+  codeBlockHighlightLanguage,
   createHighlightCacheKey,
   estimateHighlightedSize,
   extractFenceLanguage,
@@ -362,8 +360,11 @@ export function SuspenseShikiCodeBlock({
 }: SuspenseShikiCodeBlockProps) {
   const [hasStreamed, setHasStreamed] = useState(isStreaming);
   if (isStreaming && !hasStreamed) setHasStreamed(true);
-  const language =
-    code.length > MAX_HIGHLIGHTED_CODE_LENGTH ? "text" : extractFenceLanguage(className);
+  const language = codeBlockHighlightLanguage({
+    fenceLanguage: extractFenceLanguage(className),
+    code,
+    hasStreamed,
+  });
   const cacheKey = createHighlightCacheKey(code, language, themeName);
   // Once lines are mounted individually, keep that renderer when streaming
   // finishes so switching to cached HTML cannot clear an existing selection.

@@ -239,10 +239,16 @@ export function MermaidDiagram({
   const trimmedSource = source.trim();
   if (isDiagramSourceTooLarge(trimmedSource)) {
     return (
-      <DiagramError
-        message={`the source is over the ${MAX_DIAGRAM_SOURCE_BYTES / 1024} KB limit.`}
-        source={source}
-      />
+      <div
+        className="chat-markdown-mermaid overflow-x-auto"
+        data-markdown-mermaid=""
+        data-markdown-copy={serializeCodeBlockToMarkdown(source, "mermaid")}
+      >
+        <DiagramError
+          message={`the source is over the ${MAX_DIAGRAM_SOURCE_BYTES / 1024} KB limit.`}
+          source={source}
+        />
+      </div>
     );
   }
   const core = use(loadCore());

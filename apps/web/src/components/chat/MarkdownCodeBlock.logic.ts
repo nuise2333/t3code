@@ -2,12 +2,28 @@ import { Children, isValidElement, type ReactNode } from "react";
 import type { ExtraProps as ReactMarkdownExtraProps } from "react-markdown";
 
 import type { CodeBlockThemeName } from "../../lib/diffRendering";
+import { MAX_HIGHLIGHTED_CODE_LENGTH } from "../../lib/syntaxHighlighting";
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 
 export function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
   return highlighterLanguageOf(match?.[1] ?? "text");
+}
+
+/**
+ * The grammar a block is highlighted with. A streamed block keeps its incremental highlighter:
+ * swapping grammars mid-stream drops the selection. ANSI stays parsed so escapes never show.
+ */
+export function codeBlockHighlightLanguage(input: {
+  readonly fenceLanguage: string;
+  readonly code: string;
+  readonly hasStreamed: boolean;
+}): string {
+  const { fenceLanguage, code, hasStreamed } = input;
+  return !hasStreamed && fenceLanguage !== "ansi" && code.length > MAX_HIGHLIGHTED_CODE_LENGTH
+    ? "text"
+    : fenceLanguage;
 }
 
 export function highlighterLanguageOf(language: string): string {
