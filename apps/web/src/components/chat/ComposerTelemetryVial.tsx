@@ -20,7 +20,6 @@ import { useServerConfigs } from "../../state/entities";
 import { providerClients } from "../settings/providerDriverMeta";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { composerFloatingLayerProps } from "./composerEventScope";
@@ -144,21 +143,20 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
   if (!telemetry || !contextWindow) return null;
 
   const sources = usageLimitSources ?? serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES;
-  // Every provider with quota data gets a tab, like Antigravity's; the thread's own one leads.
+  // Every enabled agent gets a tab, like Antigravity's; the thread's own one leads.
   const quotaProviders = providers
     .filter((provider) => provider.enabled)
-    .flatMap((provider) => {
-      const providerLimits = resolveProviderInstanceLimits({
+    .map((provider) => ({
+      instanceId: provider.instanceId,
+      name:
+        provider.displayName?.trim() || providerClients.get(provider.driver)?.label || "Provider",
+      limits: resolveProviderInstanceLimits({
         providerInstanceId: provider.instanceId,
         providers,
         sources,
         now,
-      });
-      if (!providerLimits) return [];
-      const name =
-        provider.displayName?.trim() || providerClients.get(provider.driver)?.label || "Provider";
-      return [{ instanceId: provider.instanceId, name, limits: providerLimits }];
-    })
+      }),
+    }))
     .toSorted(
       (left, right) =>
         Number(right.instanceId === providerInstanceId) -
@@ -481,12 +479,12 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
             </div>
           </div>
 
-          {limits ? (
+          {shownQuota ? (
             <div
               data-composer-telemetry-quotas="true"
-              className="flex flex-col gap-1 border-t border-border/60 pt-2"
+              className="flex flex-col gap-1.5 border-t border-border/60 pt-2"
             >
-              <div className="flex items-center justify-between gap-2 px-1.5">
+              <div className="flex items-center gap-2 px-1.5">
                 <span className="truncate text-xs font-medium text-foreground">
                   {providerDisplayName}
                 </span>
@@ -501,31 +499,76 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                     {quotaStatus.label}
                   </span>
                 ) : null}
-                {quotaProviders.length > 1 ? (
-                  <ToggleGroup
-                    aria-label="Provider quotas"
-                    variant="segmented"
-                    className="ms-auto"
-                    value={[shownQuota?.instanceId ?? ""]}
-                    onValueChange={(next) => {
-                      if (next[0]) setPickedQuotaInstance(next[0]);
-                    }}
-                  >
-                    {quotaProviders.map((entry) => (
-                      <Toggle key={entry.instanceId} value={entry.instanceId}>
-                        {entry.name}
-                      </Toggle>
-                    ))}
-                  </ToggleGroup>
-                ) : null}
               </div>
-              <ProviderUsageLimitRows
-                limits={limits}
-                now={now}
-                showResetCountdown
-                tooltipSide="top"
-                compactPadding
-              />
+              {quotaProviders.length > 1 ? (
+                <div
+                  role="tablist"
+                  aria-label="Provider quotas"
+                  className="-mx-0.5 flex gap-1 overflow-x-auto px-0.5 pb-0.5 [scrollbar-width:none]"
+                >
+                  {quotaProviders.map((entry) => {
+                    const selected = entry.instanceId === shownQuota.instanceId;
+                    return (
+                      <button
+                        key={entry.instanceId}
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        onClick={(event) => {
+                          setPickedQuotaInstance(entry.instanceId);
+                          event.currentTarget.scrollIntoView({
+                            block: "nearest",
+                            inline: "nearest",
+                          });
+                        }}
+                        className={cn(
+                          "shrink-0 cursor-pointer rounded-md px-2 py-0.5 text-2xs font-medium whitespace-nowrap outline-none transition-colors duration-150 ease-row focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          selected
+                            ? "bg-accent text-foreground"
+                            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                          entry.limits === null && !selected && "text-muted-foreground/60",
+                        )}
+                      >
+                        {entry.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {/* Every agent's rows share one grid cell, so switching fades in without the popover resizing. */}
+              <div className="grid">
+                {quotaProviders.map((entry) => {
+                  const selected = entry.instanceId === shownQuota.instanceId;
+                  return (
+                    <div
+                      key={entry.instanceId}
+                      role="tabpanel"
+                      aria-label={entry.name}
+                      inert={selected ? undefined : true}
+                      className={cn(
+                        "col-start-1 row-start-1",
+                        selected
+                          ? "opacity-100 transition-opacity duration-200 ease-row"
+                          : "pointer-events-none opacity-0",
+                      )}
+                    >
+                      {entry.limits ? (
+                        <ProviderUsageLimitRows
+                          limits={entry.limits}
+                          now={now}
+                          showResetCountdown
+                          tooltipSide="top"
+                          compactPadding
+                        />
+                      ) : (
+                        <p className="px-1.5 py-1 text-xs text-muted-foreground">
+                          No quota data from this agent.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
         </div>

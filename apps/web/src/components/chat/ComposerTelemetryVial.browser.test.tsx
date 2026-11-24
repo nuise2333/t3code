@@ -68,6 +68,17 @@ function makeClaudeProvider(): ServerProvider {
   } as unknown as ServerProvider;
 }
 
+function makeAgentWithoutQuotas(): ServerProvider {
+  return {
+    ...makeProvider(),
+    provider: "kiro",
+    driver: "kiro",
+    instanceId: ProviderInstanceId.make("kiro"),
+    displayName: "Kiro",
+    usageLimits: undefined,
+  } as unknown as ServerProvider;
+}
+
 function makeContextWindow(overrides: Partial<ContextWindowSnapshot> = {}): ContextWindowSnapshot {
   return {
     usedTokens: 20_480,
@@ -125,7 +136,7 @@ it("opens the context vial popover with quotas and runs the compact action", asy
           },
         ]}
         providerInstanceId={INSTANCE_ID}
-        providers={[makeClaudeProvider(), makeProvider(70)]}
+        providers={[makeClaudeProvider(), makeProvider(70), makeAgentWithoutQuotas()]}
         usageLimitSources={[]}
         modelLabel="Gemini 4 Neon"
         modelSlug="gemini-4-neon"
@@ -149,16 +160,25 @@ it("opens the context vial popover with quotas and runs the compact action", asy
   await expect.element(page.getByText("4% used")).toBeVisible();
   await expect.element(page.getByText("20k / 512k tokens")).toBeVisible();
   await expect.element(page.getByText("Tight")).toBeVisible();
-  await expect.element(page.getByText("5h window")).toBeVisible();
-  // Every provider with quotas gets a tab; the thread's provider is shown first.
-  const quotaTabs = page.getByRole("group", { name: "Provider quotas" });
+  // Every enabled agent gets a tab; the thread's provider is shown first.
+  const quotaTabs = page.getByRole("tablist", { name: "Provider quotas" });
   await expect
-    .element(quotaTabs.getByRole("button", { name: "Gemini" }))
-    .toHaveAttribute("aria-pressed", "true");
-  await userEvent.click(quotaTabs.getByRole("button", { name: "Claude" }));
-  await expect.element(page.getByText("Opus weekly")).toBeVisible();
-  await userEvent.click(quotaTabs.getByRole("button", { name: "Gemini" }));
-  await expect.element(page.getByText("5h window")).toBeVisible();
+    .element(quotaTabs.getByRole("tab", { name: "Gemini" }))
+    .toHaveAttribute("aria-selected", "true");
+  await userEvent.click(quotaTabs.getByRole("tab", { name: "Claude" }));
+  await expect
+    .element(page.getByRole("tabpanel", { name: "Claude" }).getByText("Opus weekly"))
+    .toBeVisible();
+  await userEvent.click(quotaTabs.getByRole("tab", { name: "Kiro" }));
+  await expect
+    .element(
+      page.getByRole("tabpanel", { name: "Kiro" }).getByText("No quota data from this agent."),
+    )
+    .toBeVisible();
+  await userEvent.click(quotaTabs.getByRole("tab", { name: "Gemini" }));
+  await expect
+    .element(page.getByRole("tabpanel", { name: "Gemini" }).getByText("5h window"))
+    .toBeVisible();
 
   await userEvent.click(page.getByRole("button", { name: "Tools" }));
   await expect.element(page.getByText(/Tool Output · ~/)).toBeVisible();

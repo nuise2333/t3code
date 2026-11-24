@@ -65,6 +65,7 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
     userId?: string;
     userInfoAt?: number;
     missingToken?: boolean;
+    keyring?: string;
     authMethod?: "oauth-personal" | "oauth-business" | "gemini-api-key";
   } = {},
 ) {
@@ -111,7 +112,7 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
             : Response.json({}, { status: 403 }),
         );
       }
-      expect(JSON.parse(body)).toEqual({ project: "project-id" });
+      expect(JSON.parse(body)).toEqual(options.missingToken ? {} : { project: "project-id" });
       expect(request.headers["user-agent"]).toMatch(/^antigravity\/hub\/2\.24\.0 /);
       return HttpClientResponse.fromWeb(
         request,
@@ -132,6 +133,7 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
   const usage = yield* makeAntigravityUsageProbe({
     profileDirectory,
     authMethod: options.authMethod ?? "oauth-personal",
+    readKeyring: options.keyring === undefined ? undefined : Effect.succeedSome(options.keyring),
   }).pipe(Effect.provideService(HttpClient.HttpClient, http));
   return { ...usage, requests, writeToken, tokenPath };
 });
@@ -651,6 +653,35 @@ describe("Antigravity subscription limits", () => {
       expect(limits.windows).toEqual([]);
       expect(limits.unavailable?.reason).toBe("probeFailed");
       expect(JSON.stringify(limits)).not.toMatch(/client-secret|refresh-a|access-token/);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("reads the runtime's keychain sign-in when it keeps no token file", () =>
+    Effect.gen(function* () {
+      const keyringEntry = (expiry: string) =>
+        `go-keyring-base64:${btoa(
+          JSON.stringify({
+            token: { access_token: "access-token", refresh_token: "refresh-k", expiry },
+            id_token_email: "someone@example.com",
+          }),
+        )}`;
+      const signedIn = yield* fixture({
+        missingToken: true,
+        userId: "google-user",
+        keyring: keyringEntry("2099-01-01T00:00:00Z"),
+      });
+      const limits = yield* signedIn.probe;
+      expect(limits.unavailable).toBeUndefined();
+      expect(limits.windows.length).toBeGreaterThan(0);
+      expect(signedIn.requests.some((entry) => entry.url.endsWith("/token"))).toBe(false);
+      expect(JSON.stringify(limits)).not.toMatch(/refresh-k|access-token/);
+
+      const expired = yield* fixture({
+        missingToken: true,
+        keyring: keyringEntry("1970-01-01T00:00:00Z"),
+      });
+      expect((yield* expired.probe).unavailable?.reason).toBe("probeFailed");
+      expect(expired.requests).toEqual([]);
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 

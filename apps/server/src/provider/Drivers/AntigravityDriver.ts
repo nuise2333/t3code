@@ -21,6 +21,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { HttpClient } from "effect/http";
 import * as AcpErrors from "effect-acp/errors";
@@ -449,9 +450,23 @@ export const AntigravityDriver: ProviderDriver<
       };
     });
 
+    // Newer runtimes keep the Google sign-in in the macOS keychain instead of acp_token.json.
+    const readKeyring =
+      (yield* HostProcess.Platform) === "darwin"
+        ? spawner
+            .string(
+              ChildProcess.make(
+                "security",
+                ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
+                { stdin: "ignore", stderr: "ignore" },
+              ),
+            )
+            .pipe(Effect.option)
+        : undefined;
     const usage = yield* makeAntigravityUsageProbe({
       profileDirectory,
       authMethod: auth.authMethod,
+      readKeyring,
     }).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
