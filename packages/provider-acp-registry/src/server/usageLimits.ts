@@ -421,9 +421,23 @@ const DeepSeekBalance = Schema.Struct({
 
 /** The API key dsh keeps under `refs:` in ~/.dsh/.credentials.yaml. */
 export function dshApiKeyRef(credentials: string): string | undefined {
-  const refs = credentials.split(/^refs:\s*$/m)[1];
-  const value = refs?.match(/^\s+DEEPSEEK_API_KEY:\s*["']?([^\s"']+)["']?\s*$/m)?.[1];
-  return value && Option.isSome(decodeHeaderSafe(value)) ? value : undefined;
+  const lines = credentials.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^refs:\s*$/.test(line));
+  if (start < 0) return undefined;
+  // Only direct children of the top-level `refs` map; stop at the next top-level key.
+  const block: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+    if (!/^\s/.test(line)) break;
+    block.push(line);
+  }
+  const indent = Math.min(...block.map((line) => line.length - line.trimStart().length));
+  for (const line of block) {
+    if (line.length - line.trimStart().length !== indent) continue;
+    const value = line.match(/^\s+DEEPSEEK_API_KEY:\s*["']?([^\s"']+)["']?\s*$/)?.[1];
+    if (value !== undefined) return Option.isSome(decodeHeaderSafe(value)) ? value : undefined;
+  }
+  return undefined;
 }
 
 /** DeepSeek bills a prepaid wallet, so its "limits" are the balance, not a percentage window. */

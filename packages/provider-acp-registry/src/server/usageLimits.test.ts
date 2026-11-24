@@ -190,6 +190,20 @@ describe("ACP Registry agent limits", () => {
       "  MAGPIE_GATEWAY_KEY: other",
     ].join("\n");
     expect(dshApiKeyRef(credentials)).toBe("sk-test");
+    // A same-named field outside refs, or nested under one of its entries, is never picked.
+    expect(
+      dshApiKeyRef(
+        [
+          "refs:",
+          "  MAGPIE_GATEWAY_KEY: other",
+          "  nested:",
+          "    DEEPSEEK_API_KEY: sk-nested",
+          "records:",
+          "  x:",
+          "    DEEPSEEK_API_KEY: sk-record",
+        ].join("\n"),
+      ),
+    ).toBeUndefined();
     expect(dshApiKeyRef('refs:\n  DEEPSEEK_API_KEY: "bad key"')).toBeUndefined();
   });
 

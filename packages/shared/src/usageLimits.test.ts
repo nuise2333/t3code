@@ -1211,7 +1211,7 @@ describe("pooled account columns", () => {
     expect(
       limitsNotice({ checkedAt, windows: [], balances: [{ currency: "CNY", total: 41.44 }] }),
     ).toBeNull();
-    expect(formatUsageBalance({ currency: "CNY", total: 41.44 })).toBe("¥41.44");
+    expect(formatUsageBalance({ currency: "CNY", total: 41.44 })).toBe("CN¥41.44");
   });
 
   it("gives each ACP Registry agent its own pool, named and iconed after the agent", () => {

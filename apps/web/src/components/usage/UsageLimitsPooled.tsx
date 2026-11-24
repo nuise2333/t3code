@@ -643,11 +643,11 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
           />
         );
       })}
-      {pool.accounts
-        .flatMap((account) => account.limits.balances ?? [])
-        .map((balance) => (
-          <BalanceCard key={`balance:${balance.currency}`} balance={balance} />
-        ))}
+      {pool.accounts.flatMap((account) =>
+        (account.limits.balances ?? []).map((balance) => (
+          <BalanceCard key={`balance:${account.key}:${balance.currency}`} balance={balance} />
+        )),
+      )}
     </section>
   );
 }

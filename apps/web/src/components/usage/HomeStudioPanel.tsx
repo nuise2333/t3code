@@ -693,10 +693,12 @@ function QuotaCard({ pool, now }: { readonly pool: LimitPool; readonly now: numb
         );
       })}
       {pool.accounts
-        .flatMap((account) => account.limits.balances ?? [])
-        .map((balance) => (
+        .flatMap((account) =>
+          (account.limits.balances ?? []).map((balance) => ({ key: account.key, balance })),
+        )
+        .map(({ key, balance }) => (
           <div
-            key={`balance:${balance.currency}`}
+            key={`balance:${key}:${balance.currency}`}
             className="flex items-baseline justify-between gap-1.5 text-2xs"
           >
             <span className="text-3xs text-muted-foreground">Balance</span>
