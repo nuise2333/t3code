@@ -458,10 +458,10 @@ export const AntigravityDriver: ProviderDriver<
               ChildProcess.make(
                 "security",
                 ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
-                { stdin: "ignore", stderr: "ignore" },
+                { stdin: "ignore", stderr: "ignore", forceKillAfter: "1 second" },
               ),
             )
-            .pipe(Effect.option)
+            .pipe(Effect.timeout("5 seconds"), Effect.option)
         : undefined;
     const usage = yield* makeAntigravityUsageProbe({
       profileDirectory,

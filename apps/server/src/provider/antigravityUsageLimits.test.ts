@@ -658,10 +658,18 @@ describe("Antigravity subscription limits", () => {
 
   it.effect("reads the runtime's keychain sign-in when it keeps no token file", () =>
     Effect.gen(function* () {
-      const keyringEntry = (expiry: string) =>
+      const keyringEntry = (
+        expiry: string,
+        overrides: { accessToken?: string; authMethod?: string } = {},
+      ) =>
         `go-keyring-base64:${btoa(
           JSON.stringify({
-            token: { access_token: "access-token", refresh_token: "refresh-k", expiry },
+            token: {
+              access_token: overrides.accessToken ?? "access-token",
+              refresh_token: "refresh-k",
+              expiry,
+            },
+            auth_method: overrides.authMethod ?? "consumer",
             id_token_email: "someone@example.com",
           }),
         )}`;
@@ -682,6 +690,16 @@ describe("Antigravity subscription limits", () => {
       });
       expect((yield* expired.probe).unavailable?.reason).toBe("probeFailed");
       expect(expired.requests).toEqual([]);
+
+      // Another sign-in method's entry is not this instance's; a token that could split a header is refused.
+      for (const overrides of [{ authMethod: "enterprise" }, { accessToken: "access\r\nX: y" }]) {
+        const refused = yield* fixture({
+          missingToken: true,
+          keyring: keyringEntry("2099-01-01T00:00:00Z", overrides),
+        });
+        expect((yield* refused.probe).unavailable?.reason).toBe("unsupported");
+        expect(refused.requests).toEqual([]);
+      }
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 

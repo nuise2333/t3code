@@ -79,9 +79,18 @@ const Models = Schema.Struct({
 });
 
 const KeyringSignIn = Schema.Struct({
-  token: Schema.Struct({ access_token: Schema.NonEmptyString, expiry: Schema.String }),
+  // Visible ASCII only: the token goes into a header, and a fetch error echoes header values.
+  token: Schema.Struct({
+    access_token: Schema.String.check(Schema.isPattern(/^[\x21-\x7e]+$/)),
+    expiry: Schema.String,
+  }),
+  auth_method: Schema.optional(Schema.String),
   id_token_email: Schema.optional(Schema.String),
 });
+// The runtime's name for each sign-in method; only a matching keychain entry is this instance's.
+const KEYRING_AUTH_METHODS: Partial<Record<AntigravitySettings["authMethod"], string>> = {
+  "oauth-personal": "consumer",
+};
 const decodeKeyringSignIn = Schema.decodeEffect(Schema.fromJsonString(KeyringSignIn));
 const KEYRING_BASE64_PREFIX = "go-keyring-base64:";
 
@@ -270,7 +279,10 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
             ),
           )
         : Option.none();
-      if (Option.isNone(signIn)) {
+      if (
+        Option.isNone(signIn) ||
+        signIn.value.auth_method !== KEYRING_AUTH_METHODS[input.authMethod]
+      ) {
         return makeUnavailableUsageLimits({
           checkedAt,
           reason: "unsupported",
@@ -293,7 +305,11 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
         ),
       ).pipe(
         Effect.flatMap(antigravityAccountFingerprint),
-        Effect.catch(() => sha256(`google-email\0${signIn.value.id_token_email ?? accessToken}`)),
+        Effect.catch(() =>
+          signIn.value.id_token_email
+            ? sha256(`google-email\0${signIn.value.id_token_email}`)
+            : sha256(`antigravity-access\0${accessToken}`),
+        ),
       );
     } else {
       const token = yield* fs.readFileString(tokenPath).pipe(Effect.flatMap(decodeTokenFile));
