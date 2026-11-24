@@ -20,6 +20,7 @@ import { useServerConfigs } from "../../state/entities";
 import { providerClients } from "../settings/providerDriverMeta";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { composerFloatingLayerProps } from "./composerEventScope";
@@ -127,6 +128,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
 }: ComposerTelemetryVialProps) {
   const [open, setOpen] = useState(false);
   const [hoveredSlice, setHoveredSlice] = useState<number>(-1);
+  const [pickedQuotaInstance, setPickedQuotaInstance] = useState<string | null>(null);
   const serverConfig = useServerConfigs().get(environmentId);
   const nowMinute = useNowMinute();
   const now = Date.parse(`${nowMinute}:00Z`);
@@ -142,20 +144,32 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
   if (!telemetry || !contextWindow) return null;
 
   const sources = usageLimitSources ?? serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES;
-  const limits = resolveProviderInstanceLimits({
-    providerInstanceId,
-    providers,
-    sources,
-    now,
-  });
-  const activeProvider =
-    providerInstanceId !== null
-      ? providers.find((provider) => provider.instanceId === providerInstanceId)
-      : undefined;
-  const providerDisplayName =
-    activeProvider?.displayName?.trim() ||
-    (activeProvider ? providerClients.get(activeProvider.driver)?.label : undefined) ||
-    "Provider";
+  // Every provider with quota data gets a tab, like Antigravity's; the thread's own one leads.
+  const quotaProviders = providers
+    .filter((provider) => provider.enabled)
+    .flatMap((provider) => {
+      const providerLimits = resolveProviderInstanceLimits({
+        providerInstanceId: provider.instanceId,
+        providers,
+        sources,
+        now,
+      });
+      if (!providerLimits) return [];
+      const name =
+        provider.displayName?.trim() || providerClients.get(provider.driver)?.label || "Provider";
+      return [{ instanceId: provider.instanceId, name, limits: providerLimits }];
+    })
+    .toSorted(
+      (left, right) =>
+        Number(right.instanceId === providerInstanceId) -
+        Number(left.instanceId === providerInstanceId),
+    );
+  const shownQuota =
+    quotaProviders.find((entry) => entry.instanceId === pickedQuotaInstance) ??
+    quotaProviders[0] ??
+    null;
+  const limits = shownQuota?.limits ?? null;
+  const providerDisplayName = shownQuota?.name ?? "Provider";
   const quotaStatus =
     limits && limitsNotice(limits) === null ? deriveQuotaStatus(limits.windows) : null;
 
@@ -486,6 +500,23 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                   >
                     {quotaStatus.label}
                   </span>
+                ) : null}
+                {quotaProviders.length > 1 ? (
+                  <ToggleGroup
+                    aria-label="Provider quotas"
+                    variant="segmented"
+                    className="ms-auto"
+                    value={[shownQuota?.instanceId ?? ""]}
+                    onValueChange={(next) => {
+                      if (next[0]) setPickedQuotaInstance(next[0]);
+                    }}
+                  >
+                    {quotaProviders.map((entry) => (
+                      <Toggle key={entry.instanceId} value={entry.instanceId}>
+                        {entry.name}
+                      </Toggle>
+                    ))}
+                  </ToggleGroup>
                 ) : null}
               </div>
               <ProviderUsageLimitRows

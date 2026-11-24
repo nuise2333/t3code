@@ -54,6 +54,20 @@ function makeProvider(usedPercent = 70): ServerProvider {
   } as unknown as ServerProvider;
 }
 
+function makeClaudeProvider(): ServerProvider {
+  return {
+    ...makeProvider(),
+    provider: "claudeAgent",
+    driver: "claudeAgent",
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    displayName: "Claude",
+    usageLimits: {
+      checkedAt: "2026-11-23T02:00:00.000Z",
+      windows: [{ id: "opus", label: "Opus weekly", usedPercent: 10 }],
+    },
+  } as unknown as ServerProvider;
+}
+
 function makeContextWindow(overrides: Partial<ContextWindowSnapshot> = {}): ContextWindowSnapshot {
   return {
     usedTokens: 20_480,
@@ -111,7 +125,7 @@ it("opens the context vial popover with quotas and runs the compact action", asy
           },
         ]}
         providerInstanceId={INSTANCE_ID}
-        providers={[makeProvider(70)]}
+        providers={[makeClaudeProvider(), makeProvider(70)]}
         usageLimitSources={[]}
         modelLabel="Gemini 4 Neon"
         modelSlug="gemini-4-neon"
@@ -135,6 +149,15 @@ it("opens the context vial popover with quotas and runs the compact action", asy
   await expect.element(page.getByText("4% used")).toBeVisible();
   await expect.element(page.getByText("20k / 512k tokens")).toBeVisible();
   await expect.element(page.getByText("Tight")).toBeVisible();
+  await expect.element(page.getByText("5h window")).toBeVisible();
+  // Every provider with quotas gets a tab; the thread's provider is shown first.
+  const quotaTabs = page.getByRole("group", { name: "Provider quotas" });
+  await expect
+    .element(quotaTabs.getByRole("button", { name: "Gemini" }))
+    .toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(quotaTabs.getByRole("button", { name: "Claude" }));
+  await expect.element(page.getByText("Opus weekly")).toBeVisible();
+  await userEvent.click(quotaTabs.getByRole("button", { name: "Gemini" }));
   await expect.element(page.getByText("5h window")).toBeVisible();
 
   await userEvent.click(page.getByRole("button", { name: "Tools" }));
