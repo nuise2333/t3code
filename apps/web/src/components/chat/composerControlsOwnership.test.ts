@@ -8,10 +8,10 @@ const base = {
 };
 
 describe("resolveComposerControlsOwnership", () => {
-  it("shows a labelled standalone permissions control that owns composer.mode", () => {
+  it("shows an icon-only standalone permissions control that owns composer.mode", () => {
     const result = resolveComposerControlsOwnership(base);
     expect(result).toMatchObject({
-      accessDisplay: "label",
+      accessDisplay: "icon",
       showModeBlock: true,
       hiddenBlockIds: [],
       overflowShowsPermissions: false,

@@ -8,7 +8,8 @@ export function resolveComposerControlsOwnership(input: {
   /** How many trailing blocks the width measurement moved into the overflow menu. */
   readonly measuredHiddenBlockCount: number;
 }) {
-  const accessDisplay = input.collapsed ? ("icon" as const) : ("label" as const);
+  // Like Antigravity, permissions show only their mode icon; the tooltip names the mode.
+  const accessDisplay = "icon" as const;
   const showModeBlock = true;
   const modeHidden = input.measuredHiddenBlockCount > 0;
   const hiddenBlockIds = modeHidden ? (["mode"] as const) : ([] as const);

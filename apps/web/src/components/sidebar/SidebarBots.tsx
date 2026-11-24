@@ -537,7 +537,7 @@ function SidebarBotsEnvironment({
                     type="button"
                     aria-expanded={showHidden}
                     onClick={() => setHiddenOpen(!showHidden)}
-                    className="mx-2 mt-1 mb-0.5 flex h-6 items-center gap-1 rounded-sm text-xs font-semibold text-sidebar-muted-foreground uppercase hover:text-sidebar-foreground"
+                    className="mx-2 mt-1 mb-0.5 flex h-6 items-center gap-1 rounded-sm text-xs font-semibold text-sidebar-muted-foreground hover:text-sidebar-foreground"
                   >
                     <ChevronRightIcon className={cn("size-3", showHidden && "rotate-90")} />
                     Hidden ({groups.hidden.length})
@@ -655,7 +655,7 @@ function BotsGroup({
       {showLabel ? (
         <h3
           aria-hidden
-          className="mx-2 mt-1 mb-0.5 text-xs font-semibold text-sidebar-muted-foreground uppercase"
+          className="mx-2 mt-1 mb-0.5 text-xs font-semibold text-sidebar-muted-foreground"
         >
           {label}
         </h3>

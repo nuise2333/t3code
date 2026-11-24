@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { ChatComposerProps } from "./ChatComposer";
 import type { PromptUltrathink } from "./TraitsPicker";
@@ -134,6 +135,8 @@ export function ComposerControlsBar(props: {
   onModelPickerOpenChange: (open: boolean) => void;
   modelPickerIconClassName: string | undefined;
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
+  /** Sits on the right, before permissions, like Antigravity's usage pill. */
+  trailingSlot?: ReactNode;
 }) {
   const {
     environmentId,
@@ -178,6 +181,7 @@ export function ComposerControlsBar(props: {
     onModelPickerOpenChange,
     modelPickerIconClassName,
     getModelDisabledReason,
+    trailingSlot,
   } = props;
   const accessMatchesDefault = compatibleRuntimeMode === defaultRuntimeMode;
   const {
@@ -657,6 +661,30 @@ export function ComposerControlsBar(props: {
   ) : (
     <>
       {composerModelPicker}
+      <div data-resting-fixed className="flex shrink-0 items-center gap-1 empty:hidden">
+        <ComposerThreadAssists
+          environmentId={environmentId}
+          serverThreadId={serverThreadId}
+          draftId={routeKind === "draft" ? draftId : null}
+          thread={props.activeThreadAssists}
+          size={controlSize}
+        />
+      </div>
+      {/* Two spacers center the usage pill between the left and right groups. The measurement
+          counts their minimum, so a tight row sheds controls before the gaps close. */}
+      <div
+        data-resting-controls-spacer
+        aria-hidden="true"
+        className={cn("flex-1", trailingSlot ? "min-w-8" : "min-w-0")}
+      />
+      {trailingSlot ? (
+        <div data-resting-fixed className="flex shrink-0 items-center empty:hidden">
+          {trailingSlot}
+        </div>
+      ) : null}
+      {trailingSlot ? (
+        <div data-resting-controls-spacer aria-hidden="true" className="min-w-8 flex-1" />
+      ) : null}
       <>
         {restingBlockDefs.map((def, index) => {
           const hidden = index >= restingBlockDefs.length - restingHiddenBlockCount;
@@ -701,13 +729,6 @@ export function ComposerControlsBar(props: {
           />
         </div>
       </>
-      <ComposerThreadAssists
-        environmentId={environmentId}
-        serverThreadId={serverThreadId}
-        draftId={routeKind === "draft" ? draftId : null}
-        thread={props.activeThreadAssists}
-        size={controlSize}
-      />
     </>
   );
 }

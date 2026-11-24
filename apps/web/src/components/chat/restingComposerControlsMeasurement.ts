@@ -74,6 +74,11 @@ function controlBlockWidths(block: HTMLElement): { natural: number; iconOnly: nu
   return { natural, iconOnly: Math.min(natural, iconOnly) };
 }
 
+/** The spacer grows, so only its guaranteed minimum and its gap count as fixed. */
+function spacerWidth(spacer: HTMLElement, gap: number): number {
+  return gap + (Number.parseFloat(getComputedStyle(spacer).minWidth) || 0);
+}
+
 /** Measure independently of controls hidden by the previous render. */
 export function measureRestingComposerControls(
   controls: HTMLElement,
@@ -86,7 +91,20 @@ export function measureRestingComposerControls(
   const separator = controls.querySelector<HTMLElement>("[data-resting-controls-separator]");
   const separatorWidth = separator ? elementOuterWidth(separator) : 0;
   const overflow = controls.querySelector<HTMLElement>("[data-resting-controls-overflow]");
-  const separatorAndGapWidth = separatorWidth > 0 ? separatorWidth + gap : 0;
+  // Fixed controls (thread assists, the usage pill) and the spacer's gap never collapse.
+  const fixedWidth =
+    Array.from(controls.querySelectorAll<HTMLElement>("[data-resting-fixed]")).reduce(
+      (sum, element) => {
+        const width = elementOuterWidth(element);
+        return width > 0 ? sum + width + gap : sum;
+      },
+      0,
+    ) +
+    Array.from(controls.querySelectorAll<HTMLElement>("[data-resting-controls-spacer]")).reduce(
+      (sum, spacer) => sum + spacerWidth(spacer, gap),
+      0,
+    );
+  const separatorAndGapWidth = (separatorWidth > 0 ? separatorWidth + gap : 0) + fixedWidth;
   const blocks = Array.from(controls.querySelectorAll<HTMLElement>("[data-resting-block]"));
   const widths = blocks.map(controlBlockWidths);
   return {

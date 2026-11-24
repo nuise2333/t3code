@@ -92,7 +92,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
         </TooltipTrigger>
         <TooltipPopup side="top">{permissionsTooltip}</TooltipPopup>
       </Tooltip>
-      <MenuPopup side="top" align="start" {...composerFloatingLayerProps}>
+      <MenuPopup side="top" align="end" {...composerFloatingLayerProps}>
         <ComposerPermissionsSection
           runtimeMode={props.runtimeMode}
           defaultRuntimeMode={props.defaultRuntimeMode}

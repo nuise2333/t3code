@@ -6,6 +6,17 @@ import "~/index.css";
 import { render } from "../../../test/render";
 import { Sidebar, SidebarProvider, SidebarRail, SidebarTrigger, useSidebar } from "./sidebar";
 
+// Panel animations default on; these cases cover the sidebar with them off.
+vi.mock("~/hooks/useSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/hooks/useSettings")>();
+  const { DEFAULT_CLIENT_SETTINGS } = await import("@t3tools/contracts/settings");
+  const settings = { ...DEFAULT_CLIENT_SETTINGS, panelAnimationDurationMs: 0 };
+  return {
+    ...actual,
+    useClientSettings: <T,>(select: (value: typeof settings) => T) => select(settings),
+  };
+});
+
 function CollapseFromInside() {
   const { setOpen } = useSidebar();
   return (

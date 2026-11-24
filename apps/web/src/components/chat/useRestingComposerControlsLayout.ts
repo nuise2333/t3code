@@ -57,7 +57,7 @@ export function useRestingComposerControlsLayout(
           currentHost,
           controls,
           ...controls.querySelectorAll<HTMLElement>(
-            "[data-resting-block], [data-composer-control-label], [data-chat-provider-model-picker-label]",
+            "[data-resting-block], [data-resting-fixed], [data-composer-control-label], [data-chat-provider-model-picker-label]",
           ),
         ],
         measure,

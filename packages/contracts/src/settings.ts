@@ -163,7 +163,7 @@ export const AppearanceContrast = Schema.Int.check(
 export type AppearanceContrast = typeof AppearanceContrast.Type;
 const DEFAULT_APPEARANCE_CONTRAST: AppearanceContrast = 100;
 export const MIN_PANEL_ANIMATION_DURATION_MS = 0;
-export const MAX_PANEL_ANIMATION_DURATION_MS = 400;
+export const MAX_PANEL_ANIMATION_DURATION_MS = 600;
 export const PanelAnimationDurationMs = Schema.Int.check(
   Schema.isBetween({
     minimum: MIN_PANEL_ANIMATION_DURATION_MS,
@@ -171,7 +171,7 @@ export const PanelAnimationDurationMs = Schema.Int.check(
   }),
 );
 export type PanelAnimationDurationMs = typeof PanelAnimationDurationMs.Type;
-const DEFAULT_PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 0;
+const DEFAULT_PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 500;
 
 export const OpticalMotionLevel = Schema.Literals(["off", "subtle", "standard", "ultra"]);
 export type OpticalMotionLevel = typeof OpticalMotionLevel.Type;

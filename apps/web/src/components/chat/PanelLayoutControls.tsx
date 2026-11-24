@@ -238,7 +238,7 @@ export function WorkspaceTitlebarControls(props: {
             "flex shrink-0",
             props.rightPanelOpen &&
               props.animationsActive &&
-              "motion-safe:transition-opacity motion-safe:duration-(--panel-animation-duration) motion-safe:ease-out",
+              "motion-safe:transition-opacity motion-safe:duration-(--panel-animation-duration) motion-safe:ease-panel",
             props.rightPanelOpen
               ? "pointer-events-auto opacity-100"
               : "pointer-events-none absolute right-full mr-1 opacity-0",

@@ -70,6 +70,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -2454,7 +2455,34 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     : composerControlsCollapsed
       ? 0
       : expandedControlsIconOnlyBlockCount;
-  const composerControls = (
+  const composerTelemetry = props.activeContextWindow ? (
+    <ComposerTelemetryVial
+      environmentId={environmentId}
+      contextWindow={props.activeContextWindow}
+      providerTurns={props.activeThreadProviderTurns}
+      activeProviderThreadId={props.activeProviderThreadId}
+      visibleTurnItems={props.activeThreadVisibleTurnItems}
+      providerInstanceId={selectedInstanceId}
+      providers={providerStatuses}
+      modelLabel={
+        selectedProviderModels.find((model) => model.slug === selectedModel)?.name ?? selectedModel
+      }
+      modelSlug={selectedModel}
+      isStreaming={phase === "running" || phase === "connecting"}
+      compactDisabled={
+        compactDisabled ||
+        !canOperateThread ||
+        noProviderAvailable ||
+        activePendingApproval !== null ||
+        pendingUserInputs.length > 0 ||
+        phase === "running" ||
+        isSendBusy ||
+        !activeThreadId
+      }
+      onCompactContext={compactThreadContextStable}
+    />
+  ) : null;
+  const renderComposerControls = (trailingSlot?: ReactNode) => (
     <ComposerControlsBar
       environmentId={environmentId}
       workspaceCwd={gitCwd}
@@ -2504,6 +2532,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onModelPickerOpenChange={setIsComposerModelPickerOpen}
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
+      trailingSlot={trailingSlot}
     />
   );
   // An open question owns the space above the composer. Only a machine problem,
@@ -3920,36 +3949,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       dictationTakesFooter && "hidden",
                     )}
                   >
-                    {composerControls}
+                    {renderComposerControls(composerTelemetry)}
                   </div>
-                  {!dictationTakesFooter && props.activeContextWindow ? (
-                    <ComposerTelemetryVial
-                      environmentId={environmentId}
-                      contextWindow={props.activeContextWindow}
-                      providerTurns={props.activeThreadProviderTurns}
-                      activeProviderThreadId={props.activeProviderThreadId}
-                      visibleTurnItems={props.activeThreadVisibleTurnItems}
-                      providerInstanceId={selectedInstanceId}
-                      providers={providerStatuses}
-                      modelLabel={
-                        selectedProviderModels.find((model) => model.slug === selectedModel)?.name ??
-                        selectedModel
-                      }
-                      modelSlug={selectedModel}
-                      isStreaming={phase === "running" || phase === "connecting"}
-                      compactDisabled={
-                        compactDisabled ||
-                        !canOperateThread ||
-                        noProviderAvailable ||
-                        activePendingApproval !== null ||
-                        pendingUserInputs.length > 0 ||
-                        phase === "running" ||
-                        isSendBusy ||
-                        !activeThreadId
-                      }
-                      onCompactContext={compactThreadContextStable}
-                    />
-                  ) : null}
                   <ComposerFooterPrimaryActions
                     // Stop state belongs to one thread; the composer stays mounted across threads.
                     key={`${environmentId}:${activeThreadId ?? "new"}`}
@@ -4055,7 +4056,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       !restingControlsVisible && "invisible",
                     )}
                   >
-                    {composerControls}
+                    {renderComposerControls()}
                   </div>
                 </div>
               </div>
