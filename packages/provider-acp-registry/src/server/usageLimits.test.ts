@@ -1,8 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import { FetchHttpClient } from "effect/http";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
@@ -38,8 +40,11 @@ const kimiFixture = Effect.fn(function* (options: {
     }),
   );
   const requests: Array<{ url: string; authorization: string | undefined }> = [];
-  const http = HttpClient.make((request) =>
+  const http = HttpClient.make((request, _url, _signal, fiber) =>
     Effect.gen(function* () {
+      expect(Context.getOrUndefined(fiber.context, FetchHttpClient.RequestInit)?.redirect).toBe(
+        "manual",
+      );
       requests.push({ url: request.url, authorization: request.headers.authorization });
       if (request.url.endsWith("/api/oauth/token")) {
         if (options.rotatedByCli) {
@@ -97,6 +102,14 @@ describe("ACP Registry agent limits", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("never overwrites a sign-in the Kimi CLI saved while our refresh was in flight", () =>
+    Effect.gen(function* () {
+      const { requests, saved } = yield* kimiFixture({ expiresAt: 0, rotatedByCli: true });
+      expect(saved.refresh_token).toBe("cli-refresh");
+      expect(requests.at(-1)?.authorization).toBe("Bearer cli-access");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("uses a fresh Kimi Code token without refreshing it", () =>
     Effect.gen(function* () {
       const { requests, saved } = yield* kimiFixture({ expiresAt: 4e9 });
@@ -107,15 +120,20 @@ describe("ACP Registry agent limits", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("asks for a ZCode API key instead of guessing one", () =>
+  it.effect("sends a ZCode key only to Zhipu's own hosts, and only when one is set", () =>
     Effect.gen(function* () {
-      const limits = yield* readZCodeUsageLimits({}).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          HttpClient.make(() => Effect.die("no request expected")),
-        ),
-      );
-      expect(limits.unavailable?.reason).toBe("unsupported");
+      for (const environment of [
+        {},
+        { ZCODE_ACP_API_KEY: "key", ZCODE_ACP_BASE_URL: "https://x" },
+      ]) {
+        const limits = yield* readZCodeUsageLimits(environment).pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make(() => Effect.die("no request expected")),
+          ),
+        );
+        expect(limits.unavailable?.reason).toBe("unsupported");
+      }
     }),
   );
 

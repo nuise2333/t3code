@@ -13,6 +13,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
+import { FetchHttpClient } from "effect/http";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
@@ -20,6 +21,10 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 // Visible ASCII only: tokens go into a header, and a fetch error echoes header values.
 const HeaderSafe = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]+$/));
 const decodeHeaderSafe = Schema.decodeUnknownOption(HeaderSafe);
+// Fetch would replay a credential-bearing request to a redirect's target.
+const withoutRedirects = Effect.provideService(FetchHttpClient.RequestInit, {
+  redirect: "manual",
+} satisfies RequestInit);
 
 const KIMI_CODE_CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098";
 const KIMI_CODE_TOKEN_URL = "https://auth.kimi.com/api/oauth/token";
@@ -134,42 +139,57 @@ export const readKimiCodeUsageLimits = Effect.fn("readKimiCodeUsageLimits")(func
   }
   let token = yield* readToken;
   if (token.expires_at * 1000 <= (yield* Clock.currentTimeMillis) + 60_000) {
-    const refreshed = yield* http
-      .execute(
-        HttpClientRequest.post(KIMI_CODE_TOKEN_URL).pipe(
-          HttpClientRequest.bodyUrlParams({
-            client_id: KIMI_CODE_CLIENT_ID,
-            grant_type: "refresh_token",
-            refresh_token: token.refresh_token,
-          }),
-        ),
-      )
-      .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(KimiCodeRefresh)), Effect.option);
-    if (Option.isNone(refreshed)) {
-      // The CLI may have refreshed first and rotated the refresh token; its saved token wins.
-      const current = yield* readToken;
-      if (current.refresh_token === token.refresh_token) {
-        return makeUnavailableUsageLimits({
-          checkedAt,
-          reason: "probeFailed",
-          message: "Kimi Code's sign-in has expired. Sign in to Kimi Code again.",
-        });
-      }
-      token = current;
-    } else {
-      const next = {
-        access_token: refreshed.value.access_token,
-        refresh_token: refreshed.value.refresh_token ?? token.refresh_token,
-        expires_at: (yield* Clock.currentTimeMillis) / 1000 + refreshed.value.expires_in,
-        scope: refreshed.value.scope ?? token.scope,
-        token_type: refreshed.value.token_type ?? token.token_type ?? "Bearer",
-        expires_in: refreshed.value.expires_in,
-      };
-      const tempPath = `${tokenPath}.tmp.${process.pid}.${(yield* Random.nextInt).toString(16)}`;
-      yield* fs.writeFileString(tempPath, yield* encodeKimiCodeToken(next), { mode: 0o600 });
-      yield* fs.rename(tempPath, tokenPath);
-      token = next;
+    const spent = token.refresh_token;
+    // A refresh spends the old refresh token, so the request and the write-back finish together
+    // even when the probe times out; otherwise the CLI would be left holding a dead token.
+    const rotated = yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        const refreshed = yield* http
+          .execute(
+            HttpClientRequest.post(KIMI_CODE_TOKEN_URL).pipe(
+              HttpClientRequest.bodyUrlParams({
+                client_id: KIMI_CODE_CLIENT_ID,
+                grant_type: "refresh_token",
+                refresh_token: spent,
+              }),
+            ),
+          )
+          .pipe(
+            Effect.flatMap(HttpClientResponse.schemaBodyJson(KimiCodeRefresh)),
+            withoutRedirects,
+            Effect.timeout("15 seconds"),
+            Effect.option,
+          );
+        const current = yield* readToken;
+        // The CLI's saved token wins whenever it changed meanwhile: a refresh it won, or a new sign-in.
+        if (current.refresh_token !== spent) return Option.some(current);
+        if (Option.isNone(refreshed)) return Option.none();
+        const next = {
+          access_token: refreshed.value.access_token,
+          refresh_token: refreshed.value.refresh_token ?? spent,
+          expires_at: (yield* Clock.currentTimeMillis) / 1000 + refreshed.value.expires_in,
+          scope: refreshed.value.scope ?? current.scope,
+          token_type: refreshed.value.token_type ?? current.token_type ?? "Bearer",
+          expires_in: refreshed.value.expires_in,
+        };
+        const tempPath = `${tokenPath}.tmp.${process.pid}.${(yield* Random.nextInt).toString(16)}`;
+        yield* fs
+          .writeFileString(tempPath, yield* encodeKimiCodeToken(next), { mode: 0o600, flag: "wx" })
+          .pipe(
+            Effect.andThen(fs.rename(tempPath, tokenPath)),
+            Effect.onError(() => fs.remove(tempPath).pipe(Effect.ignore)),
+          );
+        return Option.some(next);
+      }),
+    );
+    if (Option.isNone(rotated)) {
+      return makeUnavailableUsageLimits({
+        checkedAt,
+        reason: "probeFailed",
+        message: "Kimi Code's sign-in has expired. Sign in to Kimi Code again.",
+      });
     }
+    token = rotated.value;
   }
   const response = yield* http
     .execute(
@@ -177,7 +197,7 @@ export const readKimiCodeUsageLimits = Effect.fn("readKimiCodeUsageLimits")(func
         HttpClientRequest.bearerToken(token.access_token),
       ),
     )
-    .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(KimiCodeUsages)));
+    .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(KimiCodeUsages)), withoutRedirects);
   return makeUsageLimits({ checkedAt, windows: kimiCodeUsageToWindows(response) });
 });
 
@@ -247,6 +267,10 @@ export const readZCodeUsageLimits = Effect.fn("readZCodeUsageLimits")(function* 
       message: "Set ZCODE_ACP_API_KEY on the ZCode provider to see Coding Plan limits.",
     });
   }
+  // A custom endpoint's key belongs to that endpoint; never send it to Zhipu's public hosts.
+  if (environment.ZCODE_ACP_BASE_URL?.trim()) {
+    return makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
+  }
   const template = environment.ZCODE_ACP_TEMPLATE?.trim() || "bigmodel-api";
   const host = template.startsWith("zai") ? "https://api.z.ai" : "https://open.bigmodel.cn";
   const response = yield* (yield* HttpClient.HttpClient)
@@ -256,7 +280,7 @@ export const readZCodeUsageLimits = Effect.fn("readZCodeUsageLimits")(function* 
         HttpClientRequest.setHeaders({ Authorization: apiKey.value }),
       ),
     )
-    .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(ZhipuQuotaResponse)));
+    .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(ZhipuQuotaResponse)), withoutRedirects);
   if (response.code !== 200 && response.code !== 0) {
     return makeUnavailableUsageLimits({
       checkedAt,

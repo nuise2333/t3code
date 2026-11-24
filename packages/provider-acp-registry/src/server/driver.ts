@@ -729,8 +729,11 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
     const fileSystem = yield* FileSystem.FileSystem;
     const pathService = yield* Path.Path;
     const httpClient = yield* HttpClient.HttpClient;
+    // Checks can overlap; one reader at a time keeps a token refresh from racing itself.
+    const usageReads = yield* Semaphore.make(1);
     const checkUsageLimits = readUsage
       ? readUsage(processEnvironment).pipe(
+          usageReads.withPermits(1),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, pathService),
           Effect.provideService(HttpClient.HttpClient, httpClient),
