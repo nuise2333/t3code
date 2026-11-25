@@ -36,9 +36,13 @@ import { isProviderInstancePickerReady, providerInstanceEntriesFor } from "../..
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import {
+  AgentTeamHandsTo,
   AgentTeamRoleDetails,
   AgentTeamRoleName,
   EMPTY_TEAM_ROLE,
+  namedTeamFlows,
+  type TeamRowFlow,
+  teamRowFlows,
 } from "../chat/AgentTeamRoleFields";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
@@ -397,6 +401,7 @@ export function RoutingGroupsSettings({
           seedMember={seedMember}
           quotaSupported={quotaSupported && !teams}
           rolesSupported={teams && capabilities.agentTeamRoles === true}
+          flowsSupported={teams && capabilities.agentTeamFlows === true}
           takenIds={[
             ...allGroups.map((group) => group.id),
             ...Object.values(settings.routingGroupRules),
@@ -458,6 +463,7 @@ function RoutingGroupDialog({
   seedMember,
   quotaSupported,
   rolesSupported,
+  flowsSupported,
   takenIds,
   onClose,
   onSave,
@@ -470,6 +476,7 @@ function RoutingGroupDialog({
   readonly quotaSupported: boolean;
   /** A team on a server that keeps member roles and team guidance. */
   readonly rolesSupported: boolean;
+  readonly flowsSupported: boolean;
   readonly takenIds: ReadonlyArray<string>;
   readonly onClose: () => void;
   readonly onSave: (group: RoutingGroup) => void;
@@ -489,6 +496,10 @@ function RoutingGroupDialog({
       selection,
       role: editing.group.memberRoles?.[index] ?? EMPTY_TEAM_ROLE,
     })),
+  );
+  const nextKey = useRef(editing.group.members.length);
+  const [flows, setFlows] = useState<ReadonlyArray<TeamRowFlow>>(() =>
+    teamRowFlows(editing.group, [...editing.group.members.keys()]),
   );
   const members = entriesDraft.map((entry) => entry.selection);
   const memberRoles = entriesDraft.map((entry) => entry.role);
@@ -558,6 +569,7 @@ function RoutingGroupDialog({
                   ? { team: true as const, maxParallel, leadGuidance: leadGuidance.trim() }
                   : {}),
                 ...(rolesSupported ? { memberRoles, sharedGuidance: sharedGuidance.trim() } : {}),
+                ...(flowsSupported ? { memberFlows: namedTeamFlows(entriesDraft, flows) } : {}),
                 members,
               });
             }}
@@ -693,7 +705,17 @@ function RoutingGroupDialog({
                           label={`Member ${index + 1}`}
                           role={role}
                           onChange={(next) => updateRole(index, next)}
-                        />
+                        >
+                          {flowsSupported ? (
+                            <AgentTeamHandsTo
+                              label={`Member ${index + 1}`}
+                              row={{ key, role }}
+                              rows={entriesDraft}
+                              flows={flows}
+                              onChange={setFlows}
+                            />
+                          ) : null}
+                        </AgentTeamRoleDetails>
                       </div>
                     ) : null}
                   </div>
@@ -708,7 +730,7 @@ function RoutingGroupDialog({
                       setMembers((current) => [
                         ...current,
                         {
-                          key: Math.max(-1, ...current.map((entry) => entry.key)) + 1,
+                          key: nextKey.current++,
                           selection: seedMember,
                           role: EMPTY_TEAM_ROLE,
                         },

@@ -62,7 +62,12 @@ import {
   routingMemberLabel,
   routingProviderSource,
 } from "@t3tools/client-runtime/routing";
-import { agentTeamRole, threadAgentTeam, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
+import {
+  agentTeamHandsTo,
+  agentTeamRole,
+  threadAgentTeam,
+  threadAgentTeamRef,
+} from "@t3tools/shared/agentTeam";
 import { councilApplies, councilStatus, councilUserMessageTimes } from "@t3tools/shared/council";
 import { councilBannerItem } from "./chat/CouncilStrip";
 import { agentTeamBannerItem } from "./chat/AgentTeamStrip";
@@ -2830,6 +2835,9 @@ export default function ChatView(props: ChatViewProps) {
             label: role?.name || routingMemberLabel(member, providers),
             model: routingMemberLabel(member, providers),
             description: role?.description ?? "",
+            handsTo: agentTeamHandsTo(savedTeam, memberIndex).map(
+              (at) => agentTeamRole(savedTeam, at)?.name ?? "",
+            ),
             selection: member,
           },
         ];

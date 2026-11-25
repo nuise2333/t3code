@@ -134,6 +134,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   agentTeams: Schema.optionalKey(Schema.Boolean),
   /** Keeps a team's `memberRoles` and `sharedGuidance`; older servers strip them. */
   agentTeamRoles: Schema.optionalKey(Schema.Boolean),
+  /** Keeps a team's `memberFlows` and lets members hand work on. */
+  agentTeamFlows: Schema.optionalKey(Schema.Boolean),
   /** Threads take token saver packs and Council. */
   threadAssists: Schema.optionalKey(Schema.Boolean),
   /** The rtk command is installed, so the RTK compression pack can run. */

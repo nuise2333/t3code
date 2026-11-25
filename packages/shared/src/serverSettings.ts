@@ -415,6 +415,9 @@ function keepRoutingGroupKeys(
       ...(group.memberRoles === undefined && saved.memberRoles !== undefined
         ? { memberRoles: realignMemberRoles(saved, group.members) ?? [] }
         : {}),
+      ...(group.memberFlows === undefined && saved.memberFlows !== undefined
+        ? { memberFlows: saved.memberFlows }
+        : {}),
       ...(group.sharedGuidance === undefined && saved.sharedGuidance !== undefined
         ? { sharedGuidance: saved.sharedGuidance }
         : {}),

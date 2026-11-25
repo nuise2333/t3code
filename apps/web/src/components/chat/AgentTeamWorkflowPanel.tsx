@@ -41,6 +41,8 @@ export interface AgentTeamView {
     readonly label: string;
     readonly model: string;
     readonly description: string;
+    /** Teammates it may hand parts of its tasks to. */
+    readonly handsTo?: ReadonlyArray<string>;
     readonly selection: ModelSelection;
   }>;
 }
@@ -54,6 +56,7 @@ interface AgentTeamAgent {
   readonly label: string;
   readonly model: string;
   readonly description: string;
+  readonly handsTo: ReadonlyArray<string>;
   readonly selection: ModelSelection;
   readonly driver: AgentTeamTaskRow["driver"] | undefined;
   readonly state: AgentState;
@@ -86,6 +89,7 @@ function agentTeamAgents(team: AgentTeamView): ReadonlyArray<AgentTeamAgent> {
     label: team.leadLabel,
     model: team.leadLabel,
     description: "",
+    handsTo: [],
     selection: team.lead,
     driver: undefined,
     state: progress.lead ?? (progress.working > 0 ? "waiting" : "idle"),
@@ -95,12 +99,16 @@ function agentTeamAgents(team: AgentTeamView): ReadonlyArray<AgentTeamAgent> {
   };
   const workers = new Map<
     string,
-    Pick<AgentTeamAgent, "label" | "model" | "description" | "selection"> & {
+    Pick<AgentTeamAgent, "label" | "model" | "description" | "handsTo" | "selection"> & {
       rows: AgentTeamTaskRow[];
     }
   >();
   for (const worker of team.workers ?? []) {
-    workers.set(`member:${worker.memberIndex}`, { ...worker, rows: [] });
+    workers.set(`member:${worker.memberIndex}`, {
+      ...worker,
+      handsTo: worker.handsTo ?? [],
+      rows: [],
+    });
   }
   for (const row of progress.rows) {
     const key = taskAgentKey(row);
@@ -111,6 +119,7 @@ function agentTeamAgents(team: AgentTeamView): ReadonlyArray<AgentTeamAgent> {
         label: row.member,
         model: row.model,
         description: "",
+        handsTo: [],
         selection: row.selection,
         rows: [row],
       });
@@ -126,6 +135,7 @@ function agentTeamAgents(team: AgentTeamView): ReadonlyArray<AgentTeamAgent> {
         label: worker.label,
         model: worker.model,
         description: worker.description,
+        handsTo: worker.handsTo,
         selection: worker.selection,
         driver: worker.rows[0]?.driver,
         state: current?.status ?? "idle",
@@ -484,6 +494,11 @@ function AgentNode(props: {
             ? agent.description
             : `${AGENT_STATE_LABELS[agent.state]}${agent.activity ? ` · ${agent.activity}` : ""}`}
         </span>
+        {agent.handsTo.length > 0 ? (
+          <span className="truncate text-2xs text-muted-foreground">
+            May hand parts to {agent.handsTo.join(", ")}
+          </span>
+        ) : null}
       </span>
     </span>
   );

@@ -56,6 +56,22 @@ export function agentTeamRole(
   return trimmed.name || trimmed.description || trimmed.instructions ? trimmed : null;
 }
 
+/** The places of the teammates a named member may hand part of its task to. */
+export function agentTeamHandsTo(
+  team: Pick<RoutingGroup, "members" | "memberRoles" | "memberFlows">,
+  index: number,
+): ReadonlyArray<number> {
+  const nameAt = (at: number) => agentTeamRole(team, at)?.name.toLowerCase() ?? "";
+  const from = nameAt(index);
+  if (from === "" || !team.memberFlows) return [];
+  const names = new Set(
+    team.memberFlows.flatMap((flow) =>
+      flow.from.trim().toLowerCase() === from ? [flow.to.trim().toLowerCase()] : [],
+    ),
+  );
+  return [...team.members.keys()].filter((at) => at !== index && names.has(nameAt(at)));
+}
+
 const memberKey = (member: Pick<ModelSelection, "instanceId" | "model">) =>
   `${member.instanceId}\u0000${member.model}`;
 

@@ -197,10 +197,19 @@ export const AgentTeamRole = Schema.Struct({
 });
 export type AgentTeamRole = typeof AgentTeamRole.Type;
 
+/** A named member that may hand part of its task to another, both by role name. */
+export const AgentTeamFlow = Schema.Struct({
+  from: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_TEAM_ROLE_NAME_MAX_LENGTH)),
+  to: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_TEAM_ROLE_NAME_MAX_LENGTH)),
+});
+export type AgentTeamFlow = typeof AgentTeamFlow.Type;
+
 /** The member a lead handed a task to; the model that ran it can differ when T3 rerouted it. */
 export const AgentTeamTaskMember = Schema.Struct({
   teamId: RoutingGroupId,
   name: Schema.optionalKey(Schema.String),
+  /** The teammate that handed it over, in place of the lead; such a task is handed no further. */
+  handedBy: Schema.optionalKey(Schema.String),
   instanceId: ProviderInstanceId,
   model: TrimmedNonEmptyString,
 });
@@ -238,6 +247,12 @@ export const RoutingGroup = Schema.Struct({
    */
   memberRoles: Schema.optionalKey(
     Schema.Array(AgentTeamRole).check(Schema.isMaxLength(MAX_ROUTING_GROUP_MEMBERS)),
+  ),
+  /** Absent or empty: only the lead hands out tasks. Names that match no member are ignored. */
+  memberFlows: Schema.optionalKey(
+    Schema.Array(AgentTeamFlow).check(
+      Schema.isMaxLength(MAX_ROUTING_GROUP_MEMBERS * MAX_ROUTING_GROUP_MEMBERS),
+    ),
   ),
   /** Told to the lead and, with each task, to every member; empty or absent means none. */
   sharedGuidance: Schema.optionalKey(

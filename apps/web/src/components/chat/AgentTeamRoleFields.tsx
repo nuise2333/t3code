@@ -2,17 +2,105 @@ import {
   AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH,
   AGENT_TEAM_ROLE_DESCRIPTION_MAX_LENGTH,
   AGENT_TEAM_ROLE_NAME_MAX_LENGTH,
+  type AgentTeamFlow,
   type AgentTeamRole,
+  type RoutingGroup,
 } from "@t3tools/contracts";
+import { agentTeamHandsTo } from "@t3tools/shared/agentTeam";
 import { ChevronRightIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 
 export const EMPTY_TEAM_ROLE: AgentTeamRole = { name: "", description: "", instructions: "" };
+
+/** A row of a team being edited; its key outlives renames and moves, so flows point at it. */
+interface TeamRow {
+  readonly key: number;
+  readonly role: AgentTeamRole;
+}
+
+export interface TeamRowFlow {
+  readonly from: number;
+  readonly to: number;
+}
+
+/** A saved team's flows between its rows, given in member order. */
+export function teamRowFlows(
+  team: Pick<RoutingGroup, "members" | "memberRoles" | "memberFlows">,
+  keys: ReadonlyArray<number>,
+): ReadonlyArray<TeamRowFlow> {
+  return keys.flatMap((from, index) =>
+    agentTeamHandsTo(team, index).flatMap((at) => {
+      const to = keys[at];
+      return to === undefined ? [] : [{ from, to }];
+    }),
+  );
+}
+
+/** The flows to save, by the rows' current names; a removed or unnamed row has none. */
+export function namedTeamFlows(
+  rows: ReadonlyArray<TeamRow>,
+  flows: ReadonlyArray<TeamRowFlow>,
+): AgentTeamFlow[] {
+  const names = new Map(rows.map((row) => [row.key, row.role.name.trim()]));
+  return flows.flatMap((flow) => {
+    const from = names.get(flow.from);
+    const to = names.get(flow.to);
+    return from && to ? [{ from, to }] : [];
+  });
+}
+
+/** The teammates a member may hand part of its task to. Flows go by name, so both need one. */
+export function AgentTeamHandsTo(props: {
+  readonly label: string;
+  readonly row: TeamRow;
+  readonly rows: ReadonlyArray<TeamRow>;
+  readonly flows: ReadonlyArray<TeamRowFlow>;
+  readonly onChange: (flows: ReadonlyArray<TeamRowFlow>) => void;
+}) {
+  const { row, flows } = props;
+  const teammates = props.rows.filter(
+    (candidate) => candidate.key !== row.key && candidate.role.name.trim() !== "",
+  );
+  return (
+    <fieldset className="grid gap-1" aria-label={`${props.label} may hand parts to`}>
+      <span className="text-muted-foreground text-xs">May hand parts of its tasks to</span>
+      {row.role.name.trim() === "" || teammates.length === 0 ? (
+        <span className="text-muted-foreground text-xs">
+          Name this member and another one to choose.
+        </span>
+      ) : (
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {teammates.map((teammate) => {
+            const checked = flows.some((flow) => flow.from === row.key && flow.to === teammate.key);
+            const others = flows.filter(
+              (flow) => flow.from !== row.key || flow.to !== teammate.key,
+            );
+            return (
+              <label key={teammate.key} className="flex min-w-0 items-center gap-2 text-sm">
+                <Checkbox
+                  checked={checked}
+                  aria-label={teammate.role.name.trim()}
+                  onCheckedChange={(next) =>
+                    props.onChange(
+                      next === true ? [...others, { from: row.key, to: teammate.key }] : others,
+                    )
+                  }
+                />
+                <span className="min-w-0 truncate">{teammate.role.name.trim()}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </fieldset>
+  );
+}
 
 /** A member's name in place of its "Worker 1" label; left empty, the model's name shows. */
 export function AgentTeamRoleName(props: {
@@ -38,6 +126,8 @@ export function AgentTeamRoleDetails(props: {
   readonly label: string;
   readonly role: AgentTeamRole;
   readonly onChange: (role: AgentTeamRole) => void;
+  /** Whom it may hand work to, below the instructions. */
+  readonly children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -94,6 +184,7 @@ export function AgentTeamRoleDetails(props: {
               onChange={(event) => props.onChange({ ...role, instructions: event.target.value })}
             />
           </div>
+          {props.children}
         </div>
       ) : null}
     </div>

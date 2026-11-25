@@ -66,6 +66,7 @@ import {
   latestProviderTurnForAttempt,
   resolveProjectProviderInstanceEnabled,
   SECRET_REQUEST_UNSAVED_NOTE,
+  type RoutingGroup,
 } from "@t3tools/contracts";
 import {
   getProviderOptionCurrentValue,
@@ -121,7 +122,7 @@ import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingEr
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
-import { agentTeamRole } from "@t3tools/shared/agentTeam";
+import { agentTeamHandsTo, agentTeamRole } from "@t3tools/shared/agentTeam";
 import * as AgentTeam from "../routing/AgentTeam.ts";
 import * as ThreadAssists from "../assist/ThreadAssists.ts";
 import { councilApplies } from "@t3tools/shared/council";
@@ -1364,6 +1365,38 @@ const make = Effect.gen(function* () {
     readonly memberTask?: (task: string) => string;
     readonly teamMember?: AgentTeamTaskMember;
   }
+  /** The member a delegated thread works as, when the user lets that member hand work on. */
+  const loadHandingMember = Effect.fn("OrchestratorMcpService.loadHandingMember")(function* (
+    thread: OrchestrationV2ThreadProjection["thread"],
+    groups: ReadonlyArray<RoutingGroup>,
+  ) {
+    if (!groups.some((group) => group.team === true && (group.memberFlows?.length ?? 0) > 0)) {
+      return null;
+    }
+    const leadThreadId = thread.lineage.parentThreadId;
+    if (leadThreadId === null || thread.lineage.relationshipToParent !== "subagent") return null;
+    const { subagents } = yield* threadManagement
+      .getThreadRecords(leadThreadId, ["subagents"])
+      .pipe(Effect.mapError(threadManagementFailure));
+    const member = subagents.find((task) => task.childThreadId === thread.id)?.teamMember;
+    const team = groups.find((group) => group.team === true && group.id === member?.teamId);
+    if (member?.name === undefined || team === undefined) return null;
+    const name = member.name.toLowerCase();
+    const index = [...team.members.keys()].find(
+      (at) => agentTeamRole(team, at)?.name.toLowerCase() === name,
+    );
+    if (index === undefined) return null;
+    const allowed = agentTeamHandsTo(team, index);
+    if (allowed.length === 0) return null;
+    if (member.handedBy !== undefined) {
+      return yield* failure(
+        "invalid_request",
+        `A teammate handed you this task for the agent team "${team.name}", and such a task is handed no further. Do the work yourself.`,
+      );
+    }
+    return { team, allowed, name: member.name };
+  });
+
   /**
    * A team lead delegates only to its members, with their saved options. Threads load only while
    * the environment has a team, so other delegations skip the read.
@@ -1385,16 +1418,22 @@ const make = Effect.gen(function* () {
       }
     }
     const { parent } = yield* loadThreadCaller(scope, "delegate_task");
-    const team = AgentTeam.activeAgentTeam({
+    const led = AgentTeam.activeAgentTeam({
       routing: parent.thread.routing,
       agentTeam: parent.thread.agentTeam,
       modelSelection: parent.thread.modelSelection,
       groups: settings.routingGroups,
     });
+    const handing =
+      led === null && input.councilLens === undefined
+        ? yield* loadHandingMember(parent.thread, settings.routingGroups)
+        : null;
+    const team: AgentTeam.ActiveTeam | null =
+      handing === null ? led : { kind: "saved", team: handing.team };
     if (input.member !== undefined && team?.kind !== "saved") {
       return yield* failure(
         "invalid_request",
-        "`member` names a member of the agent team this thread leads, and it leads none with named members. Omit member.",
+        "`member` names an agent team's member, and this thread may hand work to none. Omit member.",
       );
     }
     if (team === null) return { input };
@@ -1402,7 +1441,7 @@ const make = Effect.gen(function* () {
     if (input.routingGroupId !== undefined) {
       return yield* failure(
         "invalid_request",
-        `This thread leads the agent team "${teamName}"; omit routingGroupId${team.kind === "saved" ? " and target one of its members" : ""}.`,
+        `This thread ${handing === null ? "leads" : "works for"} the agent team "${teamName}"; omit routingGroupId${team.kind === "saved" ? " and target one of its members" : ""}.`,
       );
     }
     if (team.kind === "auto") {
@@ -1464,7 +1503,12 @@ const make = Effect.gen(function* () {
               },
       };
     }
-    const fitted = AgentTeam.agentTeamTarget(team.team, input.target, input.member);
+    const fitted = AgentTeam.agentTeamTarget(
+      team.team,
+      input.target,
+      input.member,
+      handing?.allowed,
+    );
     if (!fitted.ok) return yield* failure("invalid_request", fitted.message);
     const member = team.team.members[fitted.index];
     const memberName = agentTeamRole(team.team, fitted.index)?.name;
@@ -1474,15 +1518,17 @@ const make = Effect.gen(function* () {
         ? {}
         : {
             memberTask: (task: string) =>
-              AgentTeam.agentTeamMemberTask(team.team, fitted.index, task),
+              AgentTeam.agentTeamMemberTask(team.team, fitted.index, task, handing?.name),
             teamMember: {
               teamId: team.team.id,
               ...(memberName ? { name: memberName } : {}),
+              ...(handing === null ? {} : { handedBy: handing.name }),
               instanceId: member.instanceId,
               model: member.model,
             },
           };
-    const limit = team.team.maxParallel ?? 0;
+    // A member hands on one part at a time, so a team's work stays within twice its limit.
+    const limit = handing === null ? (team.team.maxParallel ?? 0) : 1;
     if (limit > 0 && input.councilLens === undefined) {
       const { subagents } = yield* threadManagement
         .getThreadRecords(parent.thread.id, ["subagents"])
@@ -1498,7 +1544,9 @@ const make = Effect.gen(function* () {
       if (out >= limit) {
         return yield* failure(
           "invalid_request",
-          `The agent team "${teamName}" runs at most ${limit} ${limit === 1 ? "task" : "tasks"} at once, and ${out} ${out === 1 ? "is" : "are"} still running. End your turn; a finished task's result wakes you to delegate the next.`,
+          handing !== null
+            ? `A member hands on one task at a time, and yours is still running. End your turn; its result wakes you.`
+            : `The agent team "${teamName}" runs at most ${limit} ${limit === 1 ? "task" : "tasks"} at once, and ${out} ${out === 1 ? "is" : "are"} still running. End your turn; a finished task's result wakes you to delegate the next.`,
         );
       }
     }

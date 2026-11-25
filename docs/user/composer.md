@@ -237,7 +237,9 @@ add lead guidance for this team, and limit how many tasks run at once.
 Give a worker a name to set it apart, and open **Add role & instructions** to say which tasks the
 lead should give it and the instructions it gets with each one. Members on the same model
 need names, such as a builder and a reviewer; one of them may stay unnamed. **Team guidance**
-reaches everyone: the lead, and each worker with its tasks.
+reaches everyone: the lead, and each worker with its tasks. A named worker can
+also hand parts of its tasks to teammates you check under **May hand parts of
+its tasks to**: one at a time, and the teammate hands them no further.
 **Save setup** keeps it as **Custom setup** and turns it on; **Save as…** keeps
 it as a named profile you can pick later, and **Use a single agent** turns the
 team off. The lead plans the work, delegates each task to a team model as a

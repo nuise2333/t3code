@@ -3647,6 +3647,155 @@ describe("OrchestratorMcpService provider resolution", () => {
     }),
   );
 
+  it.effect("a team member hands work on only where allowed, one at a time and no further", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      const claudeInstanceId = ProviderInstanceId.make("claude_fake");
+      const lead = { instanceId: codexInstanceId, model: "gpt-5.4" };
+      const member = { instanceId: claudeInstanceId, model: "claude-fake-1" };
+      const parent = parentProjection([], lead);
+      const leadThreadId = ThreadId.make("thread:team-lead");
+      const work = yield* Ref.make<{ readonly handedBy?: string; readonly out: boolean }>({
+        out: false,
+      });
+      const teamParent = {
+        ...parent,
+        thread: {
+          ...parent.thread,
+          lineage: {
+            parentThreadId: leadThreadId,
+            relationshipToParent: "subagent",
+            rootThreadId: leadThreadId,
+          },
+        },
+      } as unknown as OrchestrationV2ThreadProjection;
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          hasReceipt: () => Effect.succeed(false),
+          assertProviderInstanceEnabled: () => Effect.void,
+          isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+          getThreadRecords: (threadId) =>
+            Ref.get(work).pipe(
+              Effect.map(({ handedBy, out }) =>
+                threadId === leadThreadId
+                  ? ({
+                      ...childProjection,
+                      subagents: [
+                        {
+                          childThreadId: parentThreadId,
+                          teamMember: {
+                            teamId: "crew",
+                            name: "Builder",
+                            ...(handedBy === undefined ? {} : { handedBy }),
+                            ...lead,
+                          },
+                        },
+                      ],
+                    } as unknown as OrchestrationV2ThreadProjection)
+                  : threadId === parentThreadId
+                    ? ({
+                        ...teamParent,
+                        subagents: out
+                          ? [{ threadId: parentThreadId, origin: "app_owned", status: "running" }]
+                          : [],
+                      } as unknown as OrchestrationV2ThreadProjection)
+                    : childProjection,
+              ),
+            ),
+          dispatch: (command) =>
+            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+              Effect.andThen(Effect.fail(new Error("stop after dispatch") as never)),
+            ),
+        }),
+        ServerSettings.layerTest({
+          routingGroups: [
+            {
+              id: "crew",
+              name: "Crew",
+              members: [lead, member],
+              strategy: "order",
+              team: true,
+              memberRoles: ["Builder", "Reviewer"].map((name) => ({
+                name,
+                description: "",
+                instructions: "",
+              })),
+              memberFlows: [{ from: "Builder", to: "Reviewer" }],
+            },
+            { id: "cheap", name: "Cheap", members: [member], strategy: "order" },
+          ],
+        }),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: "gpt-5.4",
+          }),
+          providerSnapshot({
+            instanceId: claudeInstanceId,
+            driver: ProviderDriverKind.make("claudeAgent"),
+            model: "claude-fake-1",
+          }),
+        ]),
+        adapterRegistryLayer([codexInstanceId, claudeInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const layer = OrchestratorMcpService.layer.pipe(
+        Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+        Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+        Layer.provide(
+          Layer.mock(RoutingPolicy.RoutingPolicy)({
+            routeTeamMember: () => Effect.succeed(null),
+          }),
+        ),
+        Layer.provide(layerDependencies),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const refuse = (input: Parameters<typeof service.delegateTask>[1]) =>
+          service.delegateTask(scope, input).pipe(Effect.flip);
+        for (const input of [
+          { task: "Build.", member: "Builder" },
+          { task: "Build.", target: { model: "gpt-5.4" } },
+          { task: "Build.", routingGroupId: "cheap" },
+        ]) {
+          assert.equal((yield* refuse(input)).code, "invalid_request");
+        }
+        yield* Ref.set(work, { out: true });
+        assert.include(
+          (yield* refuse({ task: "Review.", member: "Reviewer" })).message,
+          "one task at a time",
+        );
+        yield* Ref.set(work, { out: false, handedBy: "Planner" });
+        assert.include(
+          (yield* refuse({ task: "Review.", member: "Reviewer" })).message,
+          "handed no further",
+        );
+        assert.lengthOf(yield* Ref.get(dispatched), 0);
+
+        yield* Ref.set(work, { out: false });
+        yield* refuse({ task: "Review.", member: "Reviewer" });
+        const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+          readonly modelSelection: unknown;
+          readonly teamMember?: unknown;
+        }>;
+        assert.deepInclude(commands[0]?.modelSelection, member);
+        assert.deepEqual(commands[0]?.teamMember, {
+          teamId: "crew",
+          name: "Reviewer",
+          handedBy: "Builder",
+          ...member,
+        });
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect(
     "a team lead falls back to another agent when a member is out of quota or unavailable",
     () =>
