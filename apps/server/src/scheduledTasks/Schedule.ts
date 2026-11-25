@@ -2,8 +2,6 @@ import { MIN_SCHEDULED_TASK_INTERVAL_MS, type ScheduledTaskSchedule } from "@t3t
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
-const MINUTE_MS = 60_000;
-
 function parseTimeOfDay(value: string): { hour: number; minute: number } | null {
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
   if (!match) return null;
@@ -70,13 +68,64 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
   );
 }
 
-const MISSED_FIXED_TIME_GRACE_MS = 10 * MINUTE_MS;
+const FIXED_TIME_CATCH_UP_HOURS = 24;
+
+/**
+ * The fixed-time slot a run due since `dueAt` stands for: the latest one reached. A machine that
+ * slept through several runs only that one. Null when the latest is over a day old.
+ */
+export function fixedTimeSlotToRun(
+  schedule: ScheduledTaskSchedule,
+  dueAt: DateTime.DateTime,
+  now: DateTime.DateTime,
+): DateTime.DateTime | null {
+  const nowMs = DateTime.toEpochMillis(now);
+  const windowMs = DateTime.toEpochMillis(
+    DateTime.subtract(now, { hours: FIXED_TIME_CATCH_UP_HOURS }),
+  );
+  const dueMs = DateTime.toEpochMillis(dueAt);
+  // Back by 1 ms, so a slot exactly at the window's edge counts.
+  let from = DateTime.subtract(now, { milliseconds: nowMs - windowMs + 1 });
+  let slot: DateTime.DateTime | null = dueMs >= windowMs ? dueAt : null;
+  for (;;) {
+    const next = nextScheduledRunAt(schedule, from);
+    if (next === null || DateTime.toEpochMillis(next) > nowMs) return slot;
+    if (DateTime.toEpochMillis(next) >= dueMs) slot = next;
+    from = next;
+  }
+}
 
 export function isMissedFixedTimeRun(
   schedule: ScheduledTaskSchedule,
   dueAt: DateTime.DateTime,
   now: DateTime.DateTime,
 ): boolean {
-  if (schedule.type !== "fixed_time") return false;
-  return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_FIXED_TIME_GRACE_MS;
+  return schedule.type === "fixed_time" && fixedTimeSlotToRun(schedule, dueAt, now) === null;
+}
+
+const LATE_RUN_MS = 10 * 60_000;
+
+/** The prompt of a run that starts late, with the time it stands for; "yesterday" depends on it. */
+export function lateRunPrompt(
+  prompt: string,
+  schedule: ScheduledTaskSchedule,
+  dueAt: DateTime.DateTime,
+  now: DateTime.Zoned,
+): string {
+  if (schedule.type !== "fixed_time") return prompt;
+  const slot = fixedTimeSlotToRun(schedule, dueAt, now);
+  if (slot === null) return prompt;
+  const nowMs = DateTime.toEpochMillis(now);
+  const slotMs = DateTime.toEpochMillis(slot);
+  const zonedSlot = DateTime.subtract(now, { milliseconds: nowMs - slotMs });
+  const sameDay = DateTime.formatIsoDate(zonedSlot) === DateTime.formatIsoDate(now);
+  if (sameDay && nowMs - slotMs <= LATE_RUN_MS) return prompt;
+  const scheduledFor = DateTime.formatIsoZoned(zonedSlot);
+  return [
+    prompt,
+    "",
+    "<t3_code_late_run>",
+    `This run was scheduled for ${scheduledFor} and starts late because T3 Code was not running then, such as while the computer slept. Read "today", "yesterday" and other relative dates from that time, not from now. The task's next run is separate: do not do its work too.`,
+    "</t3_code_late_run>",
+  ].join("\n");
 }

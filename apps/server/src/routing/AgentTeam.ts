@@ -8,7 +8,7 @@ import {
   type RoutingGroup,
   type ThreadAgentTeam,
 } from "@t3tools/contracts";
-import { agentTeamRole, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
+import { agentTeamHandsTo, agentTeamRole, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
 
 /** A saved team with its members, or an automatic team whose workers T3 picks per task. */
 export type ActiveTeam =
@@ -91,20 +91,25 @@ function modelLabel(member: ModelSelection): string {
   return `providerInstanceId \`${member.instanceId}\`, model \`${member.model}\`${options.length === 0 ? "" : ` (${options.join(", ")})`}`;
 }
 
+const handsToNames = (team: RoutingGroup, index: number) =>
+  agentTeamHandsTo(team, index).map((at) => `\`${agentTeamRole(team, at)?.name ?? ""}\``);
+
 function memberLabel(team: RoutingGroup, index: number): string {
   const member = team.members[index];
   if (member === undefined) return "";
   const role = agentTeamRole(team, index);
+  const handsTo = handsToNames(team, index).join(", ");
   return [
     "- ",
     role?.name ? `member \`${role.name}\`, ` : "",
     modelLabel(member),
     role?.description ? `: ${role.description}` : "",
+    handsTo === "" ? "" : ` (may hand parts to ${handsTo})`,
   ].join("");
 }
 
-const memberList = (team: RoutingGroup) =>
-  team.members.map((_member, index) => memberLabel(team, index));
+const memberList = (team: RoutingGroup, allowed?: ReadonlyArray<number>) =>
+  [...(allowed ?? team.members.keys())].map((index) => memberLabel(team, index));
 
 const escapeAttribute = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
@@ -137,16 +142,29 @@ export function agentTeamLeadPrompt(team: RoutingGroup, sharedGuidance: string):
 }
 
 /** A delegated task with who the member is and the team's guidance after it. */
-export function agentTeamMemberTask(team: RoutingGroup, index: number, task: string): string {
+export function agentTeamMemberTask(
+  team: RoutingGroup,
+  index: number,
+  task: string,
+  /** The teammate handing it over, which ends the line: it is handed no further. */
+  handedBy?: string,
+): string {
   const role = agentTeamRole(team, index);
   const shared = team.sharedGuidance?.trim() ?? "";
   if (role === null && shared === "") return task;
+  const handsTo = handedBy === undefined ? handsToNames(team, index) : [];
   const name = role?.name ?? "";
   return [
     task,
     "",
     `<t3_code_team_member team="${escapeAttribute(team.name)}"${name === "" ? "" : ` name="${escapeAttribute(name)}"`}>`,
-    `${name === "" ? "You are a member" : `You are "${name}"`} of the agent team "${team.name}". The team's lead gave you the task above; your final message goes back to it.`,
+    `${name === "" ? "You are a member" : `You are "${name}"`} of the agent team "${team.name}". ${handedBy === undefined ? "The team's lead" : `Your teammate "${handedBy}"`} gave you the task above; your final message goes back to it.`,
+    ...(handsTo.length === 0
+      ? []
+      : [
+          "",
+          `The user lets you hand a self-contained part of this task to ${handsTo.join(" or ")} with \`delegate_task\`: set \`member\` to the name and leave \`target\` out. One at a time, and only when that part is theirs; do the rest yourself. Check what comes back and put it in your final message.`,
+        ]),
     ...(role?.description ? ["", "Your role:", role.description] : []),
     ...(role?.instructions ? ["", "Your instructions from the user:", role.instructions] : []),
     ...(shared === "" ? [] : ["", "Team guidance from the user:", shared]),
@@ -166,17 +184,24 @@ export function agentTeamTarget(
   team: RoutingGroup,
   target: OrchestratorMcpTarget | undefined,
   memberName?: string,
+  /** The places a member may hand work to; a lead may pick anyone. */
+  allowed?: ReadonlyArray<number>,
 ): AgentTeamTargetResult {
-  const members = memberList(team).join("\n");
+  const members = memberList(team, allowed).join("\n");
+  const caller =
+    allowed === undefined
+      ? `This thread leads the agent team "${team.name}"`
+      : `This thread works for the agent team "${team.name}"`;
   const wanted = memberName?.trim().toLowerCase();
   if (target?.environmentId !== undefined) {
     return {
       ok: false,
-      message: `This thread leads the agent team "${team.name}", whose members run here. Omit target.environmentId and pick a member:\n${members}`,
+      message: `${caller}, whose members run here. Omit target.environmentId and pick a member:\n${members}`,
     };
   }
   const candidates = [...team.members.entries()].filter(
     ([index, member]) =>
+      (allowed === undefined || allowed.includes(index)) &&
       (wanted === undefined || agentTeamRole(team, index)?.name.toLowerCase() === wanted) &&
       (target?.model === undefined || member.model === target.model) &&
       (target?.providerInstanceId === undefined || member.instanceId === target.providerInstanceId),
@@ -193,7 +218,7 @@ export function agentTeamTarget(
   if (match === undefined) {
     return {
       ok: false,
-      message: `This thread leads the agent team "${team.name}" and delegates only to its members. Set ${hasNames(team) ? "`member` to a name below, or " : ""}target.providerInstanceId and target.model to one of them:\n${members}`,
+      message: `${caller} and delegates only to ${allowed === undefined ? "its members" : "the teammates below"}. Set ${hasNames(team) ? "`member` to a name below, or " : ""}target.providerInstanceId and target.model to one of them:\n${members}`,
     };
   }
   const [index, member] = match;

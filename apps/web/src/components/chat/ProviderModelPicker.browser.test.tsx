@@ -533,6 +533,7 @@ it("edits the team setup inside the picker without closing it", async () => {
             currentSelection={{ instanceId: codex!.instanceId, model: "alpha" }}
             sharedGuidance=""
             rolesSupported
+            flowsSupported
             groupIds={[]}
             onDone={() => {}}
             onSaveTeams={onSaveTeams}
@@ -566,6 +567,14 @@ it("edits the team setup inside the picker without closing it", async () => {
   await setup.getByRole("textbox", { name: "Worker 2 name" }).fill("Reviewer");
   await setup.getByRole("button", { name: "Worker 2 role" }).click();
   await setup.getByRole("textbox", { name: /Give it tasks about/ }).fill("Reviews diffs");
+  // A flow follows its members through a rename.
+  await setup.getByRole("textbox", { name: "Worker 1 name" }).fill("Coder");
+  await setup.getByRole("button", { name: "Worker 1 role" }).click();
+  await setup
+    .getByRole("group", { name: "Worker 1 may hand parts to" })
+    .getByRole("checkbox", { name: "Reviewer" })
+    .click();
+  await setup.getByRole("textbox", { name: "Worker 1 name" }).fill("Builder");
   await setup.getByRole("button", { name: "Save setup" }).click();
   expect(onApply).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -581,10 +590,11 @@ it("edits the team setup inside the picker without closing it", async () => {
       ],
       memberRoles: [
         { name: "", description: "", instructions: "" },
-        { name: "", description: "", instructions: "" },
+        { name: "Builder", description: "", instructions: "" },
         { name: "Reviewer", description: "Reviews diffs", instructions: "" },
       ],
       sharedGuidance: "Answer in Chinese",
+      memberFlows: [{ from: "Builder", to: "Reviewer" }],
     }),
   );
 });

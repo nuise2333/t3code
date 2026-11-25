@@ -56,8 +56,30 @@ export function agentTeamRole(
   return trimmed.name || trimmed.description || trimmed.instructions ? trimmed : null;
 }
 
+/** The places of the teammates a named member may hand part of its task to. */
+export function agentTeamHandsTo(
+  team: Pick<RoutingGroup, "members" | "memberRoles" | "memberFlows">,
+  index: number,
+): ReadonlyArray<number> {
+  const nameAt = (at: number) => agentTeamRole(team, at)?.name.toLowerCase() ?? "";
+  const from = nameAt(index);
+  if (from === "" || !team.memberFlows) return [];
+  const names = new Set(
+    team.memberFlows.flatMap((flow) =>
+      flow.from.trim().toLowerCase() === from ? [flow.to.trim().toLowerCase()] : [],
+    ),
+  );
+  return [...team.members.keys()].filter((at) => at !== index && names.has(nameAt(at)));
+}
+
 const memberKey = (member: Pick<ModelSelection, "instanceId" | "model">) =>
   `${member.instanceId}\u0000${member.model}`;
+
+const optionsKey = (member: ModelSelection) =>
+  `${memberKey(member)}\u0000${(member.options ?? [])
+    .map((option) => `${option.id}=${String(option.value)}`)
+    .sort()
+    .join()}`;
 
 /** Why a lead could not pick each member apart, or null. Names are matched without case. */
 export function agentTeamMembersProblem(
@@ -90,11 +112,6 @@ export function realignMemberRoles(
 ): RoutingGroup["memberRoles"] {
   const roles = saved.memberRoles;
   if (roles === undefined || roles.length === 0) return roles;
-  const optionsKey = (member: ModelSelection) =>
-    `${memberKey(member)}\u0000${(member.options ?? [])
-      .map((option) => `${option.id}=${String(option.value)}`)
-      .sort()
-      .join()}`;
   const left = new Set(saved.members.keys());
   const placed = new Map<number, number>();
   const place = (
@@ -126,5 +143,42 @@ export function realignMemberRoles(
   }
   return members.map(
     (_member, to) => roles[placed.get(to) ?? -1] ?? { name: "", description: "", instructions: "" },
+  );
+}
+
+/**
+ * A team's flows after a client that doesn't know flows saved it: a flow stays only while both
+ * names stay on the models and options they were on, so none passes to another member.
+ */
+export function keptMemberFlows(
+  saved: Pick<RoutingGroup, "members" | "memberRoles" | "memberFlows">,
+  next: Pick<RoutingGroup, "members" | "memberRoles">,
+): RoutingGroup["memberFlows"] {
+  const keys = (team: Pick<RoutingGroup, "members" | "memberRoles">) =>
+    new Map(
+      team.members.map((member, at) => [
+        agentTeamRole(team, at)?.name.toLowerCase() ?? "",
+        optionsKey(member),
+      ]),
+    );
+  const before = keys(saved);
+  const after = keys(next);
+  const kept = (name: string) => {
+    const key = name.trim().toLowerCase();
+    return before.get(key) !== undefined && before.get(key) === after.get(key);
+  };
+  return saved.memberFlows?.filter((flow) => kept(flow.from) && kept(flow.to));
+}
+
+/** Who the members are and which hand work to which; equal while neither was edited. */
+export function agentTeamFlowsKey(
+  team: Pick<RoutingGroup, "members" | "memberRoles" | "memberFlows">,
+): string {
+  return JSON.stringify(
+    team.members.map((member, at) => [
+      optionsKey(member),
+      agentTeamRole(team, at)?.name ?? "",
+      agentTeamHandsTo(team, at),
+    ]),
   );
 }

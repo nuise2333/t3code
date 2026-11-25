@@ -174,7 +174,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   task: OrchestratorMcpPrompt,
   target: Schema.optional(OrchestratorMcpTarget),
   member: Schema.optional(TrimmedNonEmptyString).annotate({
-    description: "Agent team leads only: the member's name, in place of a target model.",
+    description: "Agent teams only: the member's name, in place of a target model.",
   }),
   routingGroupId: Schema.optional(RoutingGroupId).annotate({
     description:

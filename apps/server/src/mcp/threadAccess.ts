@@ -222,8 +222,10 @@ export const withReviewDelegationLeft = <A, E, R>(
   parentThreadId: ThreadId,
   counted: boolean,
   record: Effect.Effect<A, E, R>,
+  /** Another limit on the same thread's delegations, held with the count. */
+  check?: Effect.Effect<void, OrchestratorMcpFailure>,
 ): Effect.Effect<A, E | OrchestratorMcpFailure, R> =>
-  counted
+  counted || check !== undefined
     ? Effect.suspend(() => {
         const held = reviewDelegationGates.get(parentThreadId) ?? {
           gate: Semaphore.makeUnsafe(1),
@@ -233,7 +235,10 @@ export const withReviewDelegationLeft = <A, E, R>(
         held.users++;
         return held.gate
           .withPermit(
-            assertReviewDelegationLeft(threads, parentThreadId).pipe(Effect.andThen(record)),
+            (counted ? assertReviewDelegationLeft(threads, parentThreadId) : Effect.void).pipe(
+              Effect.andThen(check ?? Effect.void),
+              Effect.andThen(record),
+            ),
           )
           .pipe(
             Effect.ensuring(

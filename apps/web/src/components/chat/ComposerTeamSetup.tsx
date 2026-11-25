@@ -39,7 +39,15 @@ import { rankModelPickerSearch } from "@t3tools/client-runtime/model-search";
 import { agentTeamMembersProblem, agentTeamRole } from "@t3tools/shared/agentTeam";
 import { createModelSelection } from "@t3tools/shared/model";
 import { selectsPlanAgent } from "../../modelSelection";
-import { AgentTeamRoleDetails, AgentTeamRoleName, EMPTY_TEAM_ROLE } from "./AgentTeamRoleFields";
+import {
+  AgentTeamHandsTo,
+  AgentTeamRoleDetails,
+  AgentTeamRoleName,
+  EMPTY_TEAM_ROLE,
+  namedTeamFlows,
+  type TeamRowFlow,
+  teamRowFlows,
+} from "./AgentTeamRoleFields";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { TraitsPicker } from "./TraitsPicker";
 
@@ -54,6 +62,7 @@ interface SetupWorker {
   readonly role: AgentTeamRole;
 }
 
+const ARCHITECT_KEY = -1;
 let nextWorkerKey = 0;
 const newWorker = (
   selection: ModelSelection | null = null,
@@ -63,6 +72,7 @@ const newWorker = (
 interface Setup {
   readonly architect: ModelSelection | null;
   readonly architectRole: AgentTeamRole;
+  readonly flows: ReadonlyArray<TeamRowFlow>;
   readonly workers: ReadonlyArray<SetupWorker>;
   readonly guidance: string;
   readonly sharedGuidance: string;
@@ -75,12 +85,14 @@ const keyOf = (selection: Pick<ModelSelection, "instanceId" | "model">) =>
 
 function setupOf(team: RoutingGroup | undefined, fallbackLead: ModelSelection | null): Setup {
   const [architect, ...workers] = team?.members ?? [];
+  const rows = team
+    ? workers.map((selection, index) => newWorker(selection, team.memberRoles?.[index + 1]))
+    : [newWorker()];
   return {
     architect: architect ?? fallbackLead,
     architectRole: team?.memberRoles?.[0] ?? EMPTY_TEAM_ROLE,
-    workers: team
-      ? workers.map((selection, index) => newWorker(selection, team.memberRoles?.[index + 1]))
-      : [newWorker()],
+    workers: rows,
+    flows: team ? teamRowFlows(team, [ARCHITECT_KEY, ...rows.map((row) => row.key)]) : [],
     guidance: team?.leadGuidance ?? "",
     sharedGuidance: team?.sharedGuidance ?? "",
     unlimited: (team?.maxParallel ?? 0) === 0,
@@ -294,6 +306,8 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   readonly sharedGuidance: string;
   /** The server keeps member roles and team guidance. */
   readonly rolesSupported: boolean;
+  /** The server keeps which members may hand work on. */
+  readonly flowsSupported: boolean;
   /** Every saved team and routing group, which share one limit. */
   readonly groupIds: ReadonlyArray<string>;
   /** After Apply or Use a single agent, such as closing the picker. */
@@ -339,6 +353,20 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
       : [{ selection: setup.architect, role: setup.architectRole }]),
     ...workers,
   ];
+  const roleRows = [
+    { key: ARCHITECT_KEY, role: setup.architectRole },
+    ...setup.workers.filter((worker) => worker.selection !== null),
+  ];
+  const handsTo = (label: string, row: (typeof roleRows)[number]) =>
+    props.flowsSupported ? (
+      <AgentTeamHandsTo
+        label={label}
+        row={row}
+        rows={roleRows}
+        flows={setup.flows}
+        onChange={(flows) => setSetup((current) => ({ ...current, flows }))}
+      />
+    ) : null;
   const setWorker = (index: number, patch: Partial<SetupWorker>) =>
     setSetup((current) => ({
       ...current,
@@ -358,6 +386,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
           sharedGuidance: setup.sharedGuidance.trim(),
         }
       : {}),
+    ...(props.flowsSupported ? { memberFlows: namedTeamFlows(roleRows, setup.flows) } : {}),
     maxParallel: setup.unlimited ? 0 : Math.max(1, Math.min(32, Math.round(setup.parallel))),
     leadGuidance: setup.guidance.trim(),
   });
@@ -557,7 +586,9 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 label="Architect"
                 role={setup.architectRole}
                 onChange={(architectRole) => setSetup((current) => ({ ...current, architectRole }))}
-              />
+              >
+                {handsTo("Architect", { key: ARCHITECT_KEY, role: setup.architectRole })}
+              </AgentTeamRoleDetails>
             </>
           ) : null}
           <div className="flex items-center gap-1.5">
@@ -652,7 +683,9 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                   label={`Worker ${index + 1}`}
                   role={worker.role}
                   onChange={(role) => setWorker(index, { role })}
-                />
+                >
+                  {handsTo(`Worker ${index + 1}`, worker)}
+                </AgentTeamRoleDetails>
               ) : null}
             </div>
           ))}

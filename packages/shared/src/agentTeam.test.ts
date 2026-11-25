@@ -1,7 +1,7 @@
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { agentTeamMembersProblem, realignMemberRoles } from "./agentTeam.ts";
+import { agentTeamMembersProblem, keptMemberFlows, realignMemberRoles } from "./agentTeam.ts";
 
 const member = (model: string) => ({ instanceId: ProviderInstanceId.make("codex"), model });
 const role = (name: string) => ({ name, description: "", instructions: "" });
@@ -56,5 +56,37 @@ describe("agent team roles", () => {
     expect(names([at("high"), at("low")])).toEqual(["High", "Low"]);
     expect(names([at("low"), at("max")])).toEqual(["Low", "High"]);
     expect(names([member("c"), at("high")])).toEqual(["Low", "High"]);
+  });
+
+  it("never lets a flow change hands when a client that doesn't know flows renames members", () => {
+    const members = [member("a"), member("b"), member("c")];
+    const saved = {
+      members,
+      memberRoles: [role("A"), role("B"), role("C")],
+      memberFlows: [{ from: "A", to: "B" }],
+    };
+    const after = (names: ReadonlyArray<string>, next = members) =>
+      keptMemberFlows(saved, { members: next, memberRoles: names.map(role) });
+    expect(after(["A", "B", "C"])).toEqual([{ from: "A", to: "B" }]);
+    expect(after(["A", "Reviewer", "C"])).toEqual([]);
+    // The old name now belongs to someone else.
+    expect(after(["A", "X", "B"])).toEqual([]);
+    expect(after(["B", "A", "C"], [members[1]!, members[0]!, members[2]!])).toEqual([
+      { from: "A", to: "B" },
+    ]);
+    // Two members on one model, swapped and renamed in one save.
+    const twins = { ...saved, members: [member("a"), member("b"), member("b")] };
+    expect(
+      keptMemberFlows(twins, { members: twins.members, memberRoles: ["A", "C2", "B2"].map(role) }),
+    ).toEqual([]);
+    const at = (value: string) => ({ ...member("b"), options: [{ id: "effort", value }] });
+    const efforts = { ...saved, members: [member("a"), at("low"), at("high")] };
+    expect(
+      keptMemberFlows(efforts, {
+        members: [member("a"), at("high"), at("low")],
+        memberRoles: saved.memberRoles,
+      }),
+    ).toEqual([]);
+    expect(after(["A", "C"], [members[0]!, members[2]!])).toEqual([]);
   });
 });

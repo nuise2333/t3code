@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { ProviderInstanceId, type RouteDecision, type RoutingGroup } from "@t3tools/contracts";
+import { agentTeamHandsTo } from "@t3tools/shared/agentTeam";
 
 import {
   activeAgentTeam,
@@ -211,6 +212,32 @@ describe("named members", () => {
     expect(task).toContain("Answer in Chinese.");
     expect(task).not.toContain("Checks diffs");
     expect(agentTeamMemberTask(team, 1, "Build it")).toBe("Build it");
+  });
+
+  it("lets a member hand work only where the user drew it, and no further", () => {
+    const flows = {
+      ...named,
+      memberFlows: [
+        { from: "builder", to: "Reviewer" },
+        { from: "Builder", to: "Gone" },
+      ],
+    };
+    expect(agentTeamHandsTo(flows, 1)).toEqual([2]);
+    expect(agentTeamHandsTo(flows, 2)).toEqual([]);
+    expect(agentTeamLeadPrompt(flows, "")).toContain("(may hand parts to `Reviewer`)");
+    expect(agentTeamMemberTask(flows, 1, "Build it")).toContain("to `Reviewer` with");
+    const handed = agentTeamMemberTask(flows, 1, "Build it", "Planner");
+    expect(handed).toContain('Your teammate "Planner" gave you');
+    expect(handed).not.toContain("delegate_task");
+    const allowed = agentTeamHandsTo(flows, 1);
+    expect(agentTeamTarget(flows, undefined, "Reviewer", allowed)).toMatchObject({ index: 2 });
+    for (const result of [
+      agentTeamTarget(flows, undefined, "Builder", allowed),
+      agentTeamTarget(flows, { model: "opus-fake" }, undefined, allowed),
+    ]) {
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message).not.toContain("opus-fake");
+    }
   });
 });
 

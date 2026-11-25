@@ -517,6 +517,7 @@ export function ComposerControlsBar(props: {
             currentSelection={selectedModelSelection}
             sharedGuidance={serverConfig?.settings.agentTeamLeadGuidance ?? ""}
             rolesSupported={serverConfig?.environment.capabilities.agentTeamRoles === true}
+            flowsSupported={serverConfig?.environment.capabilities.agentTeamFlows === true}
             groupIds={savedGroups.map((group) => group.id)}
             disabledReason={teamDisabledReason}
             onDone={closeModelPicker}
