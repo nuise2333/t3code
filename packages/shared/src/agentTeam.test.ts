@@ -1,7 +1,7 @@
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { agentTeamMembersProblem, realignMemberFlows, realignMemberRoles } from "./agentTeam.ts";
+import { agentTeamMembersProblem, keptMemberFlows, realignMemberRoles } from "./agentTeam.ts";
 
 const member = (model: string) => ({ instanceId: ProviderInstanceId.make("codex"), model });
 const role = (name: string) => ({ name, description: "", instructions: "" });
@@ -66,14 +66,19 @@ describe("agent team roles", () => {
       memberFlows: [{ from: "A", to: "B" }],
     };
     const after = (names: ReadonlyArray<string>, next = members) =>
-      realignMemberFlows(saved, { members: next, memberRoles: names.map(role) });
+      keptMemberFlows(saved, { members: next, memberRoles: names.map(role) });
     expect(after(["A", "B", "C"])).toEqual([{ from: "A", to: "B" }]);
-    expect(after(["A", "Reviewer", "C"])).toEqual([{ from: "A", to: "Reviewer" }]);
+    expect(after(["A", "Reviewer", "C"])).toEqual([]);
     // The old name now belongs to someone else.
     expect(after(["A", "X", "B"])).toEqual([]);
     expect(after(["B", "A", "C"], [members[1]!, members[0]!, members[2]!])).toEqual([
       { from: "A", to: "B" },
     ]);
+    // Two members on one model, swapped and renamed in one save.
+    const twins = { ...saved, members: [member("a"), member("b"), member("b")] };
+    expect(
+      keptMemberFlows(twins, { members: twins.members, memberRoles: ["A", "C2", "B2"].map(role) }),
+    ).toEqual([]);
     expect(after(["A", "C"], [members[0]!, members[2]!])).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { agentTeamFlowsKey } from "@t3tools/shared/agentTeam";
 import { assert, describe, it } from "@effect/vitest";
 import {
   CommandId,
@@ -1502,6 +1503,11 @@ describe("OrchestratorMcpService provider resolution", () => {
         id: parentThreadId,
         projectId,
         title: "MCP parent",
+        lineage: {
+          parentThreadId: null,
+          relationshipToParent: null,
+          rootThreadId: parentThreadId,
+        },
         createdBy: "user",
         creationSource: "web",
         modelSelection,
@@ -3655,11 +3661,21 @@ describe("OrchestratorMcpService provider resolution", () => {
       const member = { instanceId: claudeInstanceId, model: "claude-fake-1" };
       const parent = parentProjection([], lead);
       const leadThreadId = ThreadId.make("thread:team-lead");
+      const crew = {
+        members: [lead, member],
+        memberRoles: ["Builder", "Reviewer"].map((name) => ({
+          name,
+          description: "",
+          instructions: "",
+        })),
+        memberFlows: [{ from: "Builder", to: "Reviewer" }],
+      };
+      const flowsKey = agentTeamFlowsKey(crew);
       const work = yield* Ref.make<{
         readonly handedBy?: string;
-        readonly handsTo?: ReadonlyArray<string>;
+        readonly flowsKey?: string;
         readonly out: boolean;
-      }>({ out: false, handsTo: ["Reviewer"] });
+      }>({ out: false, flowsKey });
       const teamParent = {
         ...parent,
         thread: {
@@ -3680,7 +3696,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           isProviderInstanceEnabledForProject: () => Effect.succeed(true),
           getThreadRecords: (threadId) =>
             Ref.get(work).pipe(
-              Effect.map(({ handedBy, handsTo, out }) =>
+              Effect.map(({ handedBy, flowsKey, out }) =>
                 threadId === leadThreadId
                   ? ({
                       ...childProjection,
@@ -3691,7 +3707,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                             teamId: "crew",
                             name: "Builder",
                             ...(handedBy === undefined ? {} : { handedBy }),
-                            ...(handsTo === undefined ? {} : { handsTo }),
+                            ...(flowsKey === undefined ? {} : { flowsKey }),
                             ...lead,
                           },
                         },
@@ -3717,15 +3733,9 @@ describe("OrchestratorMcpService provider resolution", () => {
             {
               id: "crew",
               name: "Crew",
-              members: [lead, member],
+              ...crew,
               strategy: "order",
               team: true,
-              memberRoles: ["Builder", "Reviewer"].map((name) => ({
-                name,
-                description: "",
-                instructions: "",
-              })),
-              memberFlows: [{ from: "Builder", to: "Reviewer" }],
             },
             { id: "cheap", name: "Cheap", members: [member], strategy: "order" },
           ],
@@ -3770,7 +3780,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         ]) {
           assert.equal((yield* refuse(input)).code, "invalid_request");
         }
-        yield* Ref.set(work, { out: true, handsTo: ["Reviewer"] });
+        yield* Ref.set(work, { out: true, flowsKey });
         assert.include(
           (yield* refuse({ task: "Review.", member: "Reviewer" })).message,
           "one task at a time",
@@ -3783,15 +3793,15 @@ describe("OrchestratorMcpService provider resolution", () => {
         ]) {
           assert.include((yield* refuse(input)).message, "handed no further");
         }
-        // Flows its name gained after the task began are not its own.
-        yield* Ref.set(work, { out: false, handsTo: ["Writer"] });
+        // Names can pass to another member, so an edited team lends nothing.
+        yield* Ref.set(work, { out: false, flowsKey: "an older team" });
         assert.include(
           (yield* refuse({ task: "Review.", member: "Reviewer" })).message,
-          "no longer lets you",
+          "changed since",
         );
         assert.lengthOf(yield* Ref.get(dispatched), 0);
 
-        yield* Ref.set(work, { out: false, handsTo: ["Reviewer"] });
+        yield* Ref.set(work, { out: false, flowsKey });
         yield* refuse({ task: "Review.", member: "Reviewer" });
         const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
           readonly modelSelection: unknown;

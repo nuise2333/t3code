@@ -122,7 +122,7 @@ import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingEr
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
-import { agentTeamHandsTo, agentTeamRole } from "@t3tools/shared/agentTeam";
+import { agentTeamFlowsKey, agentTeamHandsTo, agentTeamRole } from "@t3tools/shared/agentTeam";
 import * as AgentTeam from "../routing/AgentTeam.ts";
 import * as ThreadAssists from "../assist/ThreadAssists.ts";
 import { councilApplies } from "@t3tools/shared/council";
@@ -1372,7 +1372,6 @@ const make = Effect.gen(function* () {
     thread: OrchestrationV2ThreadProjection["thread"],
     groups: ReadonlyArray<RoutingGroup>,
   ) {
-    if (!groups.some((group) => group.team === true)) return null;
     const leadThreadId = thread.lineage.parentThreadId;
     if (leadThreadId === null || thread.lineage.relationshipToParent !== "subagent") return null;
     const { subagents } = yield* threadManagement
@@ -1391,19 +1390,15 @@ const make = Effect.gen(function* () {
     const index = [...team.members.keys()].find(
       (at) => agentTeamRole(team, at)?.name.toLowerCase() === name,
     );
-    // Only what was allowed when the task began: a later rename must not lend it another's flows.
-    const given = new Set(member.handsTo ?? []);
+    if (member.flowsKey === undefined) return null;
     const allowed =
-      index === undefined
+      index === undefined || member.flowsKey !== agentTeamFlowsKey(team)
         ? []
-        : agentTeamHandsTo(team, index).filter((at) =>
-            given.has(agentTeamRole(team, at)?.name ?? ""),
-          );
-    if (given.size === 0) return null;
+        : agentTeamHandsTo(team, index);
     if (allowed.length === 0) {
       return yield* failure(
         "invalid_request",
-        `The agent team "${team.name}" no longer lets you hand work on. Do the work yourself.`,
+        `The agent team "${team.name}" changed since you got this task, so you can't hand work on. Do it yourself.`,
       );
     }
     return { team, allowed, name: member.name };
@@ -1524,9 +1519,6 @@ const make = Effect.gen(function* () {
     if (!fitted.ok) return yield* failure("invalid_request", fitted.message);
     const member = team.team.members[fitted.index];
     const memberName = agentTeamRole(team.team, fitted.index)?.name;
-    const handsTo = agentTeamHandsTo(team.team, fitted.index).map(
-      (at) => agentTeamRole(team.team, at)?.name ?? "",
-    );
     // A Council reviewer carries its lens instead of a member's role.
     const asMember =
       member === undefined || input.councilLens !== undefined
@@ -1539,9 +1531,9 @@ const make = Effect.gen(function* () {
               ...(memberName ? { name: memberName } : {}),
               ...(handing !== null
                 ? { handedBy: handing.name }
-                : handsTo.length === 0
+                : agentTeamHandsTo(team.team, fitted.index).length === 0
                   ? {}
-                  : { handsTo }),
+                  : { flowsKey: agentTeamFlowsKey(team.team) }),
               instanceId: member.instanceId,
               model: member.model,
             },
@@ -3160,7 +3152,11 @@ const make = Effect.gen(function* () {
           input.role === "review" && !isRetryOfAcceptedDelegation,
           dispatchTask,
           // A retry of an accepted task finds that task, and takes no second place.
-          isRetryOfAcceptedDelegation ? undefined : checkLimit,
+          checkLimit === undefined
+            ? undefined
+            : threadManagement
+                .hasReceipt(commandId)
+                .pipe(Effect.flatMap((accepted) => (accepted ? Effect.void : checkLimit))),
         );
         const taskEvent = result.storedEvents.find(
           (stored) =>

@@ -27,7 +27,7 @@ import {
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { realignMemberFlows, realignMemberRoles } from "./agentTeam.ts";
+import { keptMemberFlows, realignMemberRoles } from "./agentTeam.ts";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
 import { createModelSelection, readCustomModelEntries } from "./model.ts";
@@ -420,7 +420,7 @@ function keepRoutingGroupKeys(
             memberFlows:
               group.memberRoles === undefined
                 ? saved.memberFlows
-                : (realignMemberFlows(saved, group) ?? []),
+                : (keptMemberFlows(saved, group) ?? []),
           }
         : {}),
       ...(group.sharedGuidance === undefined && saved.sharedGuidance !== undefined
