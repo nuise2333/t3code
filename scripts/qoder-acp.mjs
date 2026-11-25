@@ -15,6 +15,7 @@ import {
   launchArgs,
   launchContextWindow,
   modelState,
+  planningPermission,
   planPermission,
 } from "./lib/qoder-acp-config.mjs";
 
@@ -341,7 +342,29 @@ function publishConfig(session) {
 const currentOption = (result, id) =>
   result?.configOptions?.find((option) => option.id === id)?.currentValue;
 
-async function openSession(method, params) {
+// One open at a time per session, after the process that had it is gone.
+const opening = new Map();
+function openSession(method, params) {
+  const key = method === "session/load" || method === "session/resume" ? params.sessionId : null;
+  if (key === null) return startSession(method, params);
+  const opened = (opening.get(key) ?? Promise.resolve()).then(async () => {
+    const existing = sessions.get(key);
+    if (existing !== undefined) {
+      sessions.delete(key);
+      if (existing.runtime === control?.runtime) control = undefined;
+      await existing.runtime.stop();
+    }
+    return startSession(method, params);
+  });
+  const settled = opened.catch(() => {});
+  opening.set(key, settled);
+  void settled.then(() => {
+    if (opening.get(key) === settled) opening.delete(key);
+  });
+  return opened;
+}
+
+async function startSession(method, params) {
   const runtime = await runtimeForNewSession();
   let result;
   let catalog;
@@ -401,8 +424,9 @@ async function relaunch(session, wanted) {
   const previous = session.runtime;
   if (previous === control?.runtime) control = undefined;
   await previous.stop();
-  session.runtime = await startRuntime(launchArgs(wanted));
-  const result = await session.runtime.request("session/resume", {
+  const runtime = await startRuntime(launchArgs(wanted));
+  // Until the resume succeeds the session keeps its exited runtime, so the next prompt retries.
+  const resumed = runtime.request("session/resume", {
     sessionId: session.id,
     cwd: session.cwd,
     mcpServers: session.mcpServers,
@@ -410,6 +434,15 @@ async function relaunch(session, wanted) {
       ? { additionalDirectories: session.additionalDirectories }
       : {}),
   });
+  let result;
+  try {
+    result = await resumed;
+  } catch (error) {
+    void runtime.stop();
+    throw error;
+  }
+  runtime.claimed = true;
+  session.runtime = runtime;
   session.launched = {
     ...wanted,
     model: currentOption(result, "model") ?? wanted.model,
@@ -458,14 +491,18 @@ async function applySelections(session) {
   await applyPermissionMode(session);
 }
 
-// Setting a mode ends plan mode in the runtime, so it waits for the plan to be approved.
-async function applyPermissionMode(session) {
-  if (session.launched.plan || session.launched.permissionMode === session.permissionMode) return;
-  await session.runtime.request("session/set_mode", {
-    sessionId: session.id,
-    modeId: session.permissionMode,
+// Setting a mode ends plan mode in the runtime, so it waits for the plan to be approved. Changes run
+// one after another, so the last choice is the one in force however the answers interleave.
+function applyPermissionMode(session) {
+  const applied = (session.modeChange ?? Promise.resolve()).then(async () => {
+    const mode = session.permissionMode;
+    if (session.launched.plan || session.launched.permissionMode === mode) return;
+    session.launched.permissionMode = undefined;
+    await session.runtime.request("session/set_mode", { sessionId: session.id, modeId: mode });
+    session.launched.permissionMode = mode;
   });
-  session.launched.permissionMode = session.permissionMode;
+  session.modeChange = applied.catch(() => {});
+  return applied;
 }
 
 async function setConfigOption({ sessionId, configId, value }) {
@@ -490,7 +527,7 @@ async function setConfigOption({ sessionId, configId, value }) {
 
 async function prompt(params) {
   const session = requireSession(params.sessionId);
-  session.cancelled = false;
+  const cancels = session.cancels ?? 0;
   // Prompts can queue; only the first one finds an idle runtime to reconfigure.
   if (!session.prompting) {
     session.applying = applySelections(session);
@@ -498,7 +535,7 @@ async function prompt(params) {
   session.prompting = (session.prompting ?? 0) + 1;
   try {
     await session.applying;
-    if (session.cancelled) return { stopReason: "cancelled" };
+    if ((session.cancels ?? 0) !== cancels) return { stopReason: "cancelled" };
     return await session.runtime.request("session/prompt", params);
   } finally {
     session.prompting -= 1;
@@ -556,7 +593,8 @@ async function handleClientRequest({ method, params = {} }) {
 
 function handleClientNotification({ method, params = {} }) {
   const session = sessions.get(params.sessionId);
-  if (method === "session/cancel" && session !== undefined) session.cancelled = true;
+  if (method === "session/cancel" && session !== undefined)
+    session.cancels = (session.cancels ?? 0) + 1;
   (session?.runtime ?? control?.runtime)?.write({ method, params });
 }
 
@@ -601,7 +639,15 @@ async function handleRuntimeRequest(runtime, { method, params }) {
   const isPlanExit =
     method === "session/request_permission" &&
     params.toolCall?._meta?.qoder?.toolName === "ExitPlanMode";
-  if (session === undefined || !isPlanExit) return requestClient(method, params, runtime);
+  if (session === undefined) return requestClient(method, params, runtime);
+  if (!isPlanExit) {
+    if (method !== "session/request_permission" || !session.launched.plan) {
+      return requestClient(method, params, runtime);
+    }
+    // While planning, an edit is refused and nothing else is approved without the user.
+    const guarded = planningPermission(params);
+    return guarded.outcome ?? requestClient(method, guarded.request, runtime);
+  }
   const { request, plan } = planPermission(params, session.permissionMode);
   if (plan !== undefined) {
     writeClient({

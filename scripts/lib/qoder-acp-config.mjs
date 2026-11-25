@@ -180,7 +180,12 @@ export function launchArgs({ model, effort, contextWindow, plan }) {
     ...(effort ? ["--reasoning-effort", effort] : []),
     ...(contextWindow ? ["--context-window", String(contextWindow)] : []),
     // A --permission-mode flag would override the plan default.
-    ...(plan ? ["--settings", JSON.stringify({ general: { defaultPermissionMode: "plan" } })] : []),
+    ...(plan
+      ? [
+          "--settings",
+          JSON.stringify({ general: { defaultPermissionMode: "plan", plan: { enabled: true } } }),
+        ]
+      : []),
   ];
 }
 
@@ -205,6 +210,30 @@ export function planPermission(params, permissionMode) {
         { optionId: approve, name: "Approve plan", kind: "allow_once" },
         ...params.options.filter((option) => option.kind.startsWith("reject")),
       ],
+    },
+  };
+}
+
+/** A permission request made while planning: refused for edits, flagged for T3 otherwise. */
+export function planningPermission(params) {
+  if (["edit", "delete", "move"].includes(params.toolCall?.kind)) {
+    const reject = params.options.find((option) => option.kind.startsWith("reject"));
+    return {
+      outcome: {
+        outcome: reject
+          ? { outcome: "selected", optionId: reject.optionId }
+          : { outcome: "cancelled" },
+      },
+    };
+  }
+  const meta = params.toolCall?._meta;
+  return {
+    request: {
+      ...params,
+      toolCall: {
+        ...params.toolCall,
+        _meta: { ...meta, qoder: { ...meta?.qoder, planning: true } },
+      },
     },
   };
 }

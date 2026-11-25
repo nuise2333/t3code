@@ -63,7 +63,7 @@ import {
   probeAcpRegistryConfiguration,
   setAcpRegistryProvider,
 } from "./probe.ts";
-import { isQoderAcp, QODER_RUNTIME_MODES } from "./qoderAcp.ts";
+import { isQoderAcp, QODER_PRESENTATION } from "./qoderAcp.ts";
 import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpRegistryAuth from "./auth.ts";
@@ -305,7 +305,7 @@ function baseSnapshot(
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     ...(iconUrl ? { iconUrl } : {}),
     continuation: { groupKey: input.continuationKey },
-    ...(isQoderAcp(input.settings) ? QODER_RUNTIME_MODES : {}),
+    ...(isQoderAcp(input.settings) ? QODER_PRESENTATION : {}),
     supportsTextGeneration: false,
     enabled: input.settings.enabled,
     installed: input.installed,
