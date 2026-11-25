@@ -350,6 +350,10 @@ function openSession(method, params) {
   const opened = (opening.get(key) ?? Promise.resolve()).then(async () => {
     const existing = sessions.get(key);
     if (existing !== undefined) {
+      // A prompt owns the session's process, including while it relaunches it.
+      if (existing.prompting) {
+        throw new RpcError({ code: -32602, message: "This Qoder session is running a prompt." });
+      }
       sessions.delete(key);
       if (existing.runtime === control?.runtime) control = undefined;
       await existing.runtime.stop();
