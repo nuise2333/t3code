@@ -2310,10 +2310,15 @@ describe("chooseAutoModel", () => {
         now: NOW,
       })?.selection;
     };
-    const opus = { instanceId: claudeId, model: "model-opus" };
-    const sol = { instanceId: codexId, model: "model-sol" };
-    const cn = { instanceId: opencodeId, model: "fake-cn" };
-    const cnPro = { instanceId: opencodeId, model: "fake-cn-pro" };
+    const at = (instanceId: ProviderInstanceId, model: string, value = "high") => ({
+      instanceId,
+      model,
+      options: [{ id: "effort", value }],
+    });
+    const opus = at(claudeId, "model-opus");
+    const sol = at(codexId, "model-sol");
+    const cn = at(opencodeId, "fake-cn");
+    const cnPro = at(opencodeId, "fake-cn-pro");
     expect(worker("best", "backend")).toStrictEqual(opus);
     expect(worker("best", "frontend")).toStrictEqual(sol);
     // Tied at 100 on synthesis, so the broader understanding score decides.
@@ -2346,6 +2351,41 @@ describe("chooseAutoModel", () => {
     expect(worker("cheap", "backend", { taskClass: "hard", models: newestPricey })).toStrictEqual(
       cnPro,
     );
+    // A level measured apart has its own score and price, and the worker runs at the one picked.
+    const solAt = (low: number, high: number, max: number) =>
+      board.models.map((entry) =>
+        entry.models[0] === "model-sol"
+          ? {
+              ...entry,
+              efforts: (
+                [
+                  ["low", low, 1],
+                  ["high", high, 10],
+                  ["max", max, 40],
+                ] as const
+              ).map(([effort, value, costUsd]) => ({ effort, scores: scores(value), costUsd })),
+            }
+          : entry,
+      );
+    const codexOnly = [codex()];
+    const solPick = (kind: "balanced" | "best", models: typeof board.models) =>
+      worker(kind, "backend", { providers: codexOnly, models })?.options;
+    expect(solPick("best", solAt(50, 60, 70))).toStrictEqual([{ id: "effort", value: "high" }]);
+    expect(solPick("balanced", solAt(55, 60, 90))).toStrictEqual([{ id: "effort", value: "low" }]);
+    expect(
+      worker("best", "backend", {
+        providers: codexOnly,
+        models: solAt(50, 60, 70).map((entry) => ({ ...entry, writingEffort: "low" })),
+        taskClass: "hard",
+      }),
+    ).toStrictEqual(at(codexId, "model-sol", "max"));
+    // Writing was measured at one level of its own.
+    expect(
+      worker("best", "synthesis", {
+        providers: codexOnly,
+        models: board.models.map((entry) => ({ ...entry, writingEffort: "low" })),
+      }),
+    ).toStrictEqual(at(codexId, "model-sol", "low"));
     expect(worker("cheap", "backend", { models: newestPricey })).toStrictEqual(cn);
     const listedCn = board.models.map((entry) =>
       entry.models[0] === "fake-cn"

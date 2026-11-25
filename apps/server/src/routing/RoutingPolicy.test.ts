@@ -146,12 +146,13 @@ describe("RoutingPolicy.routeTeamWorker", () => {
     readonly prompt: string;
     readonly effort: string;
   }>([
-    { kind: "cheap", prompt: "Where is the sync job scheduled?", effort: "medium" },
+    { kind: "cheap", prompt: "Where is the sync job scheduled?", effort: "high" },
     { kind: "cheap", prompt: "Add a CSV export button to the reports page.", effort: "high" },
     { kind: "cheap", prompt: DEBUG, effort: "high" },
-    { kind: "best", prompt: DEBUG, effort: "xhigh" },
+    // Measured higher at high than at xhigh.
+    { kind: "best", prompt: DEBUG, effort: "high" },
   ])(
-    "a $kind worker gets its task's effort, not the model's low default: $effort",
+    "a $kind worker runs at the effort the board picked it on, not the model's low default: $effort",
     ({ kind, prompt, effort }) =>
       Effect.gen(function* () {
         const policy = yield* RoutingPolicy.RoutingPolicy;
@@ -232,7 +233,7 @@ describe("RoutingPolicy.routeTeamWorker on an ACP agent", () => {
       ).toEqual({
         instanceId: copilotId,
         model: "claude-opus-5.5",
-        options: [{ id: "reasoning_effort", value: "high" }],
+        options: [{ id: "reasoning_effort", value: "xhigh" }],
       });
     }).pipe(
       Effect.provide(

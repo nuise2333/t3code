@@ -114,11 +114,28 @@ const TeamScores = Schema.Struct({
   output: Schema.optionalKey(Schema.Finite),
 });
 
+const TeamEffortScores = Schema.Struct({
+  effort: TrimmedNonEmptyString,
+  scores: Schema.Struct({
+    backend: Schema.Finite,
+    frontend: Schema.Finite,
+    visual: Schema.Finite,
+    reasoning: Schema.Finite,
+    maintainability: Schema.Finite,
+    coding: Schema.Finite,
+  }),
+  costUsd: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
+});
+
 const TeamBoardModel = Schema.Struct({
   /** The same model's ids across agents and gateways. */
   models: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
   /** The level the coding scores and cost come from: the best one below max when there is one. */
   effort: TrimmedNonEmptyString,
+  /** Every level measured on coding, when there is more than one; a worker runs at the one picked. */
+  efforts: Schema.optionalKey(Schema.Array(TeamEffortScores)),
+  /** The level the writing scores come from, when it is not `effort`. */
+  writingEffort: Schema.optionalKey(TrimmedNonEmptyString),
   /** 0-100; the writing scores are absent for a model the writing board lacks. */
   scores: TeamScores,
   costUsd: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
@@ -140,6 +157,19 @@ const TeamBoard = Schema.Struct({
   models: Schema.Array(TeamBoardModel),
   /** Keyed by driver, or by agent id for ACP Registry agents. */
   harnesses: Schema.Record(Schema.String, Schema.Finite),
+  /** The harness board's scores by kind of work, with the same keys. */
+  harnessScenarios: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        software: Schema.Finite,
+        data: Schema.Finite,
+        reasoning: Schema.Finite,
+        office: Schema.Finite,
+        media: Schema.Finite,
+      }),
+    ),
+  ),
 });
 
 const RoutingTableEnvelope = Schema.Struct({

@@ -991,13 +991,6 @@ const CHEAP_PASS_SHARE: Readonly<Record<RoutingTaskClass, number>> = {
   implement: 0.85,
   hard: 0.95,
 };
-/** Points Cheap wants for each price doubling; null takes the cheapest that passes. */
-const CHEAP_POINTS_PER_COST_DOUBLING: Readonly<Record<RoutingTaskClass, number | null>> = {
-  quick_edit: null,
-  readonly: 2,
-  implement: 2,
-  hard: 0.5,
-};
 /** Cheap stops here except for `newest` models, so a coarse score can't buy an old flagship. */
 const CHEAP_MAX_COST_USD = 10;
 /** The adoption board's own line between high and low scores: the median coding total. */
@@ -1009,39 +1002,93 @@ const POINTS_PER_COST_DOUBLING = 5;
 /** Balanced treats value this close as a tie and takes the more used model. */
 const VALUE_TIE_POINTS = 2;
 
-interface TeamBoardPick {
-  readonly board: TeamBoardModel;
-  readonly score: number;
+const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+const effortLevel = (effort: string) => EFFORT_LEVELS.indexOf(effort);
+
+/** Max costs far more for little, so only Best's hard tasks and Cheap's low prices go there. */
+function topEffort(kind: AutoTeamKind, taskClass: RoutingTaskClass): string {
+  if (kind === "cheap") return "max";
+  if (kind === "best" && taskClass === "hard") return "max";
+  return kind === "best" && taskClass === "quick_edit" ? "high" : "xhigh";
 }
 
-/** The board model an automatic team wants, before choosing which agent runs it. */
+/** One model at one level: what it scored there and what that cost. */
+interface TeamBoardPick {
+  readonly board: TeamBoardModel;
+  readonly effort: string;
+  readonly score: number;
+  readonly coding: number;
+  readonly costUsd: number | undefined;
+}
+
+/**
+ * A board model's measured levels a worker could run at. A level no agent offers was not measured
+ * for this user; with none left the model keeps its own row, and runs at the nearest level offered.
+ */
+function teamBoardPicks(
+  board: TeamBoardModel,
+  subtask: TeamSubtask | null,
+  offered: (effort: string) => boolean,
+  cap: string,
+): ReadonlyArray<TeamBoardPick> {
+  const measured = board.efforts ?? [];
+  if (subtask !== null && subtask in WRITING_AXIS) {
+    const score = board.scores[subtask];
+    const effort = board.writingEffort ?? board.effort;
+    const at = measured.find((row) => row.effort === effort);
+    return score === undefined
+      ? []
+      : [
+          {
+            board,
+            effort,
+            score,
+            coding: board.scores.coding,
+            costUsd: at?.costUsd ?? board.costUsd,
+          },
+        ];
+  }
+  const axis = (subtask ?? "coding") as keyof (typeof measured)[number]["scores"];
+  const rows = measured.filter(
+    (row) => offered(row.effort) && effortLevel(row.effort) <= effortLevel(cap),
+  );
+  return (rows.length > 0 ? rows : [board]).map((row) => ({
+    board,
+    effort: row.effort,
+    score: row.scores[axis],
+    coding: row.scores.coding,
+    costUsd: row.costUsd,
+  }));
+}
+
+/** The board model and level an automatic team wants, before choosing which agent runs it. */
 function chooseBoardModel(
   kind: AutoTeamKind,
   subtask: TeamSubtask | null,
   taskClass: RoutingTaskClass,
   picks: ReadonlyArray<TeamBoardPick>,
-): TeamBoardModel | undefined {
-  const cost = (pick: TeamBoardPick) => pick.board.costUsd ?? Number.POSITIVE_INFINITY;
+): TeamBoardPick | undefined {
+  const cost = (pick: TeamBoardPick) => pick.costUsd ?? Number.POSITIVE_INFINITY;
   const axis = subtask === null ? undefined : WRITING_AXIS[subtask];
   // Many sub-scores tie at 100: the broader score decides, then the coding total, then the price.
   const strongest = (a: TeamBoardPick, b: TeamBoardPick) =>
     b.score - a.score ||
     (axis === undefined ? 0 : (b.board.scores[axis] ?? 0) - (a.board.scores[axis] ?? 0)) ||
-    b.board.scores.coding - a.board.scores.coding ||
+    b.coding - a.coding ||
     (cost(a) === cost(b) ? 0 : cost(a) - cost(b));
-  if (kind === "best") return [...picks].sort(strongest)[0]?.board;
+  if (kind === "best") return [...picks].sort(strongest)[0];
   const affordable = (pick: TeamBoardPick) => cost(pick) <= CHEAP_MAX_COST_USD;
   const eligible = picks.filter((pick) =>
     kind === "cheap"
       ? pick.board.chinese === true && (pick.board.newest === true || affordable(pick))
-      : pick.board.costUsd !== undefined &&
+      : pick.costUsd !== undefined &&
         pick.board.marketShare !== undefined &&
         pick.board.fading !== true &&
-        pick.board.scores.coding >= BALANCED_MIN_CODING,
+        pick.coding >= BALANCED_MIN_CODING,
   );
   // With none eligible, Cheap keeps its price limit, then takes the lowest price on offer; Balanced
   // still needs a price to judge value by.
-  const priced = picks.filter((pick) => pick.board.costUsd !== undefined);
+  const priced = picks.filter((pick) => pick.costUsd !== undefined);
   const cheapest = Math.min(...picks.map(cost));
   const fallbacks =
     kind === "cheap"
@@ -1049,27 +1096,58 @@ function chooseBoardModel(
       : [priced];
   const chosen = [eligible, ...fallbacks].find((list) => list.length > 0) ?? picks;
   // A writing sub-score rests on a few items, so one lucky item can't carry a cheap model.
-  const pool = chosen.map(({ board, score }) => ({
-    board,
-    score: axis === undefined ? score : (score + (board.scores[axis] ?? score)) / 2,
+  const pool = chosen.map((pick) => ({
+    ...pick,
+    score:
+      axis === undefined ? pick.score : (pick.score + (pick.board.scores[axis] ?? pick.score)) / 2,
   }));
   const top = Math.max(...pool.map((pick) => pick.score));
   const share = kind === "cheap" ? CHEAP_PASS_SHARE[taskClass] : BALANCED_PASS_SHARE;
   const passing = pool.filter((pick) => pick.score >= top * share);
-  const points =
-    kind === "cheap" ? CHEAP_POINTS_PER_COST_DOUBLING[taskClass] : POINTS_PER_COST_DOUBLING;
-  const value = (pick: TeamBoardPick) =>
-    points === null ? -cost(pick) : pick.score - points * Math.log2(cost(pick));
   if (kind === "cheap") {
-    return passing.sort((a, b) =>
-      value(a) === value(b) ? strongest(a, b) : value(b) - value(a),
-    )[0]?.board;
+    return passing.sort((a, b) => (cost(a) === cost(b) ? strongest(a, b) : cost(a) - cost(b)))[0];
   }
+  const value = (pick: TeamBoardPick) =>
+    pick.score - POINTS_PER_COST_DOUBLING * Math.log2(cost(pick));
   const best = Math.max(...passing.map(value));
   return passing
     .filter((pick) => value(pick) >= best - VALUE_TIE_POINTS)
-    .sort((a, b) => (b.board.marketShare ?? 0) - (a.board.marketShare ?? 0) || strongest(a, b))[0]
-    ?.board;
+    .sort(
+      (a, b) =>
+        (b.board.marketShare ?? 0) - (a.board.marketShare ?? 0) ||
+        value(b) - value(a) ||
+        strongest(a, b),
+    )[0];
+}
+
+interface ReasoningLevels {
+  readonly id: string;
+  readonly levels: ReadonlyArray<string>;
+}
+
+/** The levels a model's own picker sets; a level injected into the prompt is not one. */
+function reasoningLevels(model: ServerProvider["models"][number]): ReasoningLevels | undefined {
+  const descriptor = model.capabilities?.optionDescriptors?.find(isReasoningSelect);
+  if (descriptor === undefined) return undefined;
+  const levels = descriptor.options
+    .map((option) => option.id)
+    .filter((id) => effortLevel(id) >= 0 && descriptor.promptInjectedValues?.includes(id) !== true);
+  return levels.length === 0 ? undefined : { id: descriptor.id, levels };
+}
+
+/** The level measured, else the nearest offered; undefined for a board row on the default level. */
+function nearestLevel(
+  levels: ReadonlyArray<string>,
+  wanted: string,
+  cap: string,
+): string | undefined {
+  if (effortLevel(wanted) < 0) return undefined;
+  const target = Math.min(effortLevel(wanted), effortLevel(cap));
+  return [...levels].sort(
+    (a, b) =>
+      Math.abs(effortLevel(a) - target) - Math.abs(effortLevel(b) - target) ||
+      effortLevel(a) - effortLevel(b),
+  )[0];
 }
 
 const NATIVE_DRIVER: Readonly<Record<ModelVendor, string>> = {
@@ -1091,9 +1169,26 @@ function boardModelFor(
   return table.teamBoard?.models.find((entry) => entry.models.some((id) => keys.has(modelKey(id))));
 }
 
-/** How well the agent itself scored at multi-step work; ACP Registry agents go by agent id. */
+const HARNESS_SCENARIO = {
+  backend: "software",
+  frontend: "software",
+  maintainability: "software",
+  reasoning: "reasoning",
+  visual: "media",
+  intent: "reasoning",
+  instructions: "reasoning",
+  synthesis: "data",
+  accuracy: "data",
+  expression: "office",
+  completeness: "office",
+  style: "office",
+  structure: "office",
+} as const satisfies Record<TeamSubtask, string>;
+
+/** How well the agent itself does this kind of work; ACP Registry agents go by agent id. */
 function harnessScore(
   table: RoutingTable,
+  subtask: TeamSubtask | null,
   provider: ServerProvider,
   settings: Pick<ServerSettings, "providerInstances">,
 ): number {
@@ -1101,13 +1196,18 @@ function harnessScore(
   const agentId =
     typeof config === "object" && config !== null && "agentId" in config ? config.agentId : null;
   const key = typeof agentId === "string" ? agentId : provider.driver;
-  return table.teamBoard?.harnesses[key] ?? 0;
+  const scenario =
+    subtask === null
+      ? undefined
+      : table.teamBoard?.harnessScenarios?.[key]?.[HARNESS_SCENARIO[subtask]];
+  return scenario ?? table.teamBoard?.harnesses[key] ?? 0;
 }
 
 /**
  * A worker's model for an automatic team, or null. Models on the team board rank by the subtask's
- * score: Cheap takes a capable Chinese model at a low price, Balanced the best value among models in
- * use, Best the top score. With none on the board, coarse tiers decide.
+ * score at each measured effort: Cheap takes the cheapest capable Chinese model, Balanced the best
+ * value among models in use, Best the top score. The worker runs at the effort it was picked on.
+ * With none on the board, coarse tiers decide, and the caller routes the effort.
  */
 export function chooseTeamWorkerModel(input: {
   readonly kind: AutoTeamKind;
@@ -1121,7 +1221,12 @@ export function chooseTeamWorkerModel(input: {
   readonly interactionMode: ProviderInteractionMode;
   readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId> | undefined;
   readonly now: number;
-}): { readonly selection: ModelSelection; readonly tier: RoutingTier | null } | null {
+}): {
+  readonly selection: ModelSelection;
+  readonly tier: RoutingTier | null;
+  /** Set when the board picked the effort too, so routing leaves it alone. */
+  readonly effort?: string;
+} | null {
   const subtask = input.subtask ?? null;
   const candidates: Array<{
     readonly provider: ServerProvider;
@@ -1133,6 +1238,7 @@ export function chooseTeamWorkerModel(input: {
     readonly own: boolean;
     readonly route: number;
     readonly options: ReadonlyArray<OptionValue>;
+    readonly reasoning: ReasoningLevels | undefined;
   }> = [];
   for (const provider of input.providers) {
     for (const model of provider.models) {
@@ -1164,6 +1270,7 @@ export function chooseTeamWorkerModel(input: {
           (vendor !== null && NATIVE_DRIVER[vendor] === provider.driver),
         route: routeRank(model.slug),
         options,
+        reasoning: reasoningLevels(model),
       });
     }
   }
@@ -1176,8 +1283,8 @@ export function chooseTeamWorkerModel(input: {
     Number(b.candidate.own) - Number(a.candidate.own) ||
     a.candidate.route - b.candidate.route ||
     a.bucket - b.bucket ||
-    harnessScore(input.table, b.candidate.provider, input.settings) -
-      harnessScore(input.table, a.candidate.provider, input.settings) ||
+    harnessScore(input.table, subtask, b.candidate.provider, input.settings) -
+      harnessScore(input.table, subtask, a.candidate.provider, input.settings) ||
     b.score - a.score;
   const result = (chosen: Ranked["candidate"] | undefined) =>
     chosen === undefined
@@ -1191,20 +1298,42 @@ export function chooseTeamWorkerModel(input: {
           tier: chosen.tier,
         };
 
-  const board = chooseBoardModel(
+  const cap = topEffort(input.kind, input.taskClass);
+  const boards = new Map<TeamBoardModel, Array<Ranked["candidate"]>>();
+  for (const candidate of candidates) {
+    if (candidate.board === undefined || candidate.score === null) continue;
+    boards.set(candidate.board, [...(boards.get(candidate.board) ?? []), candidate]);
+  }
+  const pick = chooseBoardModel(
     input.kind,
     subtask,
     input.taskClass,
-    candidates.flatMap((candidate) =>
-      candidate.board === undefined || candidate.score === null
-        ? []
-        : [{ board: candidate.board, score: candidate.score }],
+    [...boards].flatMap(([board, own]) =>
+      teamBoardPicks(
+        board,
+        subtask,
+        (effort) => own.some((candidate) => candidate.reasoning?.levels.includes(effort)),
+        cap,
+      ),
     ),
   );
-  if (board !== undefined) {
-    return result(
-      ranked.filter(({ candidate }) => candidate.board === board).sort(byAgent)[0]?.candidate,
-    );
+  if (pick !== undefined) {
+    const offers = (entry: Ranked) =>
+      Number(entry.candidate.reasoning?.levels.includes(pick.effort) === true);
+    const chosen = ranked
+      .filter(({ candidate }) => candidate.board === pick.board)
+      .sort((a, b) => offers(b) - offers(a) || byAgent(a, b))[0]?.candidate;
+    const picked = result(chosen);
+    const level = chosen?.reasoning && nearestLevel(chosen.reasoning.levels, pick.effort, cap);
+    if (picked === null || !chosen?.reasoning || level === undefined) return picked;
+    return {
+      ...picked,
+      selection: {
+        ...picked.selection,
+        options: [...(picked.selection.options ?? []), { id: chosen.reasoning.id, value: level }],
+      },
+      effort: level,
+    };
   }
 
   const tiered = ranked.flatMap((entry) =>

@@ -569,6 +569,8 @@ const make = Effect.gen(function* () {
         now: DateTime.toEpochMillis(yield* DateTime.now),
       });
       if (chosen === null) return null;
+      // Picked on its score at this effort, so no other one carries that score.
+      if (chosen.effort !== undefined) return chosen.selection;
       // A model's own default effort can be far below what the task needs (Codex starts at low).
       const routed = yield* routeEffort({
         selection: chosen.selection,

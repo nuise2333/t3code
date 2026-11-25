@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-24T04:00:00Z",
+  "updatedAt": "2026-11-25T10:00:00Z",
   "routing": {
     "version": 1,
-    "updatedAt": "2026-11-24T04:00:00Z",
+    "updatedAt": "2026-11-25T10:00:00Z",
     "sources": {
       "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
       "aa-coding": {
@@ -113,6 +113,44 @@
         {
           "models": ["claude-fable-5-1"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 39.5,
+                "frontend": 68,
+                "visual": 37,
+                "reasoning": 90,
+                "maintainability": 52,
+                "coding": 57.9
+              },
+              "costUsd": 174.01
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 45.2,
+                "frontend": 73,
+                "visual": 37,
+                "reasoning": 95,
+                "maintainability": 52,
+                "coding": 61.6
+              },
+              "costUsd": 193.94
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 47,
+                "frontend": 73,
+                "visual": 37,
+                "reasoning": 95,
+                "maintainability": 52,
+                "coding": 62.1
+              },
+              "costUsd": 216.0
+            }
+          ],
           "scores": {
             "backend": 45.2,
             "frontend": 73,
@@ -126,6 +164,33 @@
         {
           "models": ["claude-opus-5-5"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 48.1,
+                "frontend": 85.9,
+                "visual": 42,
+                "reasoning": 95,
+                "maintainability": 55,
+                "coding": 65.6
+              },
+              "costUsd": 62.13
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 49.5,
+                "frontend": 86.8,
+                "visual": 44,
+                "reasoning": 100,
+                "maintainability": 72,
+                "coding": 70.3
+              },
+              "costUsd": 71.75
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 48.1,
             "frontend": 85.9,
@@ -150,6 +215,44 @@
         {
           "models": ["claude-opus-5"],
           "effort": "high",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 36.8,
+                "frontend": 54.3,
+                "visual": 44,
+                "reasoning": 90,
+                "maintainability": 52,
+                "coding": 56.1
+              },
+              "costUsd": 80.14
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 38.8,
+                "frontend": 56.3,
+                "visual": 34,
+                "reasoning": 85,
+                "maintainability": 55,
+                "coding": 54.7
+              },
+              "costUsd": 87.1
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 36,
+                "frontend": 65.7,
+                "visual": 42,
+                "reasoning": 95,
+                "maintainability": 43,
+                "coding": 57.2
+              },
+              "costUsd": 94.54
+            }
+          ],
           "scores": {
             "backend": 36.8,
             "frontend": 54.3,
@@ -163,6 +266,7 @@
         {
           "models": ["claude-sonnet-5-5"],
           "effort": "xhigh",
+          "writingEffort": "max",
           "scores": {
             "backend": 52.0,
             "frontend": 70.2,
@@ -201,6 +305,69 @@
         {
           "models": ["gpt-6.2-astra"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "low",
+              "scores": {
+                "backend": 58.0,
+                "frontend": 75.4,
+                "visual": 19,
+                "reasoning": 90,
+                "maintainability": 68,
+                "coding": 64.3
+              },
+              "costUsd": 22.83
+            },
+            {
+              "effort": "medium",
+              "scores": {
+                "backend": 60.6,
+                "frontend": 79.2,
+                "visual": 23,
+                "reasoning": 85,
+                "maintainability": 73,
+                "coding": 65.7
+              },
+              "costUsd": 28.02
+            },
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 64.9,
+                "frontend": 82.1,
+                "visual": 25,
+                "reasoning": 90,
+                "maintainability": 73,
+                "coding": 69.0
+              },
+              "costUsd": 32.7
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 65.6,
+                "frontend": 83.8,
+                "visual": 36,
+                "reasoning": 95,
+                "maintainability": 75,
+                "coding": 72.7
+              },
+              "costUsd": 36.67
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 68.4,
+                "frontend": 85.9,
+                "visual": 33,
+                "reasoning": 95,
+                "maintainability": 68,
+                "coding": 72.3
+              },
+              "costUsd": 48.08
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 65.6,
             "frontend": 83.8,
@@ -238,6 +405,7 @@
         {
           "models": ["gpt-6.1-sol"],
           "effort": "high",
+          "writingEffort": "max",
           "scores": {
             "backend": 57.5,
             "frontend": 77.5,
@@ -262,6 +430,7 @@
         {
           "models": ["gpt-6.1-terra"],
           "effort": "xhigh",
+          "writingEffort": "max",
           "scores": {
             "backend": 46.0,
             "frontend": 54.3,
@@ -287,6 +456,69 @@
         {
           "models": ["gpt-6-astra"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "low",
+              "scores": {
+                "backend": 56.3,
+                "frontend": 78.9,
+                "visual": 21,
+                "reasoning": 85,
+                "maintainability": 70,
+                "coding": 63.6
+              },
+              "costUsd": 30.45
+            },
+            {
+              "effort": "medium",
+              "scores": {
+                "backend": 58.8,
+                "frontend": 62.6,
+                "visual": 25,
+                "reasoning": 85,
+                "maintainability": 70,
+                "coding": 62.5
+              },
+              "costUsd": 36.82
+            },
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 59.4,
+                "frontend": 80.1,
+                "visual": 26,
+                "reasoning": 85,
+                "maintainability": 59,
+                "coding": 63.9
+              },
+              "costUsd": 41.73
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 60.4,
+                "frontend": 80.1,
+                "visual": 29,
+                "reasoning": 95,
+                "maintainability": 57,
+                "coding": 66.8
+              },
+              "costUsd": 49.06
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 60.2,
+                "frontend": 83.4,
+                "visual": 24,
+                "reasoning": 95,
+                "maintainability": 55,
+                "coding": 66.2
+              },
+              "costUsd": 55.19
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 60.4,
             "frontend": 80.1,
@@ -312,6 +544,69 @@
         {
           "models": ["gpt-6-sol"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "low",
+              "scores": {
+                "backend": 31.1,
+                "frontend": 54.4,
+                "visual": 14,
+                "reasoning": 70,
+                "maintainability": 57,
+                "coding": 45.6
+              },
+              "costUsd": 20.42
+            },
+            {
+              "effort": "medium",
+              "scores": {
+                "backend": 37.4,
+                "frontend": 55.5,
+                "visual": 26,
+                "reasoning": 65,
+                "maintainability": 69,
+                "coding": 50.0
+              },
+              "costUsd": 24.83
+            },
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 42.6,
+                "frontend": 55.7,
+                "visual": 22,
+                "reasoning": 70,
+                "maintainability": 70,
+                "coding": 52.4
+              },
+              "costUsd": 27.66
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 45.3,
+                "frontend": 71.2,
+                "visual": 30,
+                "reasoning": 75,
+                "maintainability": 61,
+                "coding": 56.7
+              },
+              "costUsd": 29.68
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 46.7,
+                "frontend": 76.6,
+                "visual": 25,
+                "reasoning": 70,
+                "maintainability": 68,
+                "coding": 57.0
+              },
+              "costUsd": 31.37
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 45.3,
             "frontend": 71.2,
@@ -335,6 +630,69 @@
         {
           "models": ["gpt-6-luna"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "low",
+              "scores": {
+                "backend": 15.4,
+                "frontend": 9.4,
+                "visual": 11,
+                "reasoning": 25,
+                "maintainability": 41,
+                "coding": 20.1
+              },
+              "costUsd": 0.58
+            },
+            {
+              "effort": "medium",
+              "scores": {
+                "backend": 14.5,
+                "frontend": 35.3,
+                "visual": 22,
+                "reasoning": 25,
+                "maintainability": 41,
+                "coding": 25.3
+              },
+              "costUsd": 0.71
+            },
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 25.2,
+                "frontend": 14.1,
+                "visual": 30,
+                "reasoning": 50,
+                "maintainability": 47,
+                "coding": 33.7
+              },
+              "costUsd": 0.8
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 35.7,
+                "frontend": 56.8,
+                "visual": 21,
+                "reasoning": 50,
+                "maintainability": 49,
+                "coding": 42.2
+              },
+              "costUsd": 0.87
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 37.1,
+                "frontend": 51.2,
+                "visual": 13,
+                "reasoning": 30,
+                "maintainability": 47,
+                "coding": 35.3
+              },
+              "costUsd": 0.94
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 35.7,
             "frontend": 56.8,
@@ -431,6 +789,7 @@
         {
           "models": ["gemini-4-argon"],
           "effort": "unknown",
+          "writingEffort": "high",
           "scores": {
             "backend": 45.4,
             "frontend": 70.4,
@@ -456,6 +815,7 @@
         {
           "models": ["gemini-3.8-flash"],
           "effort": "default",
+          "writingEffort": "high",
           "scores": {
             "backend": 32.9,
             "frontend": 66.2,
@@ -481,6 +841,33 @@
         {
           "models": ["grok-4.7"],
           "effort": "high",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 48.4,
+                "frontend": 58.6,
+                "visual": 22,
+                "reasoning": 85,
+                "maintainability": 50,
+                "coding": 55.4
+              },
+              "costUsd": 22.05
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 47.1,
+                "frontend": 42.5,
+                "visual": 25,
+                "reasoning": 80,
+                "maintainability": 57,
+                "coding": 52.8
+              },
+              "costUsd": 23.6
+            }
+          ],
+          "writingEffort": "xhigh",
           "scores": {
             "backend": 48.4,
             "frontend": 58.6,
@@ -505,6 +892,32 @@
         {
           "models": ["grok-4.6"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 38.4,
+                "frontend": 50.7,
+                "visual": 22,
+                "reasoning": 80,
+                "maintainability": 46,
+                "coding": 49.3
+              },
+              "costUsd": 47.38
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 43.2,
+                "frontend": 59.0,
+                "visual": 21,
+                "reasoning": 85,
+                "maintainability": 52,
+                "coding": 54.0
+              },
+              "costUsd": 52.29
+            }
+          ],
           "scores": {
             "backend": 43.2,
             "frontend": 59.0,
@@ -528,6 +941,33 @@
         {
           "models": ["k3.1-pro", "kimi-k3.1-pro"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 40.8,
+                "frontend": 60.8,
+                "visual": 36,
+                "reasoning": 80,
+                "maintainability": 55,
+                "coding": 55.0
+              },
+              "costUsd": 16.36
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 49.3,
+                "frontend": 80.6,
+                "visual": 36,
+                "reasoning": 80,
+                "maintainability": 51,
+                "coding": 59.9
+              },
+              "costUsd": 21.92
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 49.3,
             "frontend": 80.6,
@@ -554,6 +994,7 @@
         {
           "models": ["kimi-k3", "k3"],
           "effort": "high",
+          "writingEffort": "max",
           "scores": {
             "backend": 35.1,
             "frontend": 52.5,
@@ -604,6 +1045,7 @@
         {
           "models": ["qwen3.8-flash"],
           "effort": "default",
+          "writingEffort": "xhigh",
           "scores": {
             "backend": 33.6,
             "frontend": 46.1,
@@ -629,6 +1071,45 @@
         {
           "models": ["deepseek-v4.1-flash-1017", "deepseek-flash"],
           "effort": "high",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 38.1,
+                "frontend": 54.5,
+                "visual": 30,
+                "reasoning": 70,
+                "maintainability": 44,
+                "coding": 48.2
+              },
+              "costUsd": 2.0
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 37.2,
+                "frontend": 58.9,
+                "visual": 18,
+                "reasoning": 75,
+                "maintainability": 45,
+                "coding": 48.2
+              },
+              "costUsd": 2.09
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 45.1,
+                "frontend": 58.7,
+                "visual": 22,
+                "reasoning": 75,
+                "maintainability": 47,
+                "coding": 51.5
+              },
+              "costUsd": 2.39
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 38.1,
             "frontend": 54.5,
@@ -655,6 +1136,32 @@
         {
           "models": ["deepseek-v4-pro"],
           "effort": "high",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 33.3,
+                "frontend": 18.5,
+                "visual": 31,
+                "reasoning": 75,
+                "maintainability": 47,
+                "coding": 43.2
+              },
+              "costUsd": 9.22
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 37.6,
+                "frontend": 41.2,
+                "visual": 20,
+                "reasoning": 65,
+                "maintainability": 53,
+                "coding": 44.7
+              },
+              "costUsd": 10.46
+            }
+          ],
           "scores": {
             "backend": 33.3,
             "frontend": 18.5,
@@ -670,6 +1177,45 @@
         {
           "models": ["minimax-m3.1-flash"],
           "effort": "xhigh",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 32.4,
+                "frontend": 57.4,
+                "visual": 15,
+                "reasoning": 65,
+                "maintainability": 48,
+                "coding": 44.0
+              },
+              "costUsd": 1.28
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 37.5,
+                "frontend": 65.4,
+                "visual": 33,
+                "reasoning": 75,
+                "maintainability": 44,
+                "coding": 51.4
+              },
+              "costUsd": 1.44
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 40.8,
+                "frontend": 54.4,
+                "visual": 22,
+                "reasoning": 80,
+                "maintainability": 51,
+                "coding": 51.4
+              },
+              "costUsd": 1.47
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 37.5,
             "frontend": 65.4,
@@ -747,6 +1293,33 @@
         {
           "models": ["glm-5.3", "t3-bigmodel-api::GLM-5.3"],
           "effort": "high",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 37.5,
+                "frontend": 71.0,
+                "visual": 14,
+                "reasoning": 50,
+                "maintainability": 53,
+                "coding": 44.5
+              },
+              "costUsd": 28.22
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 36.8,
+                "frontend": 54.6,
+                "visual": 23,
+                "reasoning": 70,
+                "maintainability": 47,
+                "coding": 47.2
+              },
+              "costUsd": 31.1
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 37.5,
             "frontend": 71.0,
@@ -772,6 +1345,33 @@
         {
           "models": ["glm-5.3-flash", "t3-bigmodel-api::GLM-5.3-Flash"],
           "effort": "high",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 27.1,
+                "frontend": 43.8,
+                "visual": 22,
+                "reasoning": 20,
+                "maintainability": 51,
+                "coding": 30.7
+              },
+              "costUsd": 1.58
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 30,
+                "frontend": 32.7,
+                "visual": 26,
+                "reasoning": 40,
+                "maintainability": 45,
+                "coding": 34.5
+              },
+              "costUsd": 1.76
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 27.1,
             "frontend": 43.8,
@@ -798,6 +1398,45 @@
         {
           "models": ["muse-wonder"],
           "effort": "high",
+          "efforts": [
+            {
+              "effort": "high",
+              "scores": {
+                "backend": 41.1,
+                "frontend": 57.7,
+                "visual": 22,
+                "reasoning": 80,
+                "maintainability": 49,
+                "coding": 51.6
+              },
+              "costUsd": 20.48
+            },
+            {
+              "effort": "xhigh",
+              "scores": {
+                "backend": 40.3,
+                "frontend": 54.5,
+                "visual": 22,
+                "reasoning": 80,
+                "maintainability": 47,
+                "coding": 50.6
+              },
+              "costUsd": 23.56
+            },
+            {
+              "effort": "max",
+              "scores": {
+                "backend": 44.3,
+                "frontend": 57.4,
+                "visual": 22,
+                "reasoning": 90,
+                "maintainability": 39,
+                "coding": 53.6
+              },
+              "costUsd": 26.46
+            }
+          ],
+          "writingEffort": "max",
           "scores": {
             "backend": 41.1,
             "frontend": 57.7,
@@ -836,6 +1475,7 @@
         {
           "models": ["hy4", "hy4std"],
           "effort": "default",
+          "writingEffort": "high",
           "scores": {
             "backend": 52.1,
             "frontend": 54.3,
@@ -877,6 +1517,7 @@
         {
           "models": ["mimo-v2.6-flash"],
           "effort": "default",
+          "writingEffort": "max",
           "scores": {
             "backend": 33.5,
             "frontend": 40.4,
@@ -919,6 +1560,7 @@
         {
           "models": ["qwen3.8-max"],
           "effort": "default",
+          "writingEffort": "xhigh",
           "scores": {
             "backend": 36.2,
             "frontend": 35.2,
@@ -956,6 +1598,99 @@
           "marketShare": 0.24
         }
       ],
+      "harnessScenarios": {
+        "claudeAgent": {
+          "software": 59.97,
+          "data": 65.5,
+          "reasoning": 63.93,
+          "office": 53.81,
+          "media": 41.4
+        },
+        "codex": {
+          "software": 59.21,
+          "data": 67.45,
+          "reasoning": 65.27,
+          "office": 58.17,
+          "media": 35.27
+        },
+        "kimi-code": {
+          "software": 57.06,
+          "data": 64.56,
+          "reasoning": 59.56,
+          "office": 47.76,
+          "media": 30.31
+        },
+        "opencode": {
+          "software": 56.84,
+          "data": 59.02,
+          "reasoning": 57.4,
+          "office": 50.19,
+          "media": 29.93
+        },
+        "dsh-acp.mjs": {
+          "software": 55.33,
+          "data": 62.56,
+          "reasoning": 57.14,
+          "office": 50.42,
+          "media": 30.1
+        },
+        "zcode-acp.mjs": {
+          "software": 50.13,
+          "data": 62.1,
+          "reasoning": 57.48,
+          "office": 48.57,
+          "media": 32.55
+        },
+        "pi": {
+          "software": 56.5,
+          "data": 61.54,
+          "reasoning": 55.17,
+          "office": 47.44,
+          "media": 30.44
+        },
+        "fx": {
+          "software": 54.56,
+          "data": 60.17,
+          "reasoning": 56.81,
+          "office": 47.26,
+          "media": 30.66
+        },
+        "github-copilot-cli": {
+          "software": 53.51,
+          "data": 64.45,
+          "reasoning": 66.01,
+          "office": 57.1,
+          "media": 38.6
+        },
+        "grok": {
+          "software": 55.61,
+          "data": 60.48,
+          "reasoning": 53.36,
+          "office": 39.31,
+          "media": 25.66
+        },
+        "antigravity": {
+          "software": 50.74,
+          "data": 63.25,
+          "reasoning": 62.42,
+          "office": 53.53,
+          "media": 34.1
+        },
+        "qwen-code": {
+          "software": 52.54,
+          "data": 59.35,
+          "reasoning": 57.13,
+          "office": 47.26,
+          "media": 29.56
+        },
+        "muse": {
+          "software": 47.93,
+          "data": 57.38,
+          "reasoning": 53.48,
+          "office": 42.86,
+          "media": 26.44
+        }
+      },
       "harnesses": {
         "claudeAgent": 57.06,
         "codex": 56.56,
