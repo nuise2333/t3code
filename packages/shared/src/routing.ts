@@ -1418,7 +1418,11 @@ export function chooseTeamWorkerModel(input: {
     const agent = agentFor(board, effort)?.candidate;
     if (agent === undefined) return false;
     const standing = quotaStanding(agent.provider, agent.slug, input.now);
-    return standing.funding === "subscription" && !standing.inReserve;
+    // Spend budgets and add-on credits report monthly windows too, and bill at list price.
+    const rolling = applicableUsageWindows(agent.provider, input.now, agent.slug).some(
+      (window) => window.kind === "session" || window.kind === "weekly",
+    );
+    return rolling && standing.funding === "subscription" && !standing.inReserve;
   };
   const balancedFirst = input.table.teamBoard?.balancedFirst;
   const pick = chooseBoardModel(

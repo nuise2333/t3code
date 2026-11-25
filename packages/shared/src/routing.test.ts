@@ -2419,17 +2419,17 @@ describe("chooseAutoModel", () => {
       worker("balanced", null, { providers: [provider, codex()], models: nearPrice });
     expect(byPrice(claude())).toStrictEqual(sol);
     expect(byPrice(subscribed as ServerProvider)).toStrictEqual(opus);
-    // A spend budget is no subscription.
-    const budget = {
-      ...subscribed,
-      usageLimits: {
-        ...subscribed.usageLimits,
-        windows: [
-          { id: "monthly_spend", label: "Spend", kind: "monthly" as const, usedPercent: 9 },
-        ],
-      },
-    };
-    expect(byPrice(budget as ServerProvider)).toStrictEqual(sol);
+    // A spend budget or add-on credits are no subscription.
+    for (const id of ["monthly_spend", "add-on"]) {
+      const budget = {
+        ...subscribed,
+        usageLimits: {
+          ...subscribed.usageLimits,
+          windows: [{ id, label: "Spend", kind: "monthly" as const, usedPercent: 9 }],
+        },
+      };
+      expect(byPrice(budget as ServerProvider)).toStrictEqual(sol);
+    }
     // A model Balanced runs a fixed way goes to that agent at that level, or elsewhere at that level.
     const presetOption = {
       id: "preset",
