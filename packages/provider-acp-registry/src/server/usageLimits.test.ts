@@ -263,7 +263,7 @@ it.layer(NodeServices.layer)("readQoderUsageLimits", (it) => {
       const launcher = path.join(dir, "qoder");
       yield* fs.writeFileString(
         launcher,
-        `#!/bin/sh\n[ "$*" = "--account b usage" ] && echo '{"userQuota":{"total":10,"used":4}}'\n`,
+        `#!/bin/sh\n[ "$*" = "--account b --t3-qoder-usage" ] && echo '{"userQuota":{"total":10,"used":4}}'\n`,
       );
       yield* fs.chmod(launcher, 0o755);
       const limits = yield* readQoderUsageLimits(

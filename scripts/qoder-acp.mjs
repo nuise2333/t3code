@@ -706,8 +706,8 @@ function serve() {
   log("started", APP);
 }
 
-// `qoder [args] usage` prints the account's credit usage for T3's limits and exits.
-if (process.argv.at(-1) === "usage") {
+// `qoder [args] --t3-qoder-usage` prints the account's credit usage for T3's limits and exits.
+if (process.argv.at(-1) === "--t3-qoder-usage") {
   process.on("SIGTERM", () => process.exit(143));
   process.on("SIGINT", () => process.exit(130));
   queryAccount("get_usage_info", {}).then(

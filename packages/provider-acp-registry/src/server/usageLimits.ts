@@ -571,7 +571,7 @@ export const readQoderUsageLimits = Effect.fn("readQoderUsageLimits")(function* 
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const output = yield* (yield* ChildProcessSpawner.ChildProcessSpawner)
     .string(
-      ChildProcess.make(launch.commandPath, [...launch.commandArgs, "usage"], {
+      ChildProcess.make(launch.commandPath, [...launch.commandArgs, "--t3-qoder-usage"], {
         env: environment,
         stdin: "ignore",
         stderr: "ignore",
