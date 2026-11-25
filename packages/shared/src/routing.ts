@@ -1006,7 +1006,7 @@ const BEST_NEAR_SCORE = 3;
 const BEST_NEAR_BROADER = 4;
 /** What a subscription with usage left makes of a model's list price; only Balanced counts it. */
 const SUBSCRIPTION_PRICE_SHARE = 0.3;
-/** Among Balanced's preferred models, this close in score the better value wins. */
+/** Among Balanced's preferred models, this close in score the faster wins. */
 const PREFERRED_NEAR_SCORE = 3;
 /** Balanced waits twice as long only for this many more points. */
 const POINTS_PER_TIME_DOUBLING = 4;
@@ -1177,7 +1177,7 @@ function chooseBoardModel(
     const top = Math.max(...preferred.map((pick) => pick.score));
     return preferred
       .filter((pick) => pick.score >= top - PREFERRED_NEAR_SCORE)
-      .sort((a, b) => value(b) - value(a) || strongest(a, b))[0];
+      .sort((a, b) => time(a) - time(b) || value(b) - value(a) || strongest(a, b))[0];
   }
   const best = Math.max(...passing.map(value));
   return passing

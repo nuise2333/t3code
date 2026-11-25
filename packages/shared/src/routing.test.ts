@@ -2361,6 +2361,37 @@ describe("chooseAutoModel", () => {
       })?.selection;
     expect(firstPick("backend")).toStrictEqual(opus);
     expect(firstPick("frontend")).toStrictEqual(sol);
+    // Close in score, the faster preferred model wins, though it costs more.
+    const closeFirst = (opusMinutes: number) =>
+      board.models.map((entry) =>
+        entry.models[0] === "model-opus"
+          ? { ...entry, minutes: opusMinutes }
+          : entry.models[0] === "model-sol"
+            ? { ...entry, minutes: 150 }
+            : entry,
+      );
+    const bothFirst = (models: typeof board.models) =>
+      chooseTeamWorkerModel({
+        kind: "balanced",
+        subtask: "backend",
+        table: {
+          ...tableOf(ROWS),
+          teamBoard: {
+            ...board,
+            models,
+            balancedFirst: { default: ["model-opus", "model-sol"], bySubtask: {} },
+          },
+        },
+        taskClass: "implement",
+        providers: all,
+        settings: settingsFor(all),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    expect(bothFirst(closeFirst(100))).toStrictEqual(opus);
+    expect(bothFirst(closeFirst(200))).toStrictEqual(sol);
     const weakOpus = board.models.map((entry) =>
       entry.models[0] === "model-opus" ? { ...entry, scores: scores(50) } : entry,
     );
