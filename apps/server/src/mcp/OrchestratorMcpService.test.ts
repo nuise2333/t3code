@@ -3739,12 +3739,15 @@ describe("OrchestratorMcpService provider resolution", () => {
             .delegateTask(scope, { task: "Review.", target: { model: "claude-fake-1" } })
             .pipe(Effect.flip);
           const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+            readonly teamMember?: unknown;
             readonly modelSelection: { readonly instanceId: string; readonly model: string };
           }>;
           assert.include(commands[0]?.modelSelection, {
             instanceId: backupInstanceId,
             model: "claude-fake-1",
           });
+          // The task stays its member's, whichever model runs it.
+          assert.deepEqual(commands[0]?.teamMember, { teamId: "crew", ...member });
         }).pipe(Effect.provide(layer));
       }),
   );

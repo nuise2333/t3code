@@ -16,6 +16,7 @@ import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-v
 import {
   useChildThreadInputs,
   useThreadReportedModelSelection,
+  useThreadAgentTeam,
   useThreadRouting,
 } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
@@ -432,6 +433,7 @@ function ThreadDetailBody(
   const { session: voiceInputSession } = useGlobalVoiceInput();
   const reportedModelSelection = useThreadReportedModelSelection(props.selectedThreadDetailRef);
   const threadRouting = useThreadRouting(props.selectedThreadDetailRef);
+  const threadAgentTeam = useThreadAgentTeam(props.selectedThreadDetailRef);
   const deviceState = useEnvironmentQuery(
     deviceEnvironment.state({ environmentId: props.environmentId, input: {} }),
   );
@@ -1858,6 +1860,7 @@ function ThreadDetailBody(
                         draftAutoEffort={props.draftMode?.autoEffort === true}
                         draftRoutingGroupName={props.draftMode?.routingGroupName ?? null}
                         threadRouting={threadRouting}
+                        threadAgentTeam={threadAgentTeam}
                         canOperateThread={props.canOperateThread}
                         reportedModelSelection={reportedModelSelection}
                         editorRef={composerEditorRef}

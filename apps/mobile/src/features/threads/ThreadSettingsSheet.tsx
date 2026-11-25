@@ -1588,6 +1588,7 @@ export function ExistingThreadSettingsRouteScreen({
   });
   const routedGroup = routedGroupDisplay({
     routing: structure?.projection.thread.routing,
+    agentTeam: structure?.projection.thread.agentTeam,
     selection: modelSelection,
     providers: serverConfig?.providers ?? [],
   });

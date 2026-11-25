@@ -29,10 +29,12 @@ export const agentTeamTitle = (name: string) => (/\bteam$/i.test(name) ? name : 
 
 function agentTeamTally(progress: AgentTeamProgress): string {
   if (progress.rows.length === 0) return "The lead delegates to members as it plans.";
+  const stopped = progress.rows.filter((row) => row.status === "stopped").length;
   return [
     progress.working > 0 ? `${progress.working} working` : null,
     progress.done > 0 ? `${progress.done} done` : null,
     progress.failed > 0 ? `${progress.failed} failed` : null,
+    stopped > 0 ? `${stopped} stopped` : null,
   ]
     .filter(Boolean)
     .join(" · ");

@@ -1,5 +1,7 @@
 import {
+  AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH,
   AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH,
+  type AgentTeamRole,
   type EnvironmentId,
   MAX_ROUTING_GROUP_MEMBERS,
   MAX_ROUTING_GROUPS,
@@ -22,6 +24,7 @@ import {
   resolveRoutingGroupPreset,
   ROUTING_GROUP_PRESETS,
 } from "@t3tools/client-runtime/routing-presets";
+import { agentTeamMembersProblem } from "@t3tools/shared/agentTeam";
 import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { ArrowDownIcon, ArrowUpIcon, MoreVertical, PlusIcon, XIcon } from "lucide-react";
@@ -32,6 +35,11 @@ import { getCustomModelOptionsByInstance, selectsPlanAgent } from "../../modelSe
 import { isProviderInstancePickerReady, providerInstanceEntriesFor } from "../../providerInstances";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import {
+  AgentTeamRoleDetails,
+  AgentTeamRoleName,
+  EMPTY_TEAM_ROLE,
+} from "../chat/AgentTeamRoleFields";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import {
@@ -283,8 +291,8 @@ export function RoutingGroupsSettings({
         })}
         {teams ? (
           <SettingsRow
-            title="Lead guidance"
-            description="Added to the built-in team rules for every team's lead, from its next turn."
+            title="Default lead guidance"
+            description="Added to the built-in team rules for the lead of every team without its own, from its next turn."
           >
             <div className="mt-3 max-w-2xl pb-3.5">
               <Textarea
@@ -388,6 +396,7 @@ export function RoutingGroupsSettings({
           providers={providers}
           seedMember={seedMember}
           quotaSupported={quotaSupported && !teams}
+          rolesSupported={teams && capabilities.agentTeamRoles === true}
           takenIds={[
             ...allGroups.map((group) => group.id),
             ...Object.values(settings.routingGroupRules),
@@ -448,6 +457,7 @@ function RoutingGroupDialog({
   providers,
   seedMember,
   quotaSupported,
+  rolesSupported,
   takenIds,
   onClose,
   onSave,
@@ -458,6 +468,8 @@ function RoutingGroupDialog({
   readonly seedMember: ModelSelection | null;
   /** An older server strips `rank`, so it gets neither the choice nor the key. */
   readonly quotaSupported: boolean;
+  /** A team on a server that keeps member roles and team guidance. */
+  readonly rolesSupported: boolean;
   readonly takenIds: ReadonlyArray<string>;
   readonly onClose: () => void;
   readonly onSave: (group: RoutingGroup) => void;
@@ -465,18 +477,45 @@ function RoutingGroupDialog({
   const settings = useEnvironmentSettings(environmentId);
   const formId = useId();
   const [name, setName] = useState(editing.group.name);
-  const [members, setMembers] = useState<ReadonlyArray<ModelSelection>>(editing.group.members);
+  const [entriesDraft, setMembers] = useState<
+    ReadonlyArray<{
+      readonly key: number;
+      readonly selection: ModelSelection;
+      readonly role: AgentTeamRole;
+    }>
+  >(() =>
+    editing.group.members.map((selection, index) => ({
+      key: index,
+      selection,
+      role: editing.group.memberRoles?.[index] ?? EMPTY_TEAM_ROLE,
+    })),
+  );
+  const members = entriesDraft.map((entry) => entry.selection);
+  const memberRoles = entriesDraft.map((entry) => entry.role);
+  const [leadGuidance, setLeadGuidance] = useState(editing.group.leadGuidance ?? "");
+  const [sharedGuidance, setSharedGuidance] = useState(editing.group.sharedGuidance ?? "");
+  const [maxParallel, setMaxParallel] = useState(editing.group.maxParallel ?? 0);
   const [rank, setRank] = useState<RoutingGroupRank>(editing.group.rank ?? "order");
   const team = editing.group.team === true;
+  const membersProblem = team
+    ? agentTeamMembersProblem({ members, ...(rolesSupported ? { memberRoles } : {}) })
+    : null;
   const entries = providerInstanceEntriesFor(providers, settings, null);
   const trimmedName = name.trim();
   const canSave =
     trimmedName.length > 0 &&
     trimmedName.length <= 64 &&
     members.length > 0 &&
+    membersProblem === null &&
     members.every((member) => member.model.length > 0);
-  const updateMember = (index: number, member: ModelSelection) =>
-    setMembers((current) => current.map((entry, at) => (at === index ? member : entry)));
+  const updateMember = (index: number, selection: ModelSelection) =>
+    setMembers((current) =>
+      current.map((entry, at) => (at === index ? { ...entry, selection } : entry)),
+    );
+  const updateRole = (index: number, role: AgentTeamRole) =>
+    setMembers((current) =>
+      current.map((entry, at) => (at === index ? { ...entry, role } : entry)),
+    );
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -515,7 +554,10 @@ function RoutingGroupDialog({
                 name: trimmedName,
                 strategy: "order",
                 ...(quotaSupported ? { rank } : {}),
-                ...(team ? { team: true as const } : {}),
+                ...(team
+                  ? { team: true as const, maxParallel, leadGuidance: leadGuidance.trim() }
+                  : {}),
+                ...(rolesSupported ? { memberRoles, sharedGuidance: sharedGuidance.trim() } : {}),
                 members,
               });
             }}
@@ -558,16 +600,12 @@ function RoutingGroupDialog({
                     ? "Models, ties in order"
                     : "Models, in order"}
               </Label>
-              {members.map((member, index) => {
+              {entriesDraft.map(({ key, selection: member, role }, index) => {
                 const entry = entries.find(
                   (candidate) => candidate.instanceId === member.instanceId,
                 );
                 return (
-                  <div
-                    // oxlint-disable-next-line react/no-array-index-key -- members repeat freely and only move by these buttons
-                    key={index}
-                    className="flex flex-wrap items-center gap-2"
-                  >
+                  <div key={key} className="flex flex-wrap items-center gap-2">
                     <span
                       className={`${team ? "w-9" : "w-5"} text-muted-foreground text-xs tabular-nums`}
                     >
@@ -641,6 +679,23 @@ function RoutingGroupDialog({
                         <XIcon />
                       </Button>
                     </div>
+                    {rolesSupported ? (
+                      <div className="grid w-full gap-1 ps-11">
+                        <AgentTeamRoleName
+                          label={`Member ${index + 1}`}
+                          placeholder={
+                            index === 0 ? "Name as a worker, when another model leads" : undefined
+                          }
+                          role={role}
+                          onChange={(next) => updateRole(index, next)}
+                        />
+                        <AgentTeamRoleDetails
+                          label={`Member ${index + 1}`}
+                          role={role}
+                          onChange={(next) => updateRole(index, next)}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -649,14 +704,74 @@ function RoutingGroupDialog({
                   <Button
                     size="xs"
                     variant="outline"
-                    onClick={() => setMembers((current) => [...current, seedMember])}
+                    onClick={() =>
+                      setMembers((current) => [
+                        ...current,
+                        {
+                          key: Math.max(-1, ...current.map((entry) => entry.key)) + 1,
+                          selection: seedMember,
+                          role: EMPTY_TEAM_ROLE,
+                        },
+                      ])
+                    }
                   >
                     <PlusIcon className="size-3" aria-hidden />
                     Add model
                   </Button>
                 </div>
               ) : null}
+              {membersProblem ? (
+                <p role="alert" className="text-destructive-foreground text-xs">
+                  {membersProblem}
+                </p>
+              ) : null}
             </div>
+            {rolesSupported ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor={`${formId}-shared`}>Team guidance, for everyone</Label>
+                <Textarea
+                  id={`${formId}-shared`}
+                  rows={2}
+                  maxLength={AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH}
+                  placeholder="Never push to main. Run the tests before you finish."
+                  value={sharedGuidance}
+                  onChange={(event) => setSharedGuidance(event.target.value)}
+                />
+              </div>
+            ) : null}
+            {team ? (
+              <>
+                <div className="grid gap-1.5">
+                  <Label htmlFor={`${formId}-lead`}>Lead guidance, for the lead only</Label>
+                  <Textarea
+                    id={`${formId}-lead`}
+                    rows={3}
+                    maxLength={AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH}
+                    placeholder="Replaces the default lead guidance for this team. Leave empty to use that."
+                    value={leadGuidance}
+                    onChange={(event) => setLeadGuidance(event.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor={`${formId}-parallel`}>Tasks at once</Label>
+                  <div className="w-28">
+                    <Input
+                      id={`${formId}-parallel`}
+                      type="number"
+                      min={1}
+                      max={32}
+                      placeholder="Unlimited"
+                      value={maxParallel === 0 ? "" : String(maxParallel)}
+                      onChange={(event) =>
+                        setMaxParallel(
+                          Math.max(0, Math.min(32, Math.round(Number(event.target.value) || 0))),
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              </>
+            ) : null}
           </form>
         </DialogPanel>
         <DialogFooter variant="bare">

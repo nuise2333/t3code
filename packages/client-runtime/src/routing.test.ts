@@ -249,6 +249,33 @@ describe("routing groups", () => {
     ]);
     expect([progress.working, progress.done, progress.failed]).toStrictEqual([1, 1, 1]);
     expect(progress.rows[0]?.childThreadId).toBe("thread:a");
+
+    // A rerouted task stays with the member it was meant for, and one of a removed member stays.
+    const rerouted = agentTeamProgress({
+      threadId,
+      team: { ...group, memberRoles: [{ name: "Reviewer", description: "", instructions: "" }] },
+      providers,
+      subagents: [
+        task("r", "running", {
+          modelSelection: { instanceId, model: "gpt-5" },
+          teamMember: { teamId: group.id, name: "Reviewer", ...group.members[0]! },
+        }),
+        task("gone", "completed", {
+          modelSelection: { instanceId, model: "gpt-5" },
+          teamMember: { teamId: group.id, instanceId, model: "gpt-5" },
+        }),
+        task("else", "running", {
+          modelSelection: { instanceId, model: "gpt-6" },
+          teamMember: { teamId: "other-team", instanceId, model: "gpt-6" },
+        }),
+      ],
+    });
+    expect(
+      rerouted.rows.map((row) => [row.id, row.member, row.memberIndex, row.reroutedTo]),
+    ).toStrictEqual([
+      ["r", "Reviewer", 0, "gpt-5"],
+      ["gone", "gpt-5", null, null],
+    ]);
   });
 
   it("orders a team's handovers, counts a member's redo rounds and places the lead", () => {

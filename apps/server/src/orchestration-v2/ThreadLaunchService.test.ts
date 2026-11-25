@@ -3502,12 +3502,17 @@ describe("effort routing", () => {
     it.effect("records that a thread launched through an agent team leads it", () => {
       const harness = makeHarness({
         providers: [codex()],
-        serverSettings: { routingGroups: [{ ...group([modelSelection]), team: true }] },
+        serverSettings: {
+          routingGroups: [{ ...group([modelSelection]), team: true }],
+          // The remembered automatic team must not replace the one picked.
+          agentTeamDefault: "balanced",
+        },
       });
       return Effect.gen(function* () {
         const { thread } = yield* launchedThread(groupLaunch("team-launch"));
         assert.deepStrictEqual(thread.modelSelection, modelSelection);
         assert.include(thread.routing?.group, { id: "fast", team: true, chosen: 0 });
+        assert.isUndefined(thread.agentTeam);
       }).pipe(Effect.provide(harness.layer));
     });
 

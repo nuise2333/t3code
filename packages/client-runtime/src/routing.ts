@@ -25,6 +25,7 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { isClaudeUltrathinkPrompt, isReasoningSelect } from "@t3tools/shared/model";
+import { agentTeamRole } from "@t3tools/shared/agentTeam";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   effortSetOutsidePicker,
@@ -241,8 +242,10 @@ function lastOwnFailures(
   );
 }
 
-const sameModel = (left: ModelSelection, right: ModelSelection) =>
-  left.instanceId === right.instanceId && left.model === right.model;
+const sameModel = (
+  left: Pick<ModelSelection, "instanceId" | "model">,
+  right: Pick<ModelSelection, "instanceId" | "model">,
+) => left.instanceId === right.instanceId && left.model === right.model;
 
 /**
  * Finds a command that failed at the end of both of the last two completed runs on the composer's
@@ -657,19 +660,20 @@ export function pickerRoutingGroups(input: {
 
 /** Such as "Opus 5.5 leads GPT-6.1, Gemini 4"; a lone member leads itself. */
 export function agentTeamSummary(
-  team: Pick<RoutingGroup, "members">,
+  team: Pick<RoutingGroup, "members" | "memberRoles">,
   lead: Pick<ModelSelection, "instanceId" | "model"> | undefined,
   providers: ReadonlyArray<ModelNameSource>,
 ): string {
   const leader = lead ?? team.members[0];
   if (!leader) return "";
-  const others = team.members.filter(
-    (member) => member.instanceId !== leader.instanceId || member.model !== leader.model,
+  const leadIndex = team.members.findIndex((member) => sameModel(member, leader));
+  const others = team.members.flatMap((member, index) =>
+    index === leadIndex
+      ? []
+      : [agentTeamRole(team, index)?.name || routingMemberLabel(member, providers)],
   );
   const leadLabel = routingMemberLabel(leader, providers);
-  return others.length === 0
-    ? `${leadLabel} leads`
-    : `${leadLabel} leads ${others.map((member) => routingMemberLabel(member, providers)).join(", ")}`;
+  return others.length === 0 ? `${leadLabel} leads` : `${leadLabel} leads ${others.join(", ")}`;
 }
 
 /** Plain routing groups; agent teams are edited and listed apart. */
@@ -683,8 +687,16 @@ export function plainRoutingGroups(
 export interface AgentTeamTaskRow {
   readonly id: string;
   readonly title: string;
-  /** The member that runs it, such as "GPT-6.1". */
+  /** The member that runs it, such as "GPT-6.1" or its role's name, "Reviewer". */
   readonly member: string;
+  /** The model that runs it. */
+  readonly model: string;
+  /** The member's own model, which differs from `model` when T3 rerouted the task. */
+  readonly assignedModel: string;
+  /** The member's slot in a saved team; null when the task names no current member. */
+  readonly memberIndex: number | null;
+  /** The model that runs it instead of the member's, such as when that was out of usage. */
+  readonly reroutedTo: string | null;
   readonly driver: ProviderDriverKind;
   /** The member's model and options, for its provider icon and effort. */
   readonly selection: ModelSelection;
@@ -756,6 +768,24 @@ function endedBefore(
   return Date.parse(earlier.completedAt) <= Date.parse(later.startedAt);
 }
 
+/** The member with this name, else the one on this model, unnamed first; null when the team has neither. */
+function agentTeamMemberIndex(
+  team: Pick<RoutingGroup, "members" | "memberRoles">,
+  member: Pick<ModelSelection, "instanceId" | "model">,
+  name: string | undefined,
+): number | null {
+  const named = name
+    ? team.members.findIndex(
+        (_member, index) => agentTeamRole(team, index)?.name.toLowerCase() === name.toLowerCase(),
+      )
+    : -1;
+  if (named >= 0) return named;
+  const onModel = [...team.members.keys()].filter((at) => sameModel(team.members[at]!, member));
+  // As a lead's target resolves: the model alone means the one without a name.
+  const index = onModel.find((at) => !agentTeamRole(team, at)?.name) ?? onModel[0] ?? -1;
+  return index < 0 ? null : index;
+}
+
 /**
  * The tasks a thread delegated to its team's members, in the order they started; ones not started
  * yet come last. Only tasks the thread itself delegated (not a provider's own subagents or
@@ -764,7 +794,7 @@ function endedBefore(
 export function agentTeamProgress(input: {
   readonly threadId: string;
   /** A saved team's members; null for an automatic team, whose workers T3 picks per task. */
-  readonly team: Pick<RoutingGroup, "members"> | null;
+  readonly team: Pick<RoutingGroup, "id" | "members" | "memberRoles"> | null;
   readonly subagents: ReadonlyArray<OrchestrationV2Subagent>;
   readonly providers: ReadonlyArray<ModelNameSource>;
   /** Whether the lead's own thread runs now; leave out when unknown. */
@@ -775,22 +805,30 @@ export function agentTeamProgress(input: {
       if (task.threadId !== input.threadId || task.origin !== "app_owned") return [];
       if (task.workflow !== undefined || task.councilLens !== undefined) return [];
       const selection = task.modelSelection;
-      const member =
-        selection &&
-        (input.team === null
-          ? selection
-          : input.team.members.find(
-              (candidate) =>
-                candidate.instanceId === selection.instanceId &&
-                candidate.model === selection.model,
-            ));
+      const team = input.team;
+      const assigned = team && task.teamMember?.teamId === team.id ? task.teamMember : null;
+      // Another team's, from before this one was turned on.
+      if (task.teamMember && assigned === null) return [];
+      const member = assigned ?? selection;
       if (!selection || !member) return [];
+      const memberIndex = team === null ? null : agentTeamMemberIndex(team, member, assigned?.name);
+      // A task recorded for this team stays even after an edit removed its member.
+      if (team !== null && assigned === null && memberIndex === null) return [];
+      const name =
+        assigned?.name ??
+        (team && memberIndex !== null ? agentTeamRole(team, memberIndex)?.name : "");
       const status = TEAM_TASK_STATUS[task.status];
       return [
         {
           id: task.id,
           title: task.title?.trim() || promptTitle(task.prompt),
-          member: routingMemberLabel(member, input.providers),
+          member: name || routingMemberLabel(member, input.providers),
+          model: routingMemberLabel(selection, input.providers),
+          assignedModel: routingMemberLabel(member, input.providers),
+          memberIndex,
+          reroutedTo: sameModel(member, selection)
+            ? null
+            : routingMemberLabel(selection, input.providers),
           driver: task.driver,
           selection,
           status,
@@ -809,9 +847,11 @@ export function agentTeamProgress(input: {
   for (const task of tasks) {
     const previous = rows.filter(
       (row) =>
-        row.selection.instanceId === task.selection.instanceId &&
-        row.selection.model === task.selection.model &&
-        endedBefore(row, task),
+        (task.memberIndex === null
+          ? row.memberIndex === null &&
+            row.member === task.member &&
+            sameModel(row.selection, task.selection)
+          : row.memberIndex === task.memberIndex) && endedBefore(row, task),
     );
     rows.push({ ...task, round: Math.max(0, ...previous.map((row) => row.round)) + 1 });
   }

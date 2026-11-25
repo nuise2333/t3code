@@ -183,6 +183,29 @@ export type RoutingGroupId = typeof RoutingGroupId.Type;
 export const MAX_ROUTING_GROUPS = 16;
 export const MAX_ROUTING_GROUP_MEMBERS = 8;
 
+export const AGENT_TEAM_ROLE_NAME_MAX_LENGTH = 40;
+export const AGENT_TEAM_ROLE_DESCRIPTION_MAX_LENGTH = 240;
+export const AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH = 2000;
+
+/** What one team member is for. Any field may be empty; an empty name shows the model's. */
+export const AgentTeamRole = Schema.Struct({
+  name: Schema.String.check(Schema.isMaxLength(AGENT_TEAM_ROLE_NAME_MAX_LENGTH)),
+  /** Told to the lead, so it knows which tasks to hand over. */
+  description: Schema.String.check(Schema.isMaxLength(AGENT_TEAM_ROLE_DESCRIPTION_MAX_LENGTH)),
+  /** Told to the member with each of its tasks. */
+  instructions: Schema.String.check(Schema.isMaxLength(AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH)),
+});
+export type AgentTeamRole = typeof AgentTeamRole.Type;
+
+/** The member a lead handed a task to; the model that ran it can differ when T3 rerouted it. */
+export const AgentTeamTaskMember = Schema.Struct({
+  teamId: RoutingGroupId,
+  name: Schema.optionalKey(Schema.String),
+  instanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+});
+export type AgentTeamTaskMember = typeof AgentTeamTaskMember.Type;
+
 /** An ordered list of selections; a launch takes the first member that can run it, or by quota. */
 export const RoutingGroup = Schema.Struct({
   /** Stable once created; a rename changes only `name`. */
@@ -209,6 +232,17 @@ export const RoutingGroup = Schema.Struct({
   ),
   /** This team's lead guidance; empty or absent uses the setting every team shares. */
   leadGuidance: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
+  /**
+   * A team's roles, one per member in the same order; empty or absent means none. Beside `members`
+   * because a member is a plain model selection. The server keeps it when an older client saves.
+   */
+  memberRoles: Schema.optionalKey(
+    Schema.Array(AgentTeamRole).check(Schema.isMaxLength(MAX_ROUTING_GROUP_MEMBERS)),
+  ),
+  /** Told to the lead and, with each task, to every member; empty or absent means none. */
+  sharedGuidance: Schema.optionalKey(
+    Schema.String.check(Schema.isMaxLength(AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH)),
+  ),
 });
 export type RoutingGroup = typeof RoutingGroup.Type;
 

@@ -252,7 +252,7 @@ function EnvironmentRoutingGroups(props: {
             />
           );
         })}
-        {canWrite && seed && groups.length < MAX_ROUTING_GROUPS ? (
+        {canWrite && seed && groups.length + teams.length < MAX_ROUTING_GROUPS ? (
           <ListActionRow icon="plus" label="Add group" onPress={addGroup} />
         ) : null}
       </SettingsSection>

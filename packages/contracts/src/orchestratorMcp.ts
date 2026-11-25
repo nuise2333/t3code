@@ -173,6 +173,9 @@ export type OrchestratorMcpTerminalDelegatedTaskStatus =
 export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   task: OrchestratorMcpPrompt,
   target: Schema.optional(OrchestratorMcpTarget),
+  member: Schema.optional(TrimmedNonEmptyString).annotate({
+    description: "Agent team leads only: the member's name, in place of a target model.",
+  }),
   routingGroupId: Schema.optional(RoutingGroupId).annotate({
     description:
       "Group id from orchestrator_capabilities; runs a usable member here. Not with a target model or environment.",
@@ -717,6 +720,8 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
       name: Schema.String,
       members: Schema.Array(
         Schema.Struct({
+          name: Schema.optional(Schema.String),
+          description: Schema.optional(Schema.String),
           providerInstanceId: ProviderInstanceId,
           model: Schema.String,
           options: Schema.optional(Schema.Array(ProviderOptionSelection)),

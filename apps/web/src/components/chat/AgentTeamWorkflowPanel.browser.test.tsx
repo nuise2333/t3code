@@ -62,12 +62,36 @@ it("walks a team's handovers by keyboard and opens or stops a member's task", as
           leadLabel: "Opus",
           lead,
           workers: [
-            { label: "GPT-6", selection: { instanceId: codex, model: "gpt-6" } },
-            { label: "Fable", selection: { instanceId: codex, model: "fable" } },
+            {
+              memberIndex: 1,
+              label: "Builder",
+              model: "GPT-6",
+              description: "Writes the code",
+              selection: { instanceId: codex, model: "gpt-6" },
+            },
+            {
+              memberIndex: 2,
+              label: "Reviewer",
+              model: "Fable",
+              description: "Checks diffs",
+              selection: { instanceId: codex, model: "fable" },
+            },
           ],
           progress: agentTeamProgress({
             threadId,
-            team: null,
+            team: {
+              id: "crew",
+              members: [
+                lead,
+                { instanceId: codex, model: "gpt-6" },
+                { instanceId: codex, model: "fable" },
+              ],
+              memberRoles: ["", "Builder", "Reviewer"].map((name) => ({
+                name,
+                description: "",
+                instructions: "",
+              })),
+            },
             providers: [],
             subagents: [
               task("map", "completed", {
@@ -91,9 +115,17 @@ it("walks a team's handovers by keyboard and opens or stops a member's task", as
   await expect.element(agents.getByText("Waiting on workers")).toBeVisible();
   await expect.element(agents.getByText(/Working · Fix the tokenizer/)).toBeVisible();
   await expect.element(agents.getByText("1/2 done")).toBeVisible();
-  await expect.element(agents.getByText("Idle")).toBeVisible();
+  // An idle member shows what it is for; picking one shows only its handovers.
+  await expect.element(agents.getByText("Checks diffs")).toBeVisible();
+  const reviewer = agents.getByRole("button", { name: /Reviewer/ });
+  await reviewer.click();
+  await expect.element(screen.getByText("Handovers to Reviewer")).toBeVisible();
+  await expect.element(screen.getByText("No tasks for this member yet.")).toBeVisible();
+  await screen.getByRole("button", { name: "Show all" }).click();
   const first = screen.getByRole("button", { name: /Map the parser/ });
-  const second = screen.getByRole("button", { name: /Fix the tokenizer/ });
+  const second = screen
+    .getByRole("list", { name: "Team workflow" })
+    .getByRole("button", { name: /Fix the tokenizer/ });
   await expect.element(second.getByText("Round 2")).toBeVisible();
   await expect
     .element(screen.getByRole("progressbar"))

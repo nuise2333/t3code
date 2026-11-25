@@ -62,7 +62,7 @@ import {
   routingMemberLabel,
   routingProviderSource,
 } from "@t3tools/client-runtime/routing";
-import { threadAgentTeam, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
+import { agentTeamRole, threadAgentTeam, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
 import { councilApplies, councilStatus, councilUserMessageTimes } from "@t3tools/shared/council";
 import { councilBannerItem } from "./chat/CouncilStrip";
 import { agentTeamBannerItem } from "./chat/AgentTeamStrip";
@@ -2817,9 +2817,23 @@ export default function ChatView(props: ChatViewProps) {
           : agentTeamSummary(savedTeam!, lead, providers),
       leadLabel,
       lead,
-      workers: (savedTeam?.members ?? [])
-        .filter((member) => member.instanceId !== lead.instanceId || member.model !== lead.model)
-        .map((member) => ({ label: routingMemberLabel(member, providers), selection: member })),
+      workers: (savedTeam?.members ?? []).flatMap((member, memberIndex, members) => {
+        const leads =
+          members.findIndex(
+            (entry) => entry.instanceId === lead.instanceId && entry.model === lead.model,
+          ) === memberIndex;
+        if (leads || savedTeam === null) return [];
+        const role = agentTeamRole(savedTeam, memberIndex);
+        return [
+          {
+            memberIndex,
+            label: role?.name || routingMemberLabel(member, providers),
+            model: routingMemberLabel(member, providers),
+            description: role?.description ?? "",
+            selection: member,
+          },
+        ];
+      }),
       progress: agentTeamProgress({
         threadId: serverProjection.thread.id,
         team: savedTeam,

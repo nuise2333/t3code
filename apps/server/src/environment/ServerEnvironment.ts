@@ -256,6 +256,7 @@ export const make = Effect.gen(function* () {
       routingGroupQuota: true,
       scheduledTaskRoutingGroups: true,
       agentTeams: true,
+      agentTeamRoles: true,
       threadAssists: true,
       rtk,
       crossVendorModel: true,

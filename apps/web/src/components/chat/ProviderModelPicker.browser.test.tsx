@@ -532,6 +532,8 @@ it("edits the team setup inside the picker without closing it", async () => {
             entries={entries}
             currentSelection={{ instanceId: codex!.instanceId, model: "alpha" }}
             sharedGuidance=""
+            rolesSupported
+            groupIds={[]}
             onDone={() => {}}
             onSaveTeams={onSaveTeams}
             onApply={onApply}
@@ -549,12 +551,21 @@ it("edits the team setup inside the picker without closing it", async () => {
   await page.getByRole("combobox", { name: "Search models" }).fill("bet");
   await expect.element(page.getByRole("option", { name: /Alpha model/ })).not.toBeInTheDocument();
   await page.getByRole("option", { name: /Beta model/ }).click();
-  await setup.getByRole("textbox").fill("Plan first");
+  await setup.getByRole("textbox", { name: "Lead guidance" }).fill("Plan first");
+  await setup.getByRole("textbox", { name: /Team guidance/ }).fill("Answer in Chinese");
   const efforts = setup.element().querySelectorAll("[data-team-member-effort] button");
   expect(efforts).toHaveLength(2);
   (efforts[1] as HTMLButtonElement).click();
   await page.getByRole("menuitemradio", { name: "High" }).click();
   await expect.element(setup).toBeVisible();
+  // Two workers on one model need names, so the lead can tell them apart.
+  await setup.getByRole("button", { name: "Add worker" }).click();
+  await setup.getByRole("combobox", { name: "Worker 2 model" }).click();
+  await page.getByRole("option", { name: /Beta model/ }).click();
+  await expect.element(setup.getByText(/Two members use the same model/)).toBeVisible();
+  await setup.getByRole("textbox", { name: "Worker 2 name" }).fill("Reviewer");
+  await setup.getByRole("button", { name: "Worker 2 role" }).click();
+  await setup.getByRole("textbox", { name: /Give it tasks about/ }).fill("Reviews diffs");
   await setup.getByRole("button", { name: "Save setup" }).click();
   expect(onApply).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -566,7 +577,14 @@ it("edits the team setup inside the picker without closing it", async () => {
           model: "beta",
           options: [{ id: "thought_level", value: "high" }],
         },
+        { instanceId: codex!.instanceId, model: "beta" },
       ],
+      memberRoles: [
+        { name: "", description: "", instructions: "" },
+        { name: "", description: "", instructions: "" },
+        { name: "Reviewer", description: "Reviews diffs", instructions: "" },
+      ],
+      sharedGuidance: "Answer in Chinese",
     }),
   );
 });

@@ -34,7 +34,15 @@ export interface AgentTeamView {
   readonly lead: ModelSelection;
   readonly progress: AgentTeamProgress;
   /** A saved team's workers, listed before they get a task; T3 picks an automatic team's. */
-  readonly workers?: ReadonlyArray<{ readonly label: string; readonly selection: ModelSelection }>;
+  readonly workers?: ReadonlyArray<{
+    /** Its place in the saved team, which its tasks carry too. */
+    readonly memberIndex: number;
+    /** Its role's name, else its model's. */
+    readonly label: string;
+    readonly model: string;
+    readonly description: string;
+    readonly selection: ModelSelection;
+  }>;
 }
 
 type AgentState = AgentTeamTaskRow["status"] | "planning" | "reviewing" | "waiting" | "idle";
@@ -44,6 +52,8 @@ interface AgentTeamAgent {
   readonly key: string;
   readonly role: "lead" | "worker";
   readonly label: string;
+  readonly model: string;
+  readonly description: string;
   readonly selection: ModelSelection;
   readonly driver: AgentTeamTaskRow["driver"] | undefined;
   readonly state: AgentState;
@@ -64,6 +74,9 @@ const AGENT_STATE_LABELS: Record<AgentState, string> = {
 const selectionKey = (selection: Pick<ModelSelection, "instanceId" | "model">) =>
   `${selection.instanceId}\u0000${selection.model}`;
 
+const taskAgentKey = (row: AgentTeamTaskRow) =>
+  row.memberIndex === null ? `model:${selectionKey(row.selection)}` : `member:${row.memberIndex}`;
+
 /** The lead, then each worker with its latest task: working, else how its last task ended. */
 function agentTeamAgents(team: AgentTeamView): ReadonlyArray<AgentTeamAgent> {
   const { progress } = team;
@@ -71,6 +84,8 @@ function agentTeamAgents(team: AgentTeamView): ReadonlyArray<AgentTeamAgent> {
     key: `lead:${selectionKey(team.lead)}`,
     role: "lead",
     label: team.leadLabel,
+    model: team.leadLabel,
+    description: "",
     selection: team.lead,
     driver: undefined,
     state: progress.lead ?? (progress.working > 0 ? "waiting" : "idle"),
@@ -80,25 +95,37 @@ function agentTeamAgents(team: AgentTeamView): ReadonlyArray<AgentTeamAgent> {
   };
   const workers = new Map<
     string,
-    { label: string; selection: ModelSelection; rows: AgentTeamTaskRow[] }
+    Pick<AgentTeamAgent, "label" | "model" | "description" | "selection"> & {
+      rows: AgentTeamTaskRow[];
+    }
   >();
   for (const worker of team.workers ?? []) {
-    workers.set(selectionKey(worker.selection), { ...worker, rows: [] });
+    workers.set(`member:${worker.memberIndex}`, { ...worker, rows: [] });
   }
   for (const row of progress.rows) {
-    const key = selectionKey(row.selection);
+    const key = taskAgentKey(row);
     const worker = workers.get(key);
     if (worker) worker.rows.push(row);
-    else workers.set(key, { label: row.member, selection: row.selection, rows: [row] });
+    else {
+      workers.set(key, {
+        label: row.member,
+        model: row.model,
+        description: "",
+        selection: row.selection,
+        rows: [row],
+      });
+    }
   }
   return [
     lead,
     ...[...workers].map(([key, worker]): AgentTeamAgent => {
       const current = worker.rows.find((row) => row.status === "working") ?? worker.rows.at(-1);
       return {
-        key: `worker:${key}`,
+        key,
         role: "worker",
         label: worker.label,
+        model: worker.model,
+        description: worker.description,
         selection: worker.selection,
         driver: worker.rows[0]?.driver,
         state: current?.status ?? "idle",
@@ -143,6 +170,8 @@ export function AgentTeamWorkflowPanel(props: {
   const { team, onStopTask } = props;
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set());
   const [stopping, setStopping] = useState(false);
+  /** The agent whose handovers show; null shows everyone's. */
+  const [filter, setFilter] = useState<string | null>(null);
 
   if (team === null) {
     return (
@@ -158,8 +187,9 @@ export function AgentTeamWorkflowPanel(props: {
   const stop = async (taskIds: ReadonlyArray<string>) => {
     if (!onStopTask || stopping) return;
     setStopping(true);
-    await Promise.all(taskIds.map((taskId) => onStopTask(taskId)));
-    setStopping(false);
+    await Promise.all(taskIds.map((taskId) => onStopTask(taskId))).finally(() =>
+      setStopping(false),
+    );
   };
   const setExpanded = (taskId: string, expanded: boolean) =>
     setExpandedIds((current) => {
@@ -169,6 +199,10 @@ export function AgentTeamWorkflowPanel(props: {
       else next.delete(taskId);
       return next;
     });
+  const agents = agentTeamAgents(team);
+  const picked = agents.find((agent) => agent.role === "worker" && agent.key === filter);
+  const shown = picked ? rows.filter((row) => taskAgentKey(row) === picked.key) : rows;
+  const leadStep = picked ? null : progress.lead;
   const live = progress.working > 0 || progress.lead !== null;
 
   return (
@@ -256,21 +290,35 @@ export function AgentTeamWorkflowPanel(props: {
         ) : null}
       </header>
       <ScrollArea scrollFade className="min-h-0 flex-1">
-        <AgentList agents={agentTeamAgents(team)} providers={props.providers} />
-        <h3 className="px-3 pt-1 text-2xs font-medium text-muted-foreground select-none">
-          Handovers
-        </h3>
-        {rows.length === 0 && progress.lead === null ? (
+        <AgentList
+          agents={agents}
+          providers={props.providers}
+          picked={picked?.key ?? null}
+          onPick={setFilter}
+        />
+        <div className="flex min-h-6 items-center justify-between gap-2 px-3 pt-1">
+          <h3 className="min-w-0 truncate text-2xs font-medium text-muted-foreground select-none">
+            {picked ? `Handovers to ${picked.label}` : "Handovers"}
+          </h3>
+          {picked ? (
+            <Button size="xs" variant="ghost-muted" onClick={() => setFilter(null)}>
+              Show all
+            </Button>
+          ) : null}
+        </div>
+        {shown.length === 0 && leadStep === null ? (
           <p className="px-3 py-2 text-xs text-muted-foreground">
-            No tasks yet. The lead delegates to members as it plans.
+            {picked
+              ? "No tasks for this member yet."
+              : "No tasks yet. The lead delegates to members as it plans."}
           </p>
         ) : (
           <ol aria-label="Team workflow" className="flex flex-col p-3" onKeyDown={moveBetweenSteps}>
-            {rows.map((row, index) => (
+            {shown.map((row, index) => (
               <WorkflowStep
                 key={row.id}
                 row={row}
-                last={index === rows.length - 1 && progress.lead === null}
+                last={index === shown.length - 1 && leadStep === null}
                 expanded={expandedIds.has(row.id)}
                 providers={props.providers}
                 stopping={stopping}
@@ -279,7 +327,7 @@ export function AgentTeamWorkflowPanel(props: {
                 onStop={onStopTask ? () => void stop([row.id]) : undefined}
               />
             ))}
-            {progress.lead === null ? null : (
+            {leadStep === null ? null : (
               <li className="flex gap-2.5">
                 <StepRail last>
                   <LoaderCircleIcon
@@ -288,11 +336,9 @@ export function AgentTeamWorkflowPanel(props: {
                   />
                 </StepRail>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-1.5 py-1">
-                  <span className="truncate text-xs font-medium">
-                    {LEAD_STEP[progress.lead].title}
-                  </span>
+                  <span className="truncate text-xs font-medium">{LEAD_STEP[leadStep].title}</span>
                   <span className="truncate text-2xs text-muted-foreground">
-                    {team.leadLabel} · {LEAD_STEP[progress.lead].detail}
+                    {team.leadLabel} · {LEAD_STEP[leadStep].detail}
                   </span>
                 </div>
               </li>
@@ -329,54 +375,117 @@ function AgentStateIcon(props: { readonly state: AgentState }) {
   );
 }
 
-/** Every agent of the team, one row each: its model, role, state and current work. */
+/**
+ * The team as a tree: the lead, and under it the workers it hands tasks to, each with its model
+ * and current work. Picking a worker shows only its handovers.
+ */
 function AgentList(props: {
   readonly agents: ReadonlyArray<AgentTeamAgent>;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly picked: string | null;
+  readonly onPick: (key: string | null) => void;
 }) {
+  const workers = props.agents.filter((agent) => agent.role === "worker");
   return (
     <section aria-label="Agents" className="flex flex-col gap-1 px-3 pt-3 pb-2">
-      <h3 className="text-2xs font-medium text-muted-foreground select-none">Agents</h3>
-      <ul className="flex flex-col gap-1">
-        {props.agents.map((agent) => (
-          <li
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-2xs font-medium text-muted-foreground select-none">Agents</h3>
+        {workers.length > 1 && props.picked === null ? (
+          <span className="text-2xs text-muted-foreground">Pick a worker to filter</span>
+        ) : null}
+      </div>
+      {props.agents
+        .filter((agent) => agent.role === "lead")
+        .map((agent) => (
+          <div
             key={agent.key}
-            data-agent-team-agent={agent.role}
+            data-agent-team-agent="lead"
             data-agent-state={agent.state}
-            className="flex min-w-0 items-start gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5"
+            className="rounded-md border border-border/60 bg-muted/30 px-2 py-1.5"
           >
-            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
-              <AgentStateIcon state={agent.state} />
-            </span>
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="flex min-w-0 items-center gap-1.5 text-xs">
-                <span className="min-w-0 flex-1 font-medium">
-                  <ModelLine
-                    label={agent.label}
-                    selection={agent.selection}
-                    driver={agent.driver}
-                    providers={props.providers}
-                  />
-                </span>
-                {agent.role === "lead" ? (
-                  <Badge variant="outline" size="sm">
-                    Lead
-                  </Badge>
-                ) : agent.total > 0 ? (
-                  <span className="shrink-0 text-2xs text-muted-foreground tabular-nums">
-                    {agent.done}/{agent.total} done
-                  </span>
-                ) : null}
-              </span>
-              <span className="truncate text-2xs text-muted-foreground">
-                {AGENT_STATE_LABELS[agent.state]}
-                {agent.activity ? ` · ${agent.activity}` : ""}
-              </span>
-            </div>
-          </li>
+            <AgentNode agent={agent} providers={props.providers} />
+          </div>
         ))}
+      <ul aria-label="Workers" className="flex flex-col">
+        {workers.map((agent, index) => {
+          const picked = props.picked === agent.key;
+          return (
+            <li key={agent.key} className="relative flex min-w-0 pt-1 ps-6">
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute start-4 top-0 w-px bg-border",
+                  index === workers.length - 1 ? "h-5" : "h-full",
+                )}
+              />
+              <span aria-hidden className="absolute start-4 top-5 h-px w-2 bg-border" />
+              <button
+                type="button"
+                aria-pressed={picked}
+                data-agent-team-agent="worker"
+                data-agent-state={agent.state}
+                className={cn(
+                  "min-w-0 flex-1 cursor-pointer rounded-md border px-2 py-1.5 text-start outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                  picked ? "border-ring bg-accent" : "border-border/60 bg-muted/30",
+                )}
+                onClick={() => props.onPick(picked ? null : agent.key)}
+              >
+                <AgentNode agent={agent} providers={props.providers} />
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </section>
+  );
+}
+
+function AgentNode(props: {
+  readonly agent: AgentTeamAgent;
+  readonly providers: ReadonlyArray<ServerProvider>;
+}) {
+  const { agent } = props;
+  const named = agent.label !== agent.model;
+  const modelLine = (
+    <ModelLine
+      label={agent.model}
+      selection={agent.selection}
+      driver={agent.driver}
+      providers={props.providers}
+    />
+  );
+  return (
+    <span className="flex min-w-0 items-start gap-2">
+      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+        <AgentStateIcon state={agent.state} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-1.5 text-xs">
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {named ? agent.label : modelLine}
+          </span>
+          {named ? (
+            <span className="flex min-w-0 max-w-[50%] text-2xs text-muted-foreground">
+              {modelLine}
+            </span>
+          ) : null}
+          {agent.role === "lead" ? (
+            <Badge variant="outline" size="sm">
+              Lead
+            </Badge>
+          ) : agent.total > 0 ? (
+            <span className="shrink-0 text-2xs text-muted-foreground tabular-nums">
+              {agent.done}/{agent.total} done
+            </span>
+          ) : null}
+        </span>
+        <span className="truncate text-2xs text-muted-foreground">
+          {agent.state === "idle" && agent.description
+            ? agent.description
+            : `${AGENT_STATE_LABELS[agent.state]}${agent.activity ? ` · ${agent.activity}` : ""}`}
+        </span>
+      </span>
+    </span>
   );
 }
 
@@ -398,6 +507,12 @@ function moveBetweenSteps(event: KeyboardEvent<HTMLOListElement>) {
   if (!next) return;
   event.preventDefault();
   next.focus();
+}
+
+/** The member and the model that ran, or a rerouted member's own model and the one used. */
+function stepModelLabel(row: AgentTeamTaskRow): string {
+  const models = row.reroutedTo === null ? row.model : `${row.assignedModel} → ${row.reroutedTo}`;
+  return row.member === row.assignedModel ? models : `${row.member} · ${models}`;
 }
 
 function WorkflowStep(props: {
@@ -463,12 +578,22 @@ function WorkflowStep(props: {
           </span>
           <span className="flex w-full min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
             <ModelLine
-              label={row.member}
+              label={stepModelLabel(row)}
               selection={row.selection}
               driver={row.driver}
               providers={props.providers}
             />
             <span className="shrink-0">· {AGENT_TEAM_STATUS_LABELS[row.status]}</span>
+            {row.reroutedTo === null ? null : (
+              <Tooltip>
+                <TooltipTrigger render={<Badge variant="outline" size="sm" />}>
+                  Rerouted
+                </TooltipTrigger>
+                <TooltipPopup>
+                  {row.assignedModel} couldn&apos;t run, so T3 used {row.reroutedTo}
+                </TooltipPopup>
+              </Tooltip>
+            )}
           </span>
         </button>
         {expanded ? (
@@ -479,6 +604,11 @@ function WorkflowStep(props: {
             className="mt-1 ms-1.5 flex min-w-0 flex-col gap-2 rounded-md border border-border/60 bg-muted/40 px-2.5 py-2"
           >
             <StepExcerpt label="Assignment">{row.brief}</StepExcerpt>
+            {row.reroutedTo === null ? null : (
+              <StepExcerpt label="Rerouted">
+                {`${row.assignedModel} couldn't run, so T3 used ${row.reroutedTo}.`}
+              </StepExcerpt>
+            )}
             {row.progress === null ? null : (
               <StepExcerpt label="Latest update">{row.progress}</StepExcerpt>
             )}

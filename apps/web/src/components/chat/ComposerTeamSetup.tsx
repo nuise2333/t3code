@@ -1,7 +1,10 @@
 import { newRoutingGroupId } from "@t3tools/client-runtime/routing";
 import {
+  AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH,
   AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH,
+  type AgentTeamRole,
   MAX_ROUTING_GROUP_MEMBERS,
+  MAX_ROUTING_GROUPS,
   type ModelSelection,
   type RoutingGroup,
 } from "@t3tools/contracts";
@@ -33,8 +36,10 @@ import {
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { rankModelPickerSearch } from "@t3tools/client-runtime/model-search";
+import { agentTeamMembersProblem, agentTeamRole } from "@t3tools/shared/agentTeam";
 import { createModelSelection } from "@t3tools/shared/model";
 import { selectsPlanAgent } from "../../modelSelection";
+import { AgentTeamRoleDetails, AgentTeamRoleName, EMPTY_TEAM_ROLE } from "./AgentTeamRoleFields";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { TraitsPicker } from "./TraitsPicker";
 
@@ -42,10 +47,25 @@ import { TraitsPicker } from "./TraitsPicker";
 const CUSTOM_TEAM_ID = "custom-setup";
 const CUSTOM_TEAM_NAME = "Custom setup";
 
+interface SetupWorker {
+  /** Keeps a row's own state with it when another is removed. */
+  readonly key: number;
+  readonly selection: ModelSelection | null;
+  readonly role: AgentTeamRole;
+}
+
+let nextWorkerKey = 0;
+const newWorker = (
+  selection: ModelSelection | null = null,
+  role: AgentTeamRole = EMPTY_TEAM_ROLE,
+): SetupWorker => ({ key: nextWorkerKey++, selection, role });
+
 interface Setup {
   readonly architect: ModelSelection | null;
-  readonly workers: ReadonlyArray<ModelSelection | null>;
+  readonly architectRole: AgentTeamRole;
+  readonly workers: ReadonlyArray<SetupWorker>;
   readonly guidance: string;
+  readonly sharedGuidance: string;
   readonly unlimited: boolean;
   readonly parallel: number;
 }
@@ -57,8 +77,12 @@ function setupOf(team: RoutingGroup | undefined, fallbackLead: ModelSelection | 
   const [architect, ...workers] = team?.members ?? [];
   return {
     architect: architect ?? fallbackLead,
-    workers: team ? workers : [null],
+    architectRole: team?.memberRoles?.[0] ?? EMPTY_TEAM_ROLE,
+    workers: team
+      ? workers.map((selection, index) => newWorker(selection, team.memberRoles?.[index + 1]))
+      : [newWorker()],
     guidance: team?.leadGuidance ?? "",
+    sharedGuidance: team?.sharedGuidance ?? "",
     unlimited: (team?.maxParallel ?? 0) === 0,
     parallel: team?.maxParallel || 3,
   };
@@ -268,6 +292,10 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   /** The thread's model, which a new setup starts from as its architect. */
   readonly currentSelection: ModelSelection;
   readonly sharedGuidance: string;
+  /** The server keeps member roles and team guidance. */
+  readonly rolesSupported: boolean;
+  /** Every saved team and routing group, which share one limit. */
+  readonly groupIds: ReadonlyArray<string>;
   /** After Apply or Use a single agent, such as closing the picker. */
   readonly onDone: () => void;
   readonly disabledReason?: string | null;
@@ -301,29 +329,35 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
     setSetup(setupOf(team, props.currentSelection));
   };
 
-  const workers = setup.workers.filter((worker): worker is ModelSelection => worker !== null);
-  const members = (() => {
-    const seen = new Set<string>();
-    return [setup.architect, ...workers].filter((member): member is ModelSelection => {
-      if (member === null || seen.has(keyOf(member))) return false;
-      seen.add(keyOf(member));
-      return true;
-    });
-  })();
-  // Saved options (such as effort) stay with a member the setup keeps.
-  const withSavedOptions = (member: ModelSelection) =>
-    member.options !== undefined
-      ? member
-      : (props.teams
-          .flatMap((team) => team.members)
-          .find((saved) => keyOf(saved) === keyOf(member) && saved.options !== undefined) ??
-        member);
+  const rolesSupported = props.rolesSupported;
+  const workers = setup.workers.flatMap(({ selection, role }) =>
+    selection === null ? [] : [{ selection, role }],
+  );
+  const members = [
+    ...(setup.architect === null
+      ? []
+      : [{ selection: setup.architect, role: setup.architectRole }]),
+    ...workers,
+  ];
+  const setWorker = (index: number, patch: Partial<SetupWorker>) =>
+    setSetup((current) => ({
+      ...current,
+      workers: current.workers.map((worker, at) =>
+        at === index ? { ...worker, ...patch } : worker,
+      ),
+    }));
   const teamFrom = (id: string, name: string): RoutingGroup => ({
     id,
     name,
     strategy: "order",
     team: true,
-    members: members.map(withSavedOptions),
+    members: members.map((member) => member.selection),
+    ...(rolesSupported
+      ? {
+          memberRoles: members.map((member) => member.role),
+          sharedGuidance: setup.sharedGuidance.trim(),
+        }
+      : {}),
     maxParallel: setup.unlimited ? 0 : Math.max(1, Math.min(32, Math.round(setup.parallel))),
     leadGuidance: setup.guidance.trim(),
   });
@@ -334,14 +368,21 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
         ? "Add a worker."
         : members.length > MAX_ROUTING_GROUP_MEMBERS
           ? `A team takes at most ${MAX_ROUTING_GROUP_MEMBERS} models.`
-          : null;
+          : agentTeamMembersProblem({
+              members: members.map((member) => member.selection),
+              ...(rolesSupported ? { memberRoles: members.map((member) => member.role) } : {}),
+            });
+  const full = props.groupIds.length >= MAX_ROUTING_GROUPS;
+  const fullReason = `You can save at most ${MAX_ROUTING_GROUPS} teams and routing groups.`;
+  // Custom setup is saved the first time it is applied, so it needs a free place then.
+  const saveProblem = problem ?? (profile === undefined && full ? fullReason : null);
 
-  const upsert = (team: RoutingGroup) => [
-    ...props.teams.filter((existing) => existing.id !== team.id),
-    team,
-  ];
+  const upsert = (team: RoutingGroup) =>
+    props.teams.some((existing) => existing.id === team.id)
+      ? props.teams.map((existing) => (existing.id === team.id ? team : existing))
+      : [...props.teams, team];
   const save = () => {
-    if (problem !== null) return;
+    if (saveProblem !== null) return;
     const team = teamFrom(profile?.id ?? CUSTOM_TEAM_ID, profile?.name ?? CUSTOM_TEAM_NAME);
     props.onSaveTeams(upsert(team));
     props.onApply(team);
@@ -349,14 +390,8 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   };
   const saveAs = () => {
     const name = naming?.value.trim();
-    if (!name || problem !== null) return;
-    const team = teamFrom(
-      newRoutingGroupId(
-        name,
-        props.teams.map((existing) => existing.id),
-      ),
-      name,
-    );
+    if (!name || problem !== null || full) return;
+    const team = teamFrom(newRoutingGroupId(name, props.groupIds), name);
     props.onSaveTeams(upsert(team));
     setProfileId(team.id);
     setNaming(null);
@@ -447,6 +482,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
               size="xs"
               variant="ghost"
               className="justify-self-start"
+              disabled={full}
               onClick={() => setNaming({ kind: "new", value: "" })}
             >
               <PlusIcon />
@@ -497,15 +533,40 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
             label="Architect model"
             value={setup.architect}
             entries={props.entries}
-            onChange={(architect) => setSetup((current) => ({ ...current, architect }))}
+            onChange={(architect) =>
+              setSetup((current) => ({
+                ...current,
+                architect,
+                // The role was the earlier model's; a new effort keeps it.
+                architectRole:
+                  current.architect && keyOf(current.architect) === keyOf(architect)
+                    ? current.architectRole
+                    : EMPTY_TEAM_ROLE,
+              }))
+            }
           />
+          {rolesSupported && profile && agentTeamRole(profile, 0) ? (
+            <>
+              <AgentTeamRoleName
+                label="Architect"
+                placeholder="Name as a worker, when another model leads"
+                role={setup.architectRole}
+                onChange={(architectRole) => setSetup((current) => ({ ...current, architectRole }))}
+              />
+              <AgentTeamRoleDetails
+                label="Architect"
+                role={setup.architectRole}
+                onChange={(architectRole) => setSetup((current) => ({ ...current, architectRole }))}
+              />
+            </>
+          ) : null}
           <div className="flex items-center gap-1.5">
             <label htmlFor={guidanceId} className="text-muted-foreground text-xs">
               Lead guidance
             </label>
             <InfoMark
               label="About lead guidance"
-              text="Extra instructions for the architect, sent with the built-in team rules. Leave it empty to use the guidance from Settings → Providers → Agent teams."
+              text="Extra instructions for the architect only, sent with the built-in team rules. They replace the default lead guidance in Settings → Providers → Agent teams; leave it empty to use that."
             />
           </div>
           <Textarea
@@ -543,7 +604,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
               aria-label="Add worker"
               disabled={setup.workers.length + 1 >= MAX_ROUTING_GROUP_MEMBERS}
               onClick={() =>
-                setSetup((current) => ({ ...current, workers: [...current.workers, null] }))
+                setSetup((current) => ({ ...current, workers: [...current.workers, newWorker()] }))
               }
             >
               <PlusIcon />
@@ -551,13 +612,20 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
             </Button>
           </div>
           {setup.workers.map((worker, index) => (
-            // oxlint-disable-next-line react/no-array-index-key -- workers have no identity until saved; the index is their slot
-            <div key={index} className="grid gap-1">
-              <div className="flex items-center justify-between text-sm">
-                <span>
-                  <span className="me-2 text-muted-foreground tabular-nums">{index + 1}</span>
-                  Worker {index + 1}
-                </span>
+            <div key={worker.key} className="grid gap-1">
+              <div className="flex items-center justify-between gap-1.5 text-sm">
+                <span className="text-muted-foreground tabular-nums">{index + 1}</span>
+                <div className="min-w-0 flex-1">
+                  {rolesSupported ? (
+                    <AgentTeamRoleName
+                      label={`Worker ${index + 1}`}
+                      role={worker.role}
+                      onChange={(role) => setWorker(index, { role })}
+                    />
+                  ) : (
+                    `Worker ${index + 1}`
+                  )}
+                </div>
                 <Button
                   type="button"
                   size="icon-xs"
@@ -575,20 +643,44 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
               </div>
               <ModelField
                 label={`Worker ${index + 1} model`}
-                value={worker}
+                value={worker.selection}
                 entries={props.entries}
-                onChange={(selection) =>
-                  setSetup((current) => ({
-                    ...current,
-                    workers: current.workers.map((existing, at) =>
-                      at === index ? selection : existing,
-                    ),
-                  }))
-                }
+                onChange={(selection) => setWorker(index, { selection })}
               />
+              {rolesSupported ? (
+                <AgentTeamRoleDetails
+                  label={`Worker ${index + 1}`}
+                  role={worker.role}
+                  onChange={(role) => setWorker(index, { role })}
+                />
+              ) : null}
             </div>
           ))}
         </section>
+
+        {rolesSupported ? (
+          <section className="grid gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor={`${guidanceId}-team`} className="font-medium text-sm">
+                Team guidance, for everyone
+              </label>
+              <InfoMark
+                label="About team guidance"
+                text="Rules for everyone: the architect gets them each turn, and every worker with each task."
+              />
+            </div>
+            <Textarea
+              id={`${guidanceId}-team`}
+              rows={2}
+              maxLength={AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH}
+              placeholder="Never push to main. Run the tests before you finish."
+              value={setup.sharedGuidance}
+              onChange={(event) =>
+                setSetup((current) => ({ ...current, sharedGuidance: event.target.value }))
+              }
+            />
+          </section>
+        ) : null}
 
         <section className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
@@ -638,9 +730,9 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
           </span>
         </p>
 
-        {problem !== null || props.disabledReason ? (
+        {saveProblem !== null || props.disabledReason ? (
           <p role="alert" className="text-destructive-foreground text-xs">
-            {props.disabledReason ?? problem}
+            {props.disabledReason ?? saveProblem}
           </p>
         ) : null}
 
@@ -665,7 +757,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
           <Button
             type="submit"
             size="sm"
-            disabled={problem !== null || Boolean(props.disabledReason)}
+            disabled={saveProblem !== null || Boolean(props.disabledReason)}
           >
             {active ? "Apply setup" : "Save setup"}
           </Button>

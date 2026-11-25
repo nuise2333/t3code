@@ -4,6 +4,7 @@ import { ProviderInstanceId, type RouteDecision, type RoutingGroup } from "@t3to
 import {
   activeAgentTeam,
   agentTeamLeadPrompt,
+  agentTeamMemberTask,
   agentTeamTarget,
   autoTeamLeadPrompt,
 } from "./AgentTeam.ts";
@@ -124,6 +125,7 @@ describe("agentTeamTarget", () => {
   it("fits a member target and fills its saved options", () => {
     expect(agentTeamTarget(team, { model: "opus-fake" })).toEqual({
       ok: true,
+      index: 0,
       target: {
         providerInstanceId: claude,
         model: "opus-fake",
@@ -137,7 +139,11 @@ describe("agentTeamTarget", () => {
         model: "gpt-fake",
         options: [],
       }),
-    ).toEqual({ ok: true, target: { providerInstanceId: codex, model: "gpt-fake", options: [] } });
+    ).toEqual({
+      ok: true,
+      index: 1,
+      target: { providerInstanceId: codex, model: "gpt-fake", options: [] },
+    });
   });
 
   it("refuses models outside the team, an ambiguous target, and other environments", () => {
@@ -151,6 +157,60 @@ describe("agentTeamTarget", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.message).toContain("model `gpt-fake`");
     }
+  });
+});
+
+describe("named members", () => {
+  const role = (name: string, description = "", instructions = "") => ({
+    name,
+    description,
+    instructions,
+  });
+  const named: RoutingGroup = {
+    ...team,
+    members: [...team.members, { instanceId: codex, model: "gpt-fake" }],
+    memberRoles: [
+      role(""),
+      role("Builder", "Writes the code", "Run the tests."),
+      role("Reviewer", "Checks diffs"),
+    ],
+    sharedGuidance: "Answer in Chinese.",
+  };
+
+  it("tells members on one model apart by name", () => {
+    expect(agentTeamTarget(named, undefined, " reviewer ")).toMatchObject({ ok: true, index: 2 });
+    const oneNamed = { ...named, memberRoles: [role(""), role(""), role("Reviewer")] };
+    expect(agentTeamTarget(oneNamed, { model: "gpt-fake" })).toMatchObject({ ok: true, index: 1 });
+    expect(agentTeamTarget(oneNamed, undefined, "Reviewer")).toMatchObject({ index: 2 });
+    for (const result of [
+      // A target that fits several models never falls to the one without a name.
+      agentTeamTarget(oneNamed, undefined),
+      agentTeamTarget(
+        { ...named, members: named.members.map((m) => ({ ...m, instanceId: codex })) },
+        { providerInstanceId: codex },
+      ),
+      agentTeamTarget(named, { model: "gpt-fake" }),
+      agentTeamTarget(named, undefined, "Nobody"),
+      agentTeamTarget(named, { model: "opus-fake" }, "Reviewer"),
+    ]) {
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message).toContain("member `Reviewer`");
+    }
+  });
+
+  it("tells the lead each role, and a member its own role with the team's guidance", () => {
+    const prompt = agentTeamLeadPrompt(named, "");
+    expect(prompt).toContain(
+      "- member `Builder`, providerInstanceId `codex_fake`, model `gpt-fake`: Writes the code",
+    );
+    expect(prompt).toContain("Answer in Chinese.");
+    expect(prompt).not.toContain("Run the tests.");
+    const task = agentTeamMemberTask(named, 1, "Build it");
+    expect(task.startsWith("Build it\n")).toBe(true);
+    expect(task).toContain("Run the tests.");
+    expect(task).toContain("Answer in Chinese.");
+    expect(task).not.toContain("Checks diffs");
+    expect(agentTeamMemberTask(team, 1, "Build it")).toBe("Build it");
   });
 });
 

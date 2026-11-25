@@ -9506,6 +9506,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.completionWake === undefined ? {} : { completionWake: command.completionWake }),
         ...(command.delegatedRole === undefined ? {} : { delegatedRole: command.delegatedRole }),
         ...(command.councilLens === undefined ? {} : { councilLens: command.councilLens }),
+        ...(command.teamMember === undefined ? {} : { teamMember: command.teamMember }),
         status: "running",
         result: null,
         startedAt: now,

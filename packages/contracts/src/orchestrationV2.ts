@@ -57,7 +57,12 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { LaunchRoutingRequest, RouteDecision, ThreadAgentTeam } from "./routing.ts";
+import {
+  AgentTeamTaskMember,
+  LaunchRoutingRequest,
+  RouteDecision,
+  ThreadAgentTeam,
+} from "./routing.ts";
 import {
   CouncilLens,
   CouncilSettings,
@@ -976,6 +981,8 @@ export const OrchestrationV2Subagent = Schema.Struct({
   delegatedRole: Schema.optional(Schema.Literal("review")),
   /** A Council reviewer: what it checks. Its report ends with a score the server reads. */
   councilLens: Schema.optional(CouncilLens),
+  /** The saved team's member the lead handed this to. */
+  teamMember: Schema.optional(AgentTeamTaskMember),
   completionDelivery: Schema.optional(OrchestrationV2DelegatedCompletionTaskDelivery),
   // The run whose unfinished task was cancelled, committed with its Stop.
   cancelledRunId: Schema.optional(RunId),
@@ -3598,6 +3605,8 @@ export const OrchestrationV2Command = Schema.Union([
     delegatedRole: Schema.optional(Schema.Literal("review")),
     /** Only the server sets this, for a Council reviewer the lead convened. */
     councilLens: Schema.optional(CouncilLens),
+    /** Only the server sets this, for a task an agent team's lead delegated. */
+    teamMember: Schema.optional(AgentTeamTaskMember),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({
