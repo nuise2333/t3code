@@ -1032,6 +1032,9 @@ function teamBoardPicks(
   cap: string,
 ): ReadonlyArray<TeamBoardPick> {
   const measured = board.efforts ?? [];
+  // A level of unknown price counts as the dearest one, so it can't slip under a price limit.
+  const prices = [board, ...measured].flatMap(({ costUsd }) => costUsd ?? []);
+  const unknownPrice = prices.length === 0 ? undefined : Math.max(...prices);
   if (subtask !== null && subtask in WRITING_AXIS) {
     const score = board.scores[subtask];
     const effort = board.writingEffort ?? board.effort;
@@ -1044,7 +1047,7 @@ function teamBoardPicks(
             effort,
             score,
             coding: board.scores.coding,
-            costUsd: at?.costUsd ?? board.costUsd,
+            costUsd: at?.costUsd ?? (effort === board.effort ? board.costUsd : unknownPrice),
           },
         ];
   }
@@ -1052,7 +1055,7 @@ function teamBoardPicks(
   const rows = measured.filter(
     (row) => offered(row.effort) && effortLevel(row.effort) <= effortLevel(cap),
   );
-  return (rows.length > 0 ? rows : [board]).map((row) => ({
+  return (rows.length > 0 ? rows : [{ ...board, costUsd: unknownPrice }]).map((row) => ({
     board,
     effort: row.effort,
     score: row.scores[axis],
@@ -1112,12 +1115,7 @@ function chooseBoardModel(
   const best = Math.max(...passing.map(value));
   return passing
     .filter((pick) => value(pick) >= best - VALUE_TIE_POINTS)
-    .sort(
-      (a, b) =>
-        (b.board.marketShare ?? 0) - (a.board.marketShare ?? 0) ||
-        value(b) - value(a) ||
-        strongest(a, b),
-    )[0];
+    .sort((a, b) => (b.board.marketShare ?? 0) - (a.board.marketShare ?? 0) || strongest(a, b))[0];
 }
 
 interface ReasoningLevels {
@@ -1143,7 +1141,9 @@ function nearestLevel(
 ): string | undefined {
   if (effortLevel(wanted) < 0) return undefined;
   const target = Math.min(effortLevel(wanted), effortLevel(cap));
-  return [...levels].sort(
+  const within = levels.filter((level) => effortLevel(level) <= effortLevel(cap));
+  if (within.length === 0) return [...levels].sort((a, b) => effortLevel(a) - effortLevel(b))[0];
+  return within.sort(
     (a, b) =>
       Math.abs(effortLevel(a) - target) - Math.abs(effortLevel(b) - target) ||
       effortLevel(a) - effortLevel(b),

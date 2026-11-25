@@ -2379,6 +2379,16 @@ describe("chooseAutoModel", () => {
         taskClass: "hard",
       }),
     ).toStrictEqual(at(codexId, "model-sol", "max"));
+    // No level to set: it may run at the dearest one, which Cheap's price limit then counts.
+    const fixedLevel = [provider(opencodeId, "opencode", ["fake-cn", "fake-cn-pro"], {}, [])];
+    const pricier = board.models.map((entry) =>
+      entry.models[0] === "fake-cn-pro"
+        ? { ...entry, efforts: [{ effort: "max", scores: scores(60), costUsd: 11 }] }
+        : entry,
+    );
+    expect(
+      worker("cheap", "backend", { providers: fixedLevel, models: pricier, taskClass: "hard" }),
+    ).toStrictEqual({ instanceId: opencodeId, model: "fake-cn" });
     // Writing was measured at one level of its own.
     expect(
       worker("best", "synthesis", {
