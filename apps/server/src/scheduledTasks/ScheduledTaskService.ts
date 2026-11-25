@@ -60,7 +60,12 @@ import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as DueHint from "../scheduling/DueHint.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { latestRootProviderFailure } from "@t3tools/shared/orchestrationV2ThreadError";
-import { isMissedFixedTimeRun, isSameSchedule, nextScheduledRunAt } from "./Schedule.ts";
+import {
+  isMissedFixedTimeRun,
+  lateRunPrompt,
+  isSameSchedule,
+  nextScheduledRunAt,
+} from "./Schedule.ts";
 import {
   redactHeaders,
   redactQuery,
@@ -1035,7 +1040,11 @@ export const layer = Layer.effect(
             : `${active.id}:webhook:${webhook.deliveryId}`;
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
         const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
-        const prompt = webhook?.prompt ?? active.prompt;
+        const prompt =
+          webhook?.prompt ??
+          (trigger === "scheduled" && Option.isSome(parsedNextRunAt)
+            ? lateRunPrompt(active.prompt, active.schedule, parsedNextRunAt.value, startedAt)
+            : active.prompt);
         const threadMode = scheduledTaskThreadMode(active);
 
         // A bound thread can move to another project (No project to a project) while
@@ -1293,11 +1302,12 @@ export const layer = Layer.effect(
       yield* Effect.forEach(
         due,
         ({ task, dueAt }) =>
-          Effect.suspend(() =>
-            isMissedFixedTimeRun(task.schedule, dueAt, now)
+          // An earlier task can hold this one up, across another sleep.
+          Effect.flatMap(localNow, (startNow) =>
+            isMissedFixedTimeRun(task.schedule, dueAt, startNow)
               ? rescheduleMissedRun(
                   task,
-                  now,
+                  startNow,
                   "missed",
                   "Missed a scheduled run because the server was not running within a day of it.",
                 )

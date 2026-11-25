@@ -70,17 +70,62 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
 
 const FIXED_TIME_CATCH_UP_HOURS = 24;
 
-/** A machine that slept through a slot still runs it once; slots over a day old are dropped. */
+/**
+ * The fixed-time slot a run due since `dueAt` stands for: the latest one reached. A machine that
+ * slept through several runs only that one. Null when the latest is over a day old.
+ */
+export function fixedTimeSlotToRun(
+  schedule: ScheduledTaskSchedule,
+  dueAt: DateTime.DateTime,
+  now: DateTime.DateTime,
+): DateTime.DateTime | null {
+  const nowMs = DateTime.toEpochMillis(now);
+  const windowMs = DateTime.toEpochMillis(
+    DateTime.subtract(now, { hours: FIXED_TIME_CATCH_UP_HOURS }),
+  );
+  const dueMs = DateTime.toEpochMillis(dueAt);
+  // Back by 1 ms, so a slot exactly at the window's edge counts.
+  let from = DateTime.subtract(now, { milliseconds: nowMs - windowMs + 1 });
+  let slot: DateTime.DateTime | null = dueMs >= windowMs ? dueAt : null;
+  for (;;) {
+    const next = nextScheduledRunAt(schedule, from);
+    if (next === null || DateTime.toEpochMillis(next) > nowMs) return slot;
+    if (DateTime.toEpochMillis(next) >= dueMs) slot = next;
+    from = next;
+  }
+}
+
 export function isMissedFixedTimeRun(
   schedule: ScheduledTaskSchedule,
   dueAt: DateTime.DateTime,
   now: DateTime.DateTime,
 ): boolean {
-  if (schedule.type !== "fixed_time") return false;
+  return schedule.type === "fixed_time" && fixedTimeSlotToRun(schedule, dueAt, now) === null;
+}
+
+const LATE_RUN_MS = 10 * 60_000;
+
+/** The prompt of a run that starts late, with the time it stands for; "yesterday" depends on it. */
+export function lateRunPrompt(
+  prompt: string,
+  schedule: ScheduledTaskSchedule,
+  dueAt: DateTime.DateTime,
+  now: DateTime.Zoned,
+): string {
+  if (schedule.type !== "fixed_time") return prompt;
+  const slot = fixedTimeSlotToRun(schedule, dueAt, now);
+  if (slot === null) return prompt;
   const nowMs = DateTime.toEpochMillis(now);
-  const windowStart = DateTime.subtract(now, { hours: FIXED_TIME_CATCH_UP_HOURS });
-  if (DateTime.toEpochMillis(dueAt) >= DateTime.toEpochMillis(windowStart)) return false;
-  // `dueAt` is the oldest slot missed; a later one can still be recent enough to run.
-  const recentSlot = nextScheduledRunAt(schedule, windowStart);
-  return recentSlot === null || DateTime.toEpochMillis(recentSlot) > nowMs;
+  const slotMs = DateTime.toEpochMillis(slot);
+  if (nowMs - slotMs <= LATE_RUN_MS) return prompt;
+  const scheduledFor = DateTime.formatIsoZoned(
+    DateTime.subtract(now, { milliseconds: nowMs - slotMs }),
+  );
+  return [
+    prompt,
+    "",
+    "<t3_code_late_run>",
+    `This run was scheduled for ${scheduledFor} and starts late because T3 Code was not running then, such as while the computer slept. Read "today", "yesterday" and other relative dates from that time, not from now. The task's next run is separate: do not do its work too.`,
+    "</t3_code_late_run>",
+  ].join("\n");
 }
