@@ -48,13 +48,11 @@ export async function withModelEfforts(ctx, options) {
   const infoOf = async (value) => {
     try {
       const [provider, model] = JSON.parse(value);
-      let timer;
-      const timeout = new Promise((resolve) => {
-        timer = setTimeout(resolve, MODEL_INFO_TIMEOUT_MS);
-      });
-      const info = await Promise.race([ctx.llm.resolveModelInfo(provider, model), timeout]);
-      clearTimeout(timer);
-      return info;
+      const signal = AbortSignal.timeout(MODEL_INFO_TIMEOUT_MS);
+      const aborted = new Promise((resolve) =>
+        signal.addEventListener("abort", () => resolve(undefined), { once: true }),
+      );
+      return await Promise.race([ctx.llm.resolveModelInfo(provider, model, signal), aborted]);
     } catch {
       return undefined;
     }

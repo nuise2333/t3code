@@ -2445,6 +2445,14 @@ describe("chooseAutoModel", () => {
       ],
     });
     expect(fixedRun("balanced", [codex()])).toStrictEqual(at(codexId, "model-sol", "max"));
+    // The agent is passed over while it can't run that level.
+    const highOnly = provider(harnessId, "acpRegistry", ["model-sol"], {}, [
+      { id: "effort", label: "Effort", type: "select", options: [{ id: "high", label: "High" }] },
+      presetOption,
+    ]);
+    expect(fixedRun("balanced", [codex(), highOnly])).toStrictEqual(
+      at(codexId, "model-sol", "max"),
+    );
     expect(fixedRun("best", [codex(), harness])).toStrictEqual(sol);
     // Best takes the faster of two about as strong, not one well behind.
     const timedBest = (solMinutes: number, solScore: number) =>

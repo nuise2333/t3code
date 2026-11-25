@@ -1393,6 +1393,7 @@ export function chooseTeamWorkerModel(input: {
   }
   const onAgent = ({ candidate }: Ranked, run: NonNullable<TeamBoardModel["balancedRun"]>) =>
     agentIdOf(candidate.provider, input.settings) === run.agentId &&
+    candidate.reasoning?.levels.includes(run.effort) === true &&
     run.options.every((option) => optionSelectionProblem(option, candidate.descriptors) === null);
   const agentFor = (board: TeamBoardModel, effort: string) => {
     const run = runOf(board);
