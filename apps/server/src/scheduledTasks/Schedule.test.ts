@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 
-import { isSameSchedule, nextScheduledRunAt } from "./Schedule.ts";
+import { isSameSchedule, lateRunPrompt, nextScheduledRunAt } from "./Schedule.ts";
 
 describe("scheduled task schedule calculation", () => {
   it("skips to the next matching fixed-time weekday", () => {
@@ -81,5 +81,19 @@ describe("scheduled task schedule calculation", () => {
         { type: "fixed_time", timeOfDay: "09:00" },
       ),
     ).toBe(false);
+  });
+
+  it("names a late run's own time once it is late or on another local day", () => {
+    const at = (day: number, hour: number, minute: number) =>
+      DateTime.makeZonedUnsafe(
+        { year: 2026, month: 7, day, hour, minute, second: 0, millisecond: 0 },
+        { timeZone: "Asia/Shanghai", adjustForTimeZone: true },
+      );
+    const nightly = { type: "fixed_time", timeOfDay: "23:55" } as const;
+    const prompt = (now: DateTime.Zoned) => lateRunPrompt("Send it.", nightly, at(3, 23, 55), now);
+    expect(prompt(at(3, 23, 59))).toBe("Send it.");
+    for (const now of [at(4, 0, 0), at(4, 0, 4), at(4, 12, 0)]) {
+      expect(prompt(now)).toContain("scheduled for 2026-07-03T23:55:00");
+    }
   });
 });

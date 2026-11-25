@@ -117,10 +117,10 @@ export function lateRunPrompt(
   if (slot === null) return prompt;
   const nowMs = DateTime.toEpochMillis(now);
   const slotMs = DateTime.toEpochMillis(slot);
-  if (nowMs - slotMs <= LATE_RUN_MS) return prompt;
-  const scheduledFor = DateTime.formatIsoZoned(
-    DateTime.subtract(now, { milliseconds: nowMs - slotMs }),
-  );
+  const zonedSlot = DateTime.subtract(now, { milliseconds: nowMs - slotMs });
+  const sameDay = DateTime.formatIsoDate(zonedSlot) === DateTime.formatIsoDate(now);
+  if (sameDay && nowMs - slotMs <= LATE_RUN_MS) return prompt;
+  const scheduledFor = DateTime.formatIsoZoned(zonedSlot);
   return [
     prompt,
     "",
