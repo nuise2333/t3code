@@ -2,8 +2,6 @@ import { MIN_SCHEDULED_TASK_INTERVAL_MS, type ScheduledTaskSchedule } from "@t3t
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
-const MINUTE_MS = 60_000;
-
 function parseTimeOfDay(value: string): { hour: number; minute: number } | null {
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
   if (!match) return null;
@@ -70,13 +68,19 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
   );
 }
 
-const MISSED_FIXED_TIME_GRACE_MS = 10 * MINUTE_MS;
+const FIXED_TIME_CATCH_UP_HOURS = 24;
 
+/** A machine that slept through a slot still runs it once; slots over a day old are dropped. */
 export function isMissedFixedTimeRun(
   schedule: ScheduledTaskSchedule,
   dueAt: DateTime.DateTime,
   now: DateTime.DateTime,
 ): boolean {
   if (schedule.type !== "fixed_time") return false;
-  return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_FIXED_TIME_GRACE_MS;
+  const nowMs = DateTime.toEpochMillis(now);
+  const windowStart = DateTime.subtract(now, { hours: FIXED_TIME_CATCH_UP_HOURS });
+  if (DateTime.toEpochMillis(dueAt) >= DateTime.toEpochMillis(windowStart)) return false;
+  // `dueAt` is the oldest slot missed; a later one can still be recent enough to run.
+  const recentSlot = nextScheduledRunAt(schedule, windowStart);
+  return recentSlot === null || DateTime.toEpochMillis(recentSlot) > nowMs;
 }

@@ -393,7 +393,13 @@ it.effect(
     }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
-it.effect("a fixed-time slot missed while the server was off shows on the task", () =>
+it.effect.each([
+  { slept: "a daily slot hours ago", weekdays: undefined, back: [16, 42, 1], runs: 2, nextDay: 2 },
+  { slept: "several daily slots", weekdays: undefined, back: [8, 30, 4], runs: 2, nextDay: 4 },
+  // 2026-07-01 is a Wednesday.
+  { slept: "a weekly slot within a day", weekdays: [3], back: [8, 30, 2], runs: 2, nextDay: 8 },
+  { slept: "a weekly slot over a day ago", weekdays: [3], back: [9, 30, 2], runs: 1, nextDay: 8 },
+] as const)("a server that was off across $slept runs it at most once", (row) =>
   Effect.gen(function* () {
     const at = (hour: number, minute = 0, day = 1) =>
       DateTime.makeZonedUnsafe(
@@ -432,7 +438,7 @@ it.effect("a fixed-time slot missed while the server was off shows on the task",
             title: "Morning bookkeeping",
             prompt: "Update yesterday's notes.",
             enabled: true,
-            schedule: { type: "fixed_time", timeOfDay: "09:00" },
+            schedule: { type: "fixed_time", timeOfDay: "09:00", weekdays: row.weekdays },
             projectId: "project-missed-slot",
             workspaceStrategy: { type: "root" },
             modelSelection: { instanceId: "codex", model: "gpt-5.4" },
@@ -445,8 +451,7 @@ it.effect("a fixed-time slot missed while the server was off shows on the task",
       }),
     );
 
-    // The server is off across the 09:00 slot and comes back at 09:30.
-    yield* TestClock.setTime(DateTime.toEpochMillis(at(9, 30)));
+    yield* TestClock.setTime(DateTime.toEpochMillis(at(row.back[0], row.back[1], row.back[2])));
     const [listed] = yield* withServer(
       Effect.gen(function* () {
         const service = yield* ScheduledTaskService.ScheduledTaskService;
@@ -456,13 +461,10 @@ it.effect("a fixed-time slot missed while the server was off shows on the task",
     );
 
     expect(listed?.id).toBe(taskId);
-    expect(yield* Ref.get(launches)).toBe(1);
-    expect(listed?.nextRunAt).toBe(DateTime.formatIso(DateTime.toUtc(at(9, 0, 2))));
-    // The skipped slot must not read as the earlier manual run's clean success.
-    expect({ status: listed?.lastRunStatus, error: listed?.lastRunError }).not.toEqual({
-      status: "succeeded",
-      error: null,
-    });
+    expect(yield* Ref.get(launches)).toBe(row.runs);
+    expect(listed?.nextRunAt).toBe(DateTime.formatIso(DateTime.toUtc(at(9, 0, row.nextDay))));
+    // A dropped slot must not read as the earlier manual run's clean success.
+    expect(listed?.lastRunStatus).toBe(row.runs === 2 ? "succeeded" : "failed");
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 

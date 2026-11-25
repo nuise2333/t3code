@@ -1299,7 +1299,7 @@ export const layer = Layer.effect(
                   task,
                   now,
                   "missed",
-                  "Missed a scheduled run because the server was not running at that time.",
+                  "Missed a scheduled run because the server was not running within a day of it.",
                 )
               : runTask(task, "scheduled"),
           ).pipe(
