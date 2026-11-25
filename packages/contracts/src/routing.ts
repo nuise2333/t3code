@@ -210,6 +210,8 @@ export const AgentTeamTaskMember = Schema.Struct({
   name: Schema.optionalKey(Schema.String),
   /** The teammate that handed it over, in place of the lead; such a task is handed no further. */
   handedBy: Schema.optionalKey(Schema.String),
+  /** The teammates it could hand parts to when the lead gave it the task. */
+  handsTo: Schema.optionalKey(Schema.Array(Schema.String)),
   instanceId: ProviderInstanceId,
   model: TrimmedNonEmptyString,
 });

@@ -239,7 +239,7 @@ lead should give it and the instructions it gets with each one. Members on the s
 need names, such as a builder and a reviewer; one of them may stay unnamed. **Team guidance**
 reaches everyone: the lead, and each worker with its tasks. A named worker can
 also hand parts of its tasks to teammates you check under **May hand parts of
-its tasks to**: one at a time, and the teammate hands them no further.
+its tasks to**: one at a time for each task, and the teammate hands them no further.
 **Save setup** keeps it as **Custom setup** and turns it on; **Save as…** keeps
 it as a named profile you can pick later, and **Use a single agent** turns the
 team off. The lead plans the work, delegates each task to a team model as a

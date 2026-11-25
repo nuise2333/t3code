@@ -3655,9 +3655,11 @@ describe("OrchestratorMcpService provider resolution", () => {
       const member = { instanceId: claudeInstanceId, model: "claude-fake-1" };
       const parent = parentProjection([], lead);
       const leadThreadId = ThreadId.make("thread:team-lead");
-      const work = yield* Ref.make<{ readonly handedBy?: string; readonly out: boolean }>({
-        out: false,
-      });
+      const work = yield* Ref.make<{
+        readonly handedBy?: string;
+        readonly handsTo?: ReadonlyArray<string>;
+        readonly out: boolean;
+      }>({ out: false, handsTo: ["Reviewer"] });
       const teamParent = {
         ...parent,
         thread: {
@@ -3678,7 +3680,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           isProviderInstanceEnabledForProject: () => Effect.succeed(true),
           getThreadRecords: (threadId) =>
             Ref.get(work).pipe(
-              Effect.map(({ handedBy, out }) =>
+              Effect.map(({ handedBy, handsTo, out }) =>
                 threadId === leadThreadId
                   ? ({
                       ...childProjection,
@@ -3689,6 +3691,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                             teamId: "crew",
                             name: "Builder",
                             ...(handedBy === undefined ? {} : { handedBy }),
+                            ...(handsTo === undefined ? {} : { handsTo }),
                             ...lead,
                           },
                         },
@@ -3767,19 +3770,28 @@ describe("OrchestratorMcpService provider resolution", () => {
         ]) {
           assert.equal((yield* refuse(input)).code, "invalid_request");
         }
-        yield* Ref.set(work, { out: true });
+        yield* Ref.set(work, { out: true, handsTo: ["Reviewer"] });
         assert.include(
           (yield* refuse({ task: "Review.", member: "Reviewer" })).message,
           "one task at a time",
         );
         yield* Ref.set(work, { out: false, handedBy: "Planner" });
+        for (const input of [
+          { task: "Review.", member: "Reviewer" },
+          { task: "Review." },
+          { task: "Review.", target: { model: "claude-fake-1" } },
+        ]) {
+          assert.include((yield* refuse(input)).message, "handed no further");
+        }
+        // Flows its name gained after the task began are not its own.
+        yield* Ref.set(work, { out: false, handsTo: ["Writer"] });
         assert.include(
           (yield* refuse({ task: "Review.", member: "Reviewer" })).message,
-          "handed no further",
+          "no longer lets you",
         );
         assert.lengthOf(yield* Ref.get(dispatched), 0);
 
-        yield* Ref.set(work, { out: false });
+        yield* Ref.set(work, { out: false, handsTo: ["Reviewer"] });
         yield* refuse({ task: "Review.", member: "Reviewer" });
         const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
           readonly modelSelection: unknown;

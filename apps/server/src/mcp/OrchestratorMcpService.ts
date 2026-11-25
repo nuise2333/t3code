@@ -1364,34 +1364,46 @@ const make = Effect.gen(function* () {
     readonly input: OrchestratorMcpDelegateTaskInput;
     readonly memberTask?: (task: string) => string;
     readonly teamMember?: AgentTeamTaskMember;
+    /** Fails while the caller has as many tasks out as its team lets it. */
+    readonly checkLimit?: Effect.Effect<void, OrchestratorMcpFailure>;
   }
   /** The member a delegated thread works as, when the user lets that member hand work on. */
   const loadHandingMember = Effect.fn("OrchestratorMcpService.loadHandingMember")(function* (
     thread: OrchestrationV2ThreadProjection["thread"],
     groups: ReadonlyArray<RoutingGroup>,
   ) {
-    if (!groups.some((group) => group.team === true && (group.memberFlows?.length ?? 0) > 0)) {
-      return null;
-    }
+    if (!groups.some((group) => group.team === true)) return null;
     const leadThreadId = thread.lineage.parentThreadId;
     if (leadThreadId === null || thread.lineage.relationshipToParent !== "subagent") return null;
     const { subagents } = yield* threadManagement
       .getThreadRecords(leadThreadId, ["subagents"])
       .pipe(Effect.mapError(threadManagementFailure));
     const member = subagents.find((task) => task.childThreadId === thread.id)?.teamMember;
+    if (member?.handedBy !== undefined) {
+      return yield* failure(
+        "invalid_request",
+        "A teammate handed you this task, and such a task is handed no further. Do the work yourself.",
+      );
+    }
     const team = groups.find((group) => group.team === true && group.id === member?.teamId);
     if (member?.name === undefined || team === undefined) return null;
     const name = member.name.toLowerCase();
     const index = [...team.members.keys()].find(
       (at) => agentTeamRole(team, at)?.name.toLowerCase() === name,
     );
-    if (index === undefined) return null;
-    const allowed = agentTeamHandsTo(team, index);
-    if (allowed.length === 0) return null;
-    if (member.handedBy !== undefined) {
+    // Only what was allowed when the task began: a later rename must not lend it another's flows.
+    const given = new Set(member.handsTo ?? []);
+    const allowed =
+      index === undefined
+        ? []
+        : agentTeamHandsTo(team, index).filter((at) =>
+            given.has(agentTeamRole(team, at)?.name ?? ""),
+          );
+    if (given.size === 0) return null;
+    if (allowed.length === 0) {
       return yield* failure(
         "invalid_request",
-        `A teammate handed you this task for the agent team "${team.name}", and such a task is handed no further. Do the work yourself.`,
+        `The agent team "${team.name}" no longer lets you hand work on. Do the work yourself.`,
       );
     }
     return { team, allowed, name: member.name };
@@ -1512,6 +1524,9 @@ const make = Effect.gen(function* () {
     if (!fitted.ok) return yield* failure("invalid_request", fitted.message);
     const member = team.team.members[fitted.index];
     const memberName = agentTeamRole(team.team, fitted.index)?.name;
+    const handsTo = agentTeamHandsTo(team.team, fitted.index).map(
+      (at) => agentTeamRole(team.team, at)?.name ?? "",
+    );
     // A Council reviewer carries its lens instead of a member's role.
     const asMember =
       member === undefined || input.councilLens !== undefined
@@ -1522,34 +1537,45 @@ const make = Effect.gen(function* () {
             teamMember: {
               teamId: team.team.id,
               ...(memberName ? { name: memberName } : {}),
-              ...(handing === null ? {} : { handedBy: handing.name }),
+              ...(handing !== null
+                ? { handedBy: handing.name }
+                : handsTo.length === 0
+                  ? {}
+                  : { handsTo }),
               instanceId: member.instanceId,
               model: member.model,
             },
           };
-    // A member hands on one part at a time, so a team's work stays within twice its limit.
+    // A member hands on one part of a task at a time, so a team stays within twice its limit.
     const limit = handing === null ? (team.team.maxParallel ?? 0) : 1;
-    if (limit > 0 && input.councilLens === undefined) {
-      const { subagents } = yield* threadManagement
-        .getThreadRecords(parent.thread.id, ["subagents"])
-        .pipe(Effect.mapError(threadManagementFailure));
-      const out = subagents.filter(
-        (task) =>
-          task.threadId === parent.thread.id &&
-          task.origin === "app_owned" &&
-          task.councilLens === undefined &&
-          task.workflow === undefined &&
-          (task.status === "pending" || task.status === "running" || task.status === "waiting"),
-      ).length;
-      if (out >= limit) {
-        return yield* failure(
-          "invalid_request",
-          handing !== null
-            ? `A member hands on one task at a time, and yours is still running. End your turn; its result wakes you.`
-            : `The agent team "${teamName}" runs at most ${limit} ${limit === 1 ? "task" : "tasks"} at once, and ${out} ${out === 1 ? "is" : "are"} still running. End your turn; a finished task's result wakes you to delegate the next.`,
-        );
-      }
-    }
+    const limited =
+      limit === 0 || input.councilLens !== undefined
+        ? {}
+        : {
+            checkLimit: Effect.gen(function* () {
+              const { subagents } = yield* threadManagement
+                .getThreadRecords(parent.thread.id, ["subagents"])
+                .pipe(Effect.mapError(threadManagementFailure));
+              const out = subagents.filter(
+                (task) =>
+                  task.threadId === parent.thread.id &&
+                  task.origin === "app_owned" &&
+                  task.councilLens === undefined &&
+                  task.workflow === undefined &&
+                  (task.status === "pending" ||
+                    task.status === "running" ||
+                    task.status === "waiting"),
+              ).length;
+              if (out < limit) return;
+              return yield* failure(
+                "invalid_request",
+                handing !== null
+                  ? "A member hands on one task at a time, and yours is still running. End your turn; its result wakes you."
+                  : `The agent team "${teamName}" runs at most ${limit} ${limit === 1 ? "task" : "tasks"} at once, and ${out} ${out === 1 ? "is" : "are"} still running. End your turn; a finished task's result wakes you to delegate the next.`,
+              );
+            }),
+          };
+    const rest = { ...asMember, ...limited };
     if (fitted.target.model !== undefined && routingPolicy.routeTeamMember !== undefined) {
       const fallback = yield* routingPolicy.routeTeamMember({
         target: {
@@ -1565,7 +1591,7 @@ const make = Effect.gen(function* () {
       });
       if (fallback !== null) {
         return {
-          ...asMember,
+          ...rest,
           input: {
             ...input,
             target: {
@@ -1578,7 +1604,7 @@ const make = Effect.gen(function* () {
         };
       }
     }
-    return { ...asMember, input: { ...input, target: fitted.target } };
+    return { ...rest, input: { ...input, target: fitted.target } };
   });
 
   const resolveProjectTarget = (
@@ -2925,7 +2951,10 @@ const make = Effect.gen(function* () {
     }),
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(
       function* (callerScope, requested) {
-        const { input, memberTask, teamMember } = yield* fitAgentTeamTarget(callerScope, requested);
+        const { input, memberTask, teamMember, checkLimit } = yield* fitAgentTeamTarget(
+          callerScope,
+          requested,
+        );
         const groupId = input.routingGroupId;
         const explicitTarget =
           input.target?.providerInstanceId !== undefined ||
@@ -3130,6 +3159,8 @@ const make = Effect.gen(function* () {
           scope.thread.threadId,
           input.role === "review" && !isRetryOfAcceptedDelegation,
           dispatchTask,
+          // A retry of an accepted task finds that task, and takes no second place.
+          isRetryOfAcceptedDelegation ? undefined : checkLimit,
         );
         const taskEvent = result.storedEvents.find(
           (stored) =>

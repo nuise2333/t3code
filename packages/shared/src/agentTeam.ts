@@ -144,3 +144,42 @@ export function realignMemberRoles(
     (_member, to) => roles[placed.get(to) ?? -1] ?? { name: "", description: "", instructions: "" },
   );
 }
+
+/**
+ * A team's flows after a client that knows roles but not flows saved it. A renamed member keeps
+ * its flows; where a name went to another member, its flows are dropped, so none changes hands.
+ */
+export function realignMemberFlows(
+  saved: Pick<RoutingGroup, "members" | "memberRoles" | "memberFlows">,
+  next: Pick<RoutingGroup, "members" | "memberRoles">,
+): RoutingGroup["memberFlows"] {
+  const places = realignMemberRoles(
+    {
+      members: saved.members,
+      memberRoles: saved.members.map((_member, at) => ({
+        name: String(at),
+        description: "",
+        instructions: "",
+      })),
+    },
+    next.members,
+  );
+  const nextNames = new Set(
+    next.members.map((_member, at) => agentTeamRole(next, at)?.name.toLowerCase() ?? ""),
+  );
+  const renamed = new Map<string, string>();
+  for (const at of saved.members.keys()) {
+    const before = agentTeamRole(saved, at)?.name ?? "";
+    const to = places?.findIndex((place) => place.name === String(at)) ?? -1;
+    const after = to < 0 ? "" : (agentTeamRole(next, to)?.name ?? "");
+    const kept = after.toLowerCase() === before.toLowerCase();
+    if (before && after && (kept || !nextNames.has(before.toLowerCase()))) {
+      renamed.set(before.toLowerCase(), after);
+    }
+  }
+  return saved.memberFlows?.flatMap((flow) => {
+    const from = renamed.get(flow.from.trim().toLowerCase());
+    const to = renamed.get(flow.to.trim().toLowerCase());
+    return from && to ? [{ from, to }] : [];
+  });
+}
