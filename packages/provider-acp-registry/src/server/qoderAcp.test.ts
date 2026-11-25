@@ -6,7 +6,8 @@ import { qoderPermissionDisposition, qoderSessionConfigForPolicy } from "./qoder
 describe("Qoder access modes", () => {
   it.each<[RuntimeMode, string, string, "allow" | "ask"]>([
     ["auto-accept-edits", "Bash", "acceptEdits", "ask"],
-    // Auto asks only about what Qoder itself flagged, so T3 must not answer for the user.
+    // Qoder asks only about what it flagged itself, so T3 must not answer for the user.
+    ["auto-accept-edits", "Edit", "acceptEdits", "ask"],
     ["auto", "Bash", "auto", "ask"],
     ["full-access", "Bash", "yolo", "allow"],
     ["full-access", "ExitPlanMode", "yolo", "ask"],
@@ -19,7 +20,7 @@ describe("Qoder access modes", () => {
         options: [],
         toolCall: {
           toolCallId: "call",
-          kind: toolName === "Bash" ? "execute" : "other",
+          kind: toolName === "Bash" ? "execute" : toolName === "Edit" ? "edit" : "other",
           _meta: { qoder: { toolName } },
         },
       }),

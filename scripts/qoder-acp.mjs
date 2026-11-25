@@ -15,6 +15,7 @@ import {
   launchArgs,
   launchContextWindow,
   modelState,
+  planningPermission,
   planPermission,
 } from "./lib/qoder-acp-config.mjs";
 
@@ -24,7 +25,7 @@ const RUNTIME = NodePath.join(
   RESOURCES,
   "app.asar.unpacked/node_modules/@qoder-ai/qoder-cn-agent-sdk/dist/_worker/qoder-worker-runtime.obf.mjs",
 );
-const CATALOG_TIMEOUT_MS = 10_000;
+const QUERY_TIMEOUT_MS = 10_000;
 const SDK_PROTOCOL = { version: 2, capability: "multi_session_v2" };
 
 function log(...args) {
@@ -196,8 +197,8 @@ class Runtime {
   }
 }
 
-/** The app's own model query; its answer carries the context windows and defaults ACP omits. */
-function queryModels() {
+/** One of the app's own account queries, such as the model catalog or credit usage. */
+function queryAccount(type, body) {
   return new Promise((resolve, reject) => {
     const daemon = NodeChildProcess.spawn(process.execPath, [RUNTIME, "--sdk"], {
       stdio: ["pipe", "pipe", "ignore"],
@@ -206,25 +207,30 @@ function queryModels() {
     const finish = (settle, value) => {
       clearTimeout(timer);
       daemon.kill("SIGTERM");
+      const force = setTimeout(() => daemon.kill("SIGKILL"), 2_000);
+      daemon.once("exit", () => clearTimeout(force));
       settle(value);
     };
+    // Whatever ends this process, the query's own process goes with it.
+    const killWithParent = () => daemon.kill("SIGKILL");
+    process.once("exit", killWithParent);
+    daemon.once("exit", () => process.off("exit", killWithParent));
     const timer = setTimeout(
-      () => finish(reject, new Error("Qoder model query timed out")),
-      CATALOG_TIMEOUT_MS,
+      () => finish(reject, new Error("Qoder account query timed out")),
+      QUERY_TIMEOUT_MS,
     );
     daemon.on("error", (error) => finish(reject, error));
-    daemon.on("exit", () => finish(reject, new Error("Qoder model query exited")));
+    daemon.on("exit", () => finish(reject, new Error("Qoder account query exited")));
     daemon.stdin.on("error", () => {});
-    const send = (id, type, body) =>
+    const send = (id, request, fields) =>
       daemon.stdin.write(
-        `${JSON.stringify({ type: "control_request", request_id: id, request: { type: `daemon.${type}`, ...body } })}\n`,
+        `${JSON.stringify({ type: "control_request", request_id: id, request: { type: `daemon.${request}`, ...fields } })}\n`,
       );
-    readLines(daemon.stdout, ({ type, response }) => {
-      if (type !== "control_response") return;
+    readLines(daemon.stdout, ({ type: kind, response }) => {
+      if (kind !== "control_response") return;
       if (response.subtype !== "success") finish(reject, new Error(response.error));
-      else if (response.request_id === "init")
-        send("models", "get_models", { fetchStrategy: "live" });
-      else if (response.request_id === "models") finish(resolve, response.response.models);
+      else if (response.request_id === "init") send("query", type, body);
+      else if (response.request_id === "query") finish(resolve, response.response);
     });
     send("init", "initialize", {
       business: { product: "app" },
@@ -273,8 +279,8 @@ function readAppPreferences() {
 
 let catalogQuery;
 function loadCatalog() {
-  catalogQuery ??= queryModels().then(
-    (models) => (models.length === 0 ? null : catalogFromModels(models, readAppPreferences())),
+  catalogQuery ??= queryAccount("get_models", { fetchStrategy: "live" }).then(
+    ({ models }) => (models.length === 0 ? null : catalogFromModels(models, readAppPreferences())),
     (error) => {
       log("model catalog", error.message);
       return null;
@@ -341,7 +347,33 @@ function publishConfig(session) {
 const currentOption = (result, id) =>
   result?.configOptions?.find((option) => option.id === id)?.currentValue;
 
-async function openSession(method, params) {
+// One open at a time per session, after the process that had it is gone.
+const opening = new Map();
+function openSession(method, params) {
+  const key = method === "session/load" || method === "session/resume" ? params.sessionId : null;
+  if (key === null) return startSession(method, params);
+  const opened = (opening.get(key) ?? Promise.resolve()).then(async () => {
+    const existing = sessions.get(key);
+    if (existing !== undefined) {
+      // A prompt owns the session's process, including while it relaunches it.
+      if (existing.prompting) {
+        throw new RpcError({ code: -32602, message: "This Qoder session is running a prompt." });
+      }
+      sessions.delete(key);
+      if (existing.runtime === control?.runtime) control = undefined;
+      await existing.runtime.stop();
+    }
+    return startSession(method, params);
+  });
+  const settled = opened.catch(() => {});
+  opening.set(key, settled);
+  void settled.then(() => {
+    if (opening.get(key) === settled) opening.delete(key);
+  });
+  return opened;
+}
+
+async function startSession(method, params) {
   const runtime = await runtimeForNewSession();
   let result;
   let catalog;
@@ -401,8 +433,9 @@ async function relaunch(session, wanted) {
   const previous = session.runtime;
   if (previous === control?.runtime) control = undefined;
   await previous.stop();
-  session.runtime = await startRuntime(launchArgs(wanted));
-  const result = await session.runtime.request("session/resume", {
+  const runtime = await startRuntime(launchArgs(wanted));
+  // Until the resume succeeds the session keeps its exited runtime, so the next prompt retries.
+  const resumed = runtime.request("session/resume", {
     sessionId: session.id,
     cwd: session.cwd,
     mcpServers: session.mcpServers,
@@ -410,6 +443,15 @@ async function relaunch(session, wanted) {
       ? { additionalDirectories: session.additionalDirectories }
       : {}),
   });
+  let result;
+  try {
+    result = await resumed;
+  } catch (error) {
+    void runtime.stop();
+    throw error;
+  }
+  runtime.claimed = true;
+  session.runtime = runtime;
   session.launched = {
     ...wanted,
     model: currentOption(result, "model") ?? wanted.model,
@@ -458,14 +500,18 @@ async function applySelections(session) {
   await applyPermissionMode(session);
 }
 
-// Setting a mode ends plan mode in the runtime, so it waits for the plan to be approved.
-async function applyPermissionMode(session) {
-  if (session.launched.plan || session.launched.permissionMode === session.permissionMode) return;
-  await session.runtime.request("session/set_mode", {
-    sessionId: session.id,
-    modeId: session.permissionMode,
+// Setting a mode ends plan mode in the runtime, so it waits for the plan to be approved. Changes run
+// one after another, so the last choice is the one in force however the answers interleave.
+function applyPermissionMode(session) {
+  const applied = (session.modeChange ?? Promise.resolve()).then(async () => {
+    const mode = session.permissionMode;
+    if (session.launched.plan || session.launched.permissionMode === mode) return;
+    session.launched.permissionMode = undefined;
+    await session.runtime.request("session/set_mode", { sessionId: session.id, modeId: mode });
+    session.launched.permissionMode = mode;
   });
-  session.launched.permissionMode = session.permissionMode;
+  session.modeChange = applied.catch(() => {});
+  return applied;
 }
 
 async function setConfigOption({ sessionId, configId, value }) {
@@ -490,7 +536,7 @@ async function setConfigOption({ sessionId, configId, value }) {
 
 async function prompt(params) {
   const session = requireSession(params.sessionId);
-  session.cancelled = false;
+  const cancels = session.cancels ?? 0;
   // Prompts can queue; only the first one finds an idle runtime to reconfigure.
   if (!session.prompting) {
     session.applying = applySelections(session);
@@ -498,7 +544,7 @@ async function prompt(params) {
   session.prompting = (session.prompting ?? 0) + 1;
   try {
     await session.applying;
-    if (session.cancelled) return { stopReason: "cancelled" };
+    if ((session.cancels ?? 0) !== cancels) return { stopReason: "cancelled" };
     return await session.runtime.request("session/prompt", params);
   } finally {
     session.prompting -= 1;
@@ -556,7 +602,8 @@ async function handleClientRequest({ method, params = {} }) {
 
 function handleClientNotification({ method, params = {} }) {
   const session = sessions.get(params.sessionId);
-  if (method === "session/cancel" && session !== undefined) session.cancelled = true;
+  if (method === "session/cancel" && session !== undefined)
+    session.cancels = (session.cancels ?? 0) + 1;
   (session?.runtime ?? control?.runtime)?.write({ method, params });
 }
 
@@ -601,7 +648,15 @@ async function handleRuntimeRequest(runtime, { method, params }) {
   const isPlanExit =
     method === "session/request_permission" &&
     params.toolCall?._meta?.qoder?.toolName === "ExitPlanMode";
-  if (session === undefined || !isPlanExit) return requestClient(method, params, runtime);
+  if (session === undefined) return requestClient(method, params, runtime);
+  if (!isPlanExit) {
+    if (method !== "session/request_permission" || !session.launched.plan) {
+      return requestClient(method, params, runtime);
+    }
+    // While planning, an edit is refused and nothing else is approved without the user.
+    const guarded = planningPermission(params);
+    return guarded.outcome ?? requestClient(method, guarded.request, runtime);
+  }
   const { request, plan } = planPermission(params, session.permissionMode);
   if (plan !== undefined) {
     writeClient({
@@ -618,33 +673,48 @@ async function handleRuntimeRequest(runtime, { method, params }) {
   return requestClient(method, request, runtime);
 }
 
-readLines(process.stdin, (message) => {
-  if (message.method === undefined) {
-    const pending = clientPending.get(message.id);
-    clientPending.delete(message.id);
-    if (message.error) pending?.reject(new RpcError(message.error));
-    else pending?.resolve(message.result);
-    return;
-  }
-  if (message.id === undefined) {
-    handleClientNotification(message);
-    return;
-  }
-  handleClientRequest(message).then(
-    (result) => writeClient({ id: message.id, result: result ?? {} }),
-    (error) =>
-      writeClient({
-        id: message.id,
-        error: error.error ?? { code: -32603, message: String(error.message ?? error) },
-      }),
-  );
-});
+function serve() {
+  readLines(process.stdin, (message) => {
+    if (message.method === undefined) {
+      const pending = clientPending.get(message.id);
+      clientPending.delete(message.id);
+      if (message.error) pending?.reject(new RpcError(message.error));
+      else pending?.resolve(message.result);
+      return;
+    }
+    if (message.id === undefined) {
+      handleClientNotification(message);
+      return;
+    }
+    handleClientRequest(message).then(
+      (result) => writeClient({ id: message.id, result: result ?? {} }),
+      (error) =>
+        writeClient({
+          id: message.id,
+          error: error.error ?? { code: -32603, message: String(error.message ?? error) },
+        }),
+    );
+  });
 
-async function shutdown() {
-  await Promise.all([...runtimes].map((runtime) => runtime.stop()));
-  process.exit(0);
+  async function shutdown() {
+    await Promise.all([...runtimes].map((runtime) => runtime.stop()));
+    process.exit(0);
+  }
+  process.stdin.on("end", shutdown);
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+  log("started", APP);
 }
-process.stdin.on("end", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
-log("started", APP);
+
+// `qoder [args] --t3-qoder-usage` prints the account's credit usage for T3's limits and exits.
+if (process.argv.at(-1) === "--t3-qoder-usage") {
+  process.on("SIGTERM", () => process.exit(143));
+  process.on("SIGINT", () => process.exit(130));
+  queryAccount("get_usage_info", {}).then(
+    ({ usage }) => process.stdout.write(`${JSON.stringify(usage)}\n`),
+    (error) => {
+      process.stderr.write(`${error.message}\n`);
+      process.exitCode = 1;
+    },
+  );
+} else serve();

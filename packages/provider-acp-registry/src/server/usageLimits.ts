@@ -1,3 +1,4 @@
+import type { AcpRegistrySettings } from "../settings.ts";
 import type { ServerProviderUsageWindow } from "@t3tools/contracts";
 import {
   clampPercent,
@@ -477,11 +478,127 @@ export const readDeepSeekBalance = Effect.fn("readDeepSeekBalance")(function* (
   };
 });
 
+/** How the instance starts its agent; arguments can select the account. */
+type UsageLaunch = Pick<AcpRegistrySettings, "commandPath" | "commandArgs">;
+
+const QoderQuota = Schema.Struct({ total: Schema.Number, used: Schema.Number });
+const QoderUsage = Schema.Struct({
+  // Epoch milliseconds; 0 when the plan has no renewal date.
+  expiresAt: Schema.optional(Schema.Number),
+  userQuota: Schema.optional(QoderQuota),
+  addOnQuota: Schema.optional(QoderQuota),
+  orgResourcePackage: Schema.optional(
+    Schema.Struct({
+      used: Schema.optional(Schema.Number),
+      cap: Schema.optional(Schema.Number),
+      available: Schema.optional(Schema.Boolean),
+    }),
+  ),
+  dedicatedResourcePackages: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        ...QoderQuota.fields,
+        id: Schema.String,
+        name: Schema.optional(Schema.String),
+        available: Schema.optional(Schema.Boolean),
+        expiresAt: Schema.optional(Schema.Number),
+        displayLabels: Schema.optional(
+          Schema.Array(
+            Schema.Struct({
+              dimension: Schema.String,
+              valueI18n: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+            }),
+          ),
+        ),
+      }),
+    ),
+  ),
+});
+const decodeQoderUsage = Schema.decodeEffect(Schema.fromJsonString(QoderUsage));
+
+/** The credit pools the Qoder app lists, under its own English names. */
+export function qoderUsageToWindows(usage: typeof QoderUsage.Type) {
+  const pool = (
+    id: string,
+    label: string,
+    quota: { readonly total?: number | undefined; readonly used?: number | undefined } | undefined,
+    expiresAt?: number,
+  ): ServerProviderUsageWindow[] => {
+    // A negative or zero total is an unlimited or empty pool, which has no percentage.
+    if (quota?.total === undefined || quota.used === undefined || !(quota.total > 0)) return [];
+    const resets =
+      expiresAt !== undefined && expiresAt > 0 ? DateTime.make(expiresAt) : Option.none();
+    return [
+      usageWindow(
+        id,
+        label,
+        id === "plan" ? "monthly" : "other",
+        (quota.used / quota.total) * 100,
+        Option.isSome(resets) ? DateTime.formatIso(resets.value) : undefined,
+        undefined,
+      ),
+    ];
+  };
+  const org = usage.orgResourcePackage;
+  return [
+    ...pool("plan", "Plan credits", usage.userQuota, usage.expiresAt),
+    ...pool("add-on", "Resource package", usage.addOnQuota),
+    ...(usage.dedicatedResourcePackages ?? []).flatMap((item) =>
+      item.available === false
+        ? []
+        : pool(
+            item.id,
+            item.displayLabels?.find((label) => label.dimension === "title")?.valueI18n?.[
+              "en-US"
+            ] ??
+              item.name ??
+              "Dedicated package",
+            item,
+            item.expiresAt,
+          ),
+    ),
+    ...(org?.available
+      ? pool("organization", "Organization package", { total: org.cap, used: org.used })
+      : []),
+  ];
+}
+
+/** Qoder credits, read through the launcher with the account the Qoder runtime is signed in to. */
+export const readQoderUsageLimits = Effect.fn("readQoderUsageLimits")(function* (
+  environment: NodeJS.ProcessEnv,
+  launch: UsageLaunch,
+) {
+  const checkedAt = DateTime.formatIso(yield* DateTime.now);
+  const output = yield* (yield* ChildProcessSpawner.ChildProcessSpawner)
+    .string(
+      ChildProcess.make(launch.commandPath, [...launch.commandArgs, "--t3-qoder-usage"], {
+        env: environment,
+        stdin: "ignore",
+        stderr: "ignore",
+        forceKillAfter: "1 second",
+      }),
+    )
+    .pipe(Effect.timeout("30 seconds"), Effect.option);
+  const usage = yield* Effect.fromOption(output).pipe(
+    Effect.flatMap((text) => decodeQoderUsage(text.trim())),
+    Effect.option,
+  );
+  if (Option.isNone(usage)) {
+    return makeUnavailableUsageLimits({
+      checkedAt,
+      reason: "probeFailed",
+      message: "Sign in to Qoder to see its credits.",
+    });
+  }
+  return makeUsageLimits({ checkedAt, windows: qoderUsageToWindows(usage.value) });
+});
+
 type UsageRead = ReturnType<
   | typeof readKimiCodeUsageLimits
   | typeof readZCodeUsageLimits
   | typeof readQwenTokenPlanUsageLimits
   | typeof readDeepSeekBalance
+  | typeof readQoderUsageLimits
 >;
 
 /** The limits reader for an ACP Registry agent that reports them, if any. */
@@ -490,6 +607,7 @@ export function acpRegistryUsageReader(
 ):
   | ((
       environment: NodeJS.ProcessEnv,
+      launch: UsageLaunch,
     ) => Effect.Effect<
       Effect.Success<UsageRead>,
       Effect.Error<UsageRead>,
@@ -500,5 +618,6 @@ export function acpRegistryUsageReader(
   if (agentId === "zcode-acp.mjs") return readZCodeUsageLimits;
   if (agentId === "qwen-code") return readQwenTokenPlanUsageLimits;
   if (agentId === "dsh-acp.mjs") return readDeepSeekBalance;
+  if (agentId === "qoder-acp.mjs") return readQoderUsageLimits;
   return undefined;
 }

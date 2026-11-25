@@ -8,6 +8,7 @@ import {
   configOptionsFor,
   launchArgs,
   launchContextWindow,
+  planningPermission,
   planPermission,
 } from "./lib/qoder-acp-config.mjs";
 
@@ -73,7 +74,7 @@ describe("qoder catalog", () => {
       "--reasoning-effort",
       "low",
       "--settings",
-      '{"general":{"defaultPermissionMode":"plan"}}',
+      '{"general":{"defaultPermissionMode":"plan","plan":{"enabled":true}}}',
     ]);
   });
 });
@@ -99,5 +100,21 @@ describe("qoder plan approval", () => {
     expect(ids("auto")).toEqual(["default", "plan"]);
     expect(ids("yolo")).toEqual(["yolo", "plan"]);
     NodeFS.rmSync(dir, { recursive: true });
+  });
+});
+
+describe("qoder permission while planning", () => {
+  const options = [
+    { optionId: "proceed_once", kind: "allow_once" },
+    { optionId: "cancel", kind: "reject_once" },
+  ];
+
+  it("refuses edits and flags the rest", () => {
+    expect(planningPermission({ options, toolCall: { kind: "edit" } })).toEqual({
+      outcome: { outcome: { outcome: "selected", optionId: "cancel" } },
+    });
+    expect(
+      planningPermission({ options, toolCall: { kind: "execute" } }).request.toolCall._meta,
+    ).toEqual({ qoder: { planning: true } });
   });
 });

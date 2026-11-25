@@ -16,10 +16,11 @@ export function isQoderAcp(settings: Pick<AcpRegistrySettings, "source" | "comma
   );
 }
 
-// Qoder's three access modes, in its own words.
-export const QODER_RUNTIME_MODES: Required<
-  Pick<ServerProvider, "supportedRuntimeModes" | "runtimeModeLabels">
+// Qoder's plan mode and three access modes, in its own words.
+export const QODER_PRESENTATION: Required<
+  Pick<ServerProvider, "showInteractionModeToggle" | "supportedRuntimeModes" | "runtimeModeLabels">
 > = {
+  showInteractionModeToggle: true,
   supportedRuntimeModes: ["auto-accept-edits", "auto", "full-access"],
   runtimeModeLabels: [
     {
@@ -53,19 +54,17 @@ export function qoderSessionConfigForPolicy(
   return [{ id: "permission_mode", value: QODER_PERMISSION_MODES[policy.runtimeMode] }];
 }
 
-/** Qoder asks only when its own access mode wants an answer, and for a plan in every mode. */
+/** Qoder asks only what its own access mode leaves to the user, so only Full access answers. */
 export function qoderPermissionDisposition(
   policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
   request: EffectAcpSchema.RequestPermissionRequest,
 ): AcpPermissionDisposition {
   const disposition = acpPermissionDisposition(policy, request);
   if (disposition !== "allow") return disposition;
-  if (policy.runtimeMode === "auto") return "ask";
+  if (policy.runtimeMode !== "full-access") return "ask";
   const qoder = request.toolCall._meta?.qoder;
-  const isPlanExit =
-    typeof qoder === "object" &&
-    qoder !== null &&
-    "toolName" in qoder &&
-    qoder.toolName === "ExitPlanMode";
-  return isPlanExit ? "ask" : disposition;
+  if (typeof qoder !== "object" || qoder === null) return disposition;
+  const planning = "planning" in qoder && qoder.planning === true;
+  const planExit = "toolName" in qoder && qoder.toolName === "ExitPlanMode";
+  return planning || planExit ? "ask" : disposition;
 }
