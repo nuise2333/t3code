@@ -572,9 +572,7 @@ function modelKey(id: string): string {
   }
   bare = bare.replace(/\([^()]*\)$/, "");
   return bare
-    .slice(
-      Math.max(bare.lastIndexOf("/") + 1, bare.includes("::") ? bare.lastIndexOf("::") + 2 : 0),
-    )
+    .slice(bare.lastIndexOf("/") + 1)
     .toLowerCase()
     .replaceAll(".", "-");
 }
@@ -1032,16 +1030,26 @@ function chooseBoardModel(
     b.board.scores.coding - a.board.scores.coding ||
     (cost(a) === cost(b) ? 0 : cost(a) - cost(b));
   if (kind === "best") return [...picks].sort(strongest)[0]?.board;
-  const eligible = picks.filter(({ board }) =>
+  const affordable = (pick: TeamBoardPick) => cost(pick) <= CHEAP_MAX_COST_USD;
+  const eligible = picks.filter((pick) =>
     kind === "cheap"
-      ? board.chinese === true &&
-        (board.newest === true || (board.costUsd ?? Number.POSITIVE_INFINITY) <= CHEAP_MAX_COST_USD)
-      : board.marketShare !== undefined &&
-        board.fading !== true &&
-        board.scores.coding >= BALANCED_MIN_CODING,
+      ? pick.board.chinese === true && (pick.board.newest === true || affordable(pick))
+      : pick.board.costUsd !== undefined &&
+        pick.board.marketShare !== undefined &&
+        pick.board.fading !== true &&
+        pick.board.scores.coding >= BALANCED_MIN_CODING,
   );
+  // With none eligible, Cheap keeps its price limit, then takes the lowest price on offer; Balanced
+  // still needs a price to judge value by.
+  const priced = picks.filter((pick) => pick.board.costUsd !== undefined);
+  const cheapest = Math.min(...picks.map(cost));
+  const fallbacks =
+    kind === "cheap"
+      ? [picks.filter(affordable), picks.filter((pick) => cost(pick) === cheapest)]
+      : [priced];
+  const chosen = [eligible, ...fallbacks].find((list) => list.length > 0) ?? picks;
   // A writing sub-score rests on a few items, so one lucky item can't carry a cheap model.
-  const pool = (eligible.length > 0 ? eligible : picks).map(({ board, score }) => ({
+  const pool = chosen.map(({ board, score }) => ({
     board,
     score: axis === undefined ? score : (score + (board.scores[axis] ?? score)) / 2,
   }));

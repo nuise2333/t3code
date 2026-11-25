@@ -2355,9 +2355,48 @@ describe("chooseAutoModel", () => {
     expect(worker("balanced", "backend", { models: listedCn })).toStrictEqual(sol);
     // With no Chinese model set up, Cheap takes the cheapest that passes.
     expect(worker("cheap", "backend", { providers: [claude(), codex()] })).toStrictEqual(sol);
+    // Without one, the price limit still holds, and then the lowest price wins.
+    const priced = (opusCost: number, solCost: number) =>
+      board.models.map((entry) =>
+        entry.models[0] === "model-opus"
+          ? { ...entry, costUsd: opusCost }
+          : entry.models[0] === "model-sol"
+            ? { ...entry, scores: scores(20), costUsd: solCost }
+            : entry,
+      );
+    const western = [claude(), codex()];
+    for (const models of [priced(200, 5), priced(200, 20)]) {
+      expect(worker("cheap", "backend", { providers: western, models })).toStrictEqual(sol);
+    }
+    const unpricedOpus = board.models.flatMap((entry) => {
+      const { costUsd: _costUsd, ...rest } = entry;
+      if (entry.models[0] === "model-opus") return [rest];
+      return entry.models[0] === "model-sol" ? [{ ...entry, scores: scores(20) }] : [];
+    });
+    expect(
+      worker("balanced", "backend", { providers: western, models: unpricedOpus }),
+    ).toStrictEqual(sol);
     // The better harness runs a model no agent owns.
     const grok = provider(ProviderInstanceId.make("grok"), "grok", ["fake-cn"]);
     expect(worker("cheap", "backend", { providers: [grok, openProvider] })).toStrictEqual(cn);
+  });
+
+  it("keeps `::` routes of one model apart, as they can bill differently", () => {
+    const free = provider(opencodeId, "opencode", ["free::model-sol"]);
+    const payg = provider(codexId, "codex", ["payg::model-sol"]);
+    expect(
+      chooseTeamFallbackModel({
+        target: { instanceId: opencodeId, model: "free::model-sol" },
+        table: tableOf(ROWS),
+        taskClass: "implement",
+        providers: [{ ...free, enabled: false }, payg],
+        settings: settingsFor([free, payg]),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      }),
+    ).toBeNull();
   });
 
   it.each([

@@ -719,7 +719,7 @@
           "fading": true
         },
         {
-          "models": ["glm-5.4"],
+          "models": ["glm-5.4", "t3-bigmodel-api::GLM-5.4"],
           "effort": "max",
           "scores": {
             "backend": 45.9,
@@ -745,7 +745,7 @@
           "newest": true
         },
         {
-          "models": ["glm-5.3"],
+          "models": ["glm-5.3", "t3-bigmodel-api::GLM-5.3"],
           "effort": "high",
           "scores": {
             "backend": 37.5,
@@ -770,7 +770,7 @@
           "marketShare": 1.49
         },
         {
-          "models": ["glm-5.3-flash"],
+          "models": ["glm-5.3-flash", "t3-bigmodel-api::GLM-5.3-Flash"],
           "effort": "high",
           "scores": {
             "backend": 27.1,
