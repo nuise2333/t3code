@@ -225,8 +225,8 @@ beside Favorites):
   fastest of models about as strong, at Max effort only on hard tasks.
   **Balanced** takes the best score for the cost and time among models its
   adoption board scores above the median and whose usage isn't falling.
-  **Cheap** takes a low-priced model that is fast and good enough for the task:
-  simple tasks need less, hard ones more. When several agents offer the model,
+  **Cheap** takes a low-priced Chinese model that is fast and good enough for
+  the task: simple tasks need less, hard ones more. When several agents offer the model,
   native agents and gateways come first, then remaining quota, then the harness
   board's score for that kind of work. The kind you pick is remembered, and new
   threads start with it until you pick **No team**.

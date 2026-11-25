@@ -38,6 +38,73 @@ export function presetOption(ctx, sessionId, presets) {
   };
 }
 
+const MODEL_INFO_TIMEOUT_MS = 2_000;
+
+/**
+ * The session's options, each model choice listing its own reasoning levels: ACP reports only the
+ * current model's, so T3 could not offer a level for any other.
+ */
+export async function withModelEfforts(ctx, options) {
+  const infoOf = async (value) => {
+    try {
+      const [provider, model] = JSON.parse(value);
+      let timer;
+      const timeout = new Promise((resolve) => {
+        timer = setTimeout(resolve, MODEL_INFO_TIMEOUT_MS);
+      });
+      const info = await Promise.race([ctx.llm.resolveModelInfo(provider, model), timeout]);
+      clearTimeout(timer);
+      return info;
+    } catch {
+      return undefined;
+    }
+  };
+  const choiceWith = async (choice) => {
+    const info = await infoOf(choice.value);
+    if (info === undefined) return choice;
+    const { reasoning } = info;
+    const levels =
+      reasoning === undefined
+        ? []
+        : [
+            ...(reasoning.defaultEffort === undefined
+              ? [{ value: "", name: "Provider default" }]
+              : []),
+            ...reasoning.efforts.map((effort) => ({ value: String(effort.id), name: effort.name })),
+          ];
+    const configOptions =
+      levels.length === 0
+        ? []
+        : [
+            {
+              type: "select",
+              id: "reasoning_effort",
+              name: "Reasoning effort",
+              category: "thought_level",
+              currentValue: String(reasoning.defaultEffort ?? ""),
+              options: levels,
+            },
+          ];
+    return { ...choice, _meta: { ...choice._meta, configOptions } };
+  };
+  return Promise.all(
+    (options ?? []).map(async (option) =>
+      option.id !== "model" || option.type !== "select"
+        ? option
+        : {
+            ...option,
+            options: await Promise.all(
+              option.options.map(async (entry) =>
+                entry.options === undefined
+                  ? choiceWith(entry)
+                  : { ...entry, options: await Promise.all(entry.options.map(choiceWith)) },
+              ),
+            ),
+          },
+    ),
+  );
+}
+
 export function presetAgents(ctx) {
   return new Proxy(ctx.agents, {
     get(target, key) {
@@ -75,9 +142,9 @@ export function presetStream(ctx, stream, presets) {
   const pending = new Map();
   const configurations = new Map();
   const send = (message) => writer.write(message);
-  const addOption = (options, sessionId) => {
+  const addOption = async (options, sessionId) => {
     const result = [
-      ...(options ?? []).filter((option) => option.id !== PRESET_OPTION_ID),
+      ...(await withModelEfforts(ctx, options)).filter((option) => option.id !== PRESET_OPTION_ID),
       presetOption(ctx, sessionId, presets),
     ];
     configurations.set(sessionId, result);
@@ -101,7 +168,10 @@ export function presetStream(ctx, stream, presets) {
               await ctx.agentPresets.select(agent, value);
               await ctx.sessions.flush(agent.session);
             }
-            const configOptions = addOption(configurations.get(agent.session.id), agent.session.id);
+            const configOptions = await addOption(
+              configurations.get(agent.session.id),
+              agent.session.id,
+            );
             await send({
               jsonrpc: "2.0",
               method: "session/update",
@@ -152,7 +222,7 @@ export function presetStream(ctx, stream, presets) {
               sessionId,
               update: {
                 sessionUpdate: "config_option_update",
-                configOptions: addOption(configurations.get(sessionId), sessionId),
+                configOptions: await addOption(configurations.get(sessionId), sessionId),
               },
             },
           });
@@ -162,7 +232,7 @@ export function presetStream(ctx, stream, presets) {
             ...message,
             result: {
               ...message.result,
-              configOptions: addOption(message.result.configOptions, sessionId),
+              configOptions: await addOption(message.result.configOptions, sessionId),
             },
           };
         }
@@ -177,7 +247,7 @@ export function presetStream(ctx, stream, presets) {
             ...message.params,
             update: {
               ...message.params.update,
-              configOptions: addOption(
+              configOptions: await addOption(
                 message.params.update.configOptions,
                 message.params.sessionId,
               ),

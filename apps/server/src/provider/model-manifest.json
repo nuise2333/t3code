@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-25T18:00:00Z",
+  "updatedAt": "2026-11-25T20:00:00Z",
   "routing": {
     "version": 1,
-    "updatedAt": "2026-11-25T18:00:00Z",
+    "updatedAt": "2026-11-25T20:00:00Z",
     "sources": {
       "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
       "aa-coding": {
@@ -1329,6 +1329,11 @@
         },
         {
           "models": ["deepseek-v4.1-flash-1017", "deepseek-flash"],
+          "balancedRun": {
+            "agentId": "dsh-acp.mjs",
+            "effort": "max",
+            "options": [{ "id": "t3_agent_preset", "value": "deepseek-stack" }]
+          },
           "effort": "high",
           "minutes": 115.0,
           "efforts": [

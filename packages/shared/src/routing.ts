@@ -984,7 +984,7 @@ export function inferTeamSubtask(input: {
   return role === "implementation" ? "backend" : null;
 }
 
-/** The share of the best low-priced model's score a Cheap worker needs. */
+/** The share of the best Chinese model's score a Cheap worker needs. */
 const CHEAP_PASS_SHARE: Readonly<Record<RoutingTaskClass, number>> = {
   quick_edit: 0.7,
   readonly: 0.75,
@@ -1036,6 +1036,7 @@ interface TeamBoardPick {
  * for this user; with none left the model keeps its own row, and runs at the nearest level offered.
  */
 function teamBoardPicks(
+  kind: AutoTeamKind,
   board: TeamBoardModel,
   subtask: TeamSubtask | null,
   offered: (effort: string) => boolean,
@@ -1044,6 +1045,7 @@ function teamBoardPicks(
   cap: string,
 ): ReadonlyArray<TeamBoardPick> {
   const measured = board.efforts ?? [];
+  const fixed = kind === "balanced" ? board.balancedRun?.effort : undefined;
   // A level of unknown price counts as the dearest one, so it can't slip under a price limit.
   const prices = [board, ...measured].flatMap(({ costUsd }) => costUsd ?? []);
   const unknownPrice = prices.length === 0 ? undefined : Math.max(...prices);
@@ -1051,7 +1053,7 @@ function teamBoardPicks(
   const unknownTime = times.length === 0 ? undefined : Math.max(...times);
   if (subtask !== null && subtask in WRITING_AXIS) {
     const score = board.scores[subtask];
-    const effort = board.writingEffort ?? board.effort;
+    const effort = fixed ?? board.writingEffort ?? board.effort;
     const level = runsAt(effort);
     const at = measured.find((row) => row.effort === level);
     const atBase = level === board.effort || effortLevel(effort) < 0;
@@ -1070,7 +1072,10 @@ function teamBoardPicks(
   }
   const axis = (subtask ?? "coding") as keyof (typeof measured)[number]["scores"];
   const rows = measured.filter(
-    (row) => offered(row.effort) && effortLevel(row.effort) <= effortLevel(cap),
+    (row) =>
+      (fixed === undefined || row.effort === fixed) &&
+      offered(row.effort) &&
+      effortLevel(row.effort) <= effortLevel(fixed ?? cap),
   );
   return (rows.length > 0 ? rows : [{ ...board, costUsd: unknownPrice, minutes: unknownTime }]).map(
     (row) => ({
@@ -1123,7 +1128,7 @@ function chooseBoardModel(
   const affordable = (pick: TeamBoardPick) => cost(pick) <= CHEAP_MAX_COST_USD;
   const eligible = picks.filter((pick) =>
     kind === "cheap"
-      ? (pick.board.chinese === true && pick.board.newest === true) || affordable(pick)
+      ? pick.board.chinese === true && (pick.board.newest === true || affordable(pick))
       : pick.costUsd !== undefined &&
         pick.board.marketShare !== undefined &&
         pick.board.fading !== true &&
@@ -1242,6 +1247,16 @@ const HARNESS_SCENARIO = {
   structure: "office",
 } as const satisfies Record<TeamSubtask, string>;
 
+function agentIdOf(
+  provider: ServerProvider,
+  settings: Pick<ServerSettings, "providerInstances">,
+): string | null {
+  const config = settings.providerInstances[provider.instanceId]?.config;
+  const agentId =
+    typeof config === "object" && config !== null && "agentId" in config ? config.agentId : null;
+  return typeof agentId === "string" ? agentId : null;
+}
+
 /** How well the agent itself does this kind of work; ACP Registry agents go by agent id. */
 function harnessScore(
   table: RoutingTable,
@@ -1249,10 +1264,7 @@ function harnessScore(
   provider: ServerProvider,
   settings: Pick<ServerSettings, "providerInstances">,
 ): number {
-  const config = settings.providerInstances[provider.instanceId]?.config;
-  const agentId =
-    typeof config === "object" && config !== null && "agentId" in config ? config.agentId : null;
-  const key = typeof agentId === "string" ? agentId : provider.driver;
+  const key = agentIdOf(provider, settings) ?? provider.driver;
   const scenario =
     subtask === null
       ? undefined
@@ -1262,7 +1274,7 @@ function harnessScore(
 
 /**
  * A worker's model for an automatic team, or null. Models on the team board rank by the subtask's
- * score at each measured effort: Cheap takes a capable model that is fast and cheap, Balanced the best
+ * score at each measured effort: Cheap takes a capable Chinese model that is fast and cheap, Balanced the best
  * value for price and time among models in use, Best the top score, the fastest when close. The worker runs at the effort it was picked on.
  * With none on the board, coarse tiers decide, and the caller routes the effort.
  */
@@ -1296,6 +1308,7 @@ export function chooseTeamWorkerModel(input: {
     readonly route: number;
     readonly options: ReadonlyArray<OptionValue>;
     readonly reasoning: ReasoningLevels | undefined;
+    readonly descriptors: ReadonlyArray<ProviderOptionDescriptor>;
   }> = [];
   for (const provider of input.providers) {
     for (const model of provider.models) {
@@ -1328,6 +1341,7 @@ export function chooseTeamWorkerModel(input: {
         route: routeRank(model.slug),
         options,
         reasoning: reasoningLevels(model),
+        descriptors: model.capabilities?.optionDescriptors ?? [],
       });
     }
   }
@@ -1356,6 +1370,9 @@ export function chooseTeamWorkerModel(input: {
         };
 
   const cap = topEffort(input.kind, input.taskClass);
+  const runOf = (board: TeamBoardModel) =>
+    input.kind === "balanced" ? board.balancedRun : undefined;
+  const capFor = (board: TeamBoardModel) => runOf(board)?.effort ?? cap;
   const boards = new Map<TeamBoardModel, Array<Ranked["candidate"]>>();
   for (const candidate of candidates) {
     if (candidate.board === undefined || candidate.score === null) continue;
@@ -1367,37 +1384,53 @@ export function chooseTeamWorkerModel(input: {
     input.taskClass,
     [...boards].flatMap(([board, own]) =>
       teamBoardPicks(
+        input.kind,
         board,
         subtask,
         (effort) => own.some((candidate) => candidate.reasoning?.levels.includes(effort)),
         (effort) => {
           const best = [...own].sort(
-            (a, b) => levelGap(a.reasoning, effort, cap) - levelGap(b.reasoning, effort, cap),
+            (a, b) =>
+              levelGap(a.reasoning, effort, capFor(board)) -
+              levelGap(b.reasoning, effort, capFor(board)),
           )[0]?.reasoning;
-          return best && nearestLevel(best.levels, effort, cap);
+          return best && nearestLevel(best.levels, effort, capFor(board));
         },
         cap,
       ),
     ),
   );
   if (pick !== undefined) {
+    const run = runOf(pick.board);
+    const pickCap = capFor(pick.board);
+    const onAgent = ({ candidate }: Ranked) =>
+      run !== undefined &&
+      agentIdOf(candidate.provider, input.settings) === run.agentId &&
+      run.options.every((option) => optionSelectionProblem(option, candidate.descriptors) === null);
     const chosen = ranked
       .filter(({ candidate }) => candidate.board === pick.board)
       .sort(
         (a, b) =>
-          levelGap(a.candidate.reasoning, pick.effort, cap) -
-            levelGap(b.candidate.reasoning, pick.effort, cap) || byAgent(a, b),
-      )[0]?.candidate;
-    const picked = result(chosen);
-    const level = chosen?.reasoning && nearestLevel(chosen.reasoning.levels, pick.effort, cap);
-    if (picked === null || !chosen?.reasoning || level === undefined) return picked;
+          Number(onAgent(b)) - Number(onAgent(a)) ||
+          levelGap(a.candidate.reasoning, pick.effort, pickCap) -
+            levelGap(b.candidate.reasoning, pick.effort, pickCap) ||
+          byAgent(a, b),
+      )[0];
+    const picked = result(chosen?.candidate);
+    if (picked === null || chosen === undefined) return null;
+    const { reasoning } = chosen.candidate;
+    const level = reasoning && nearestLevel(reasoning.levels, pick.effort, pickCap);
+    const options = [
+      ...(picked.selection.options ?? []),
+      ...(run !== undefined && onAgent(chosen) ? run.options : []),
+      ...(reasoning !== undefined && level !== undefined
+        ? [{ id: reasoning.id, value: level }]
+        : []),
+    ];
     return {
       ...picked,
-      selection: {
-        ...picked.selection,
-        options: [...(picked.selection.options ?? []), { id: chosen.reasoning.id, value: level }],
-      },
-      effort: level,
+      selection: { ...picked.selection, ...(options.length === 0 ? {} : { options }) },
+      ...(level === undefined ? {} : { effort: level }),
     };
   }
 

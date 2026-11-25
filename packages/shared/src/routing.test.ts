@@ -2333,11 +2333,69 @@ describe("chooseAutoModel", () => {
     );
     expect(worker("balanced", null, { models: closeValue })).toStrictEqual(opus);
     expect(worker("cheap", "backend")).toStrictEqual(cn);
-    // Any lab's model counts once its price is low.
+    // Another lab's model stays out however low its price.
     const cheapSol = board.models.map((entry) =>
       entry.models[0] === "model-sol" ? { ...entry, costUsd: 0.05 } : entry,
     );
-    expect(worker("cheap", "backend", { models: cheapSol })).toStrictEqual(sol);
+    expect(worker("cheap", "backend", { models: cheapSol })).toStrictEqual(cn);
+    // A model Balanced runs a fixed way goes to that agent at that level, or elsewhere at that level.
+    const presetOption = {
+      id: "preset",
+      label: "Preset",
+      type: "select" as const,
+      options: [{ id: "stack", label: "Stack" }],
+    };
+    const harnessId = ProviderInstanceId.make("harness");
+    const harness = provider(harnessId, "acpRegistry", ["model-sol"], {}, [effort, presetOption]);
+    const fixed = board.models.map((entry) =>
+      entry.models[0] === "model-sol"
+        ? {
+            ...entry,
+            efforts: [
+              { effort: "high", scores: scores(79), costUsd: 11 },
+              { effort: "max", scores: scores(80), costUsd: 12 },
+            ],
+            balancedRun: {
+              agentId: "harness-agent",
+              effort: "max",
+              options: [{ id: "preset", value: "stack" }],
+            },
+          }
+        : entry,
+    );
+    const fixedRun = (kind: "balanced" | "best", providers: ReadonlyArray<ServerProvider>) =>
+      chooseTeamWorkerModel({
+        kind,
+        subtask: "backend",
+        table: { ...tableOf(ROWS), teamBoard: { ...board, models: fixed } },
+        taskClass: "implement",
+        providers,
+        settings: {
+          ...settingsFor(providers),
+          providerInstances: {
+            ...settingsFor(providers).providerInstances,
+            [harnessId]: {
+              driver: harness.driver,
+              enabled: true,
+              config: { agentId: "harness-agent" },
+            },
+          },
+        },
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    expect(fixedRun("balanced", [codex(), harness])).toStrictEqual({
+      instanceId: harnessId,
+      model: "model-sol",
+      options: [
+        { id: "preset", value: "stack" },
+        { id: "effort", value: "max" },
+      ],
+    });
+    expect(fixedRun("balanced", [codex()])).toStrictEqual(at(codexId, "model-sol", "max"));
+    expect(fixedRun("best", [codex(), harness])).toStrictEqual(sol);
     // Best takes the faster of two about as strong, not one well behind.
     const timedBest = (solMinutes: number, solScore: number) =>
       board.models.map((entry) =>
