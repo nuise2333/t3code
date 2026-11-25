@@ -147,7 +147,7 @@ describe("RoutingPolicy.routeTeamWorker", () => {
     readonly effort: string;
   }>([
     { kind: "cheap", prompt: "Where is the sync job scheduled?", effort: "low" },
-    { kind: "cheap", prompt: "Add a CSV export button to the reports page.", effort: "high" },
+    { kind: "cheap", prompt: "Add a CSV export button to the reports page.", effort: "low" },
     { kind: "cheap", prompt: DEBUG, effort: "high" },
     { kind: "best", prompt: DEBUG, effort: "max" },
   ])(

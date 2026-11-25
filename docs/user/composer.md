@@ -221,11 +221,12 @@ beside Favorites):
   frontend, visual design, reasoning or maintainability, or one of eight reading
   and writing skills, as scored by
   [ModelDial](https://modeldial.com/leaderboard/coding). The worker runs at the
-  reasoning effort that score was measured at. **Best** takes the top score, at
-  Max effort only on hard tasks. **Balanced** takes the best score for the cost
-  among models its adoption board scores above the median and whose usage isn't
-  falling. **Cheap** takes a Chinese model close enough to the best Chinese
-  score for the task, the fastest for its price: simple tasks need less, hard ones more. When several agents offer the model,
+  reasoning effort that score was measured at. **Best** takes the top score, or the
+  fastest of models about as strong, at Max effort only on hard tasks.
+  **Balanced** takes the best score for the cost and time among models its
+  adoption board scores above the median and whose usage isn't falling.
+  **Cheap** takes a low-priced model that is fast and good enough for the task:
+  simple tasks need less, hard ones more. When several agents offer the model,
   native agents and gateways come first, then remaining quota, then the harness
   board's score for that kind of work. The kind you pick is remembered, and new
   threads start with it until you pick **No team**.

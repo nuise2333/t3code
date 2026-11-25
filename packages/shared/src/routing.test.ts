@@ -2270,7 +2270,7 @@ describe("chooseAutoModel", () => {
           models: ["model-sol"],
           effort: "high",
           scores: { ...scores(79, 100), frontend: 90 },
-          costUsd: 10,
+          costUsd: 11,
           marketShare: 1,
         },
         // Never measured on writing, and on no tier row: only the board makes it a candidate.
@@ -2333,6 +2333,32 @@ describe("chooseAutoModel", () => {
     );
     expect(worker("balanced", null, { models: closeValue })).toStrictEqual(opus);
     expect(worker("cheap", "backend")).toStrictEqual(cn);
+    // Any lab's model counts once its price is low.
+    const cheapSol = board.models.map((entry) =>
+      entry.models[0] === "model-sol" ? { ...entry, costUsd: 0.05 } : entry,
+    );
+    expect(worker("cheap", "backend", { models: cheapSol })).toStrictEqual(sol);
+    // Best takes the faster of two about as strong, not one well behind.
+    const timedBest = (solMinutes: number, solScore: number) =>
+      board.models.map((entry) =>
+        entry.models[0] === "model-opus"
+          ? { ...entry, minutes: 200 }
+          : entry.models[0] === "model-sol"
+            ? { ...entry, scores: scores(solScore), minutes: solMinutes }
+            : entry,
+      );
+    expect(worker("best", "backend", { models: timedBest(100, 78) })).toStrictEqual(sol);
+    expect(worker("best", "backend", { models: timedBest(300, 78) })).toStrictEqual(opus);
+    expect(worker("best", "backend", { models: timedBest(100, 70) })).toStrictEqual(opus);
+    // Balanced pays for time too: at one price, twice as slow needs more points.
+    const timedBalanced = (opusScore: number) =>
+      timedBest(100, 70).map((entry) =>
+        entry.models[0] === "model-opus"
+          ? { ...entry, scores: scores(opusScore), costUsd: 11, marketShare: 0.5 }
+          : entry,
+      );
+    expect(worker("balanced", "backend", { models: timedBalanced(72) })).toStrictEqual(sol);
+    expect(worker("balanced", "backend", { models: timedBalanced(80) })).toStrictEqual(opus);
     expect(worker("cheap", "backend", { taskClass: "hard" })).toStrictEqual(cnPro);
     expect(worker("cheap", "synthesis")).toStrictEqual(cnPro);
     const cnSpike = board.models.map((entry) =>

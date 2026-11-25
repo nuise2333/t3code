@@ -143,7 +143,7 @@ const TeamBoardModel = Schema.Struct({
   /** 0-100; the writing scores are absent for a model the writing board lacks. */
   scores: TeamScores,
   costUsd: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
-  /** From a Chinese lab: the pool Cheap picks from. */
+  /** From a Chinese lab. */
   chinese: Schema.optionalKey(Schema.Boolean),
   /** Priced from its published token counts at its predecessor's rates. */
   costEstimated: Schema.optionalKey(Schema.Boolean),
@@ -302,7 +302,7 @@ export type RoutingGroup = typeof RoutingGroup.Type;
 
 /**
  * Automatic teams: the thread's model leads, and T3 picks each worker's model for its
- * subtask: a cheap Chinese model, the best value on the market, or the strongest. They need no saved team.
+ * subtask: a fast cheap model, the best value on the market, or the strongest. They need no saved team.
  */
 export const AutoTeamKind = Schema.Literals(["cheap", "balanced", "best"]);
 export type AutoTeamKind = typeof AutoTeamKind.Type;
@@ -318,7 +318,7 @@ export const AUTO_TEAMS: ReadonlyArray<{
     kind: "cheap",
     id: "auto-cheap",
     name: "Cheap team",
-    description: "Cheap, capable Chinese models",
+    description: "Fast, cheap, capable models",
   },
   {
     kind: "balanced",

@@ -984,7 +984,7 @@ export function inferTeamSubtask(input: {
   return role === "implementation" ? "backend" : null;
 }
 
-/** The share of the best Chinese model's score a Cheap worker needs. */
+/** The share of the best low-priced model's score a Cheap worker needs. */
 const CHEAP_PASS_SHARE: Readonly<Record<RoutingTaskClass, number>> = {
   quick_edit: 0.7,
   readonly: 0.75,
@@ -1001,6 +1001,11 @@ const BALANCED_MIN_CODING = 47.97;
 const BALANCED_PASS_SHARE = 0.75;
 /** A level this far below its model's best total won its sub-score by luck, so Balanced skips it. */
 const BALANCED_LEVEL_SLACK = 5;
+/** Best takes the fastest within this many points, when its broader score is about as good too. */
+const BEST_NEAR_SCORE = 3;
+const BEST_NEAR_BROADER = 4;
+/** Balanced waits twice as long only for this many more points. */
+const POINTS_PER_TIME_DOUBLING = 4;
 /** Balanced pays twice the price only for this many more points. */
 const POINTS_PER_COST_DOUBLING = 5;
 /** Balanced treats value this close as a tie and takes the more used model. */
@@ -1049,6 +1054,7 @@ function teamBoardPicks(
     const effort = board.writingEffort ?? board.effort;
     const level = runsAt(effort);
     const at = measured.find((row) => row.effort === level);
+    const atBase = level === board.effort || effortLevel(effort) < 0;
     return score === undefined
       ? []
       : [
@@ -1056,9 +1062,9 @@ function teamBoardPicks(
             board,
             effort,
             score,
-            coding: board.scores.coding,
-            costUsd: at?.costUsd ?? (level === board.effort ? board.costUsd : unknownPrice),
-            minutes: at?.minutes ?? (level === board.effort ? board.minutes : unknownTime),
+            coding: at?.scores.coding ?? board.scores.coding,
+            costUsd: at?.costUsd ?? (atBase ? board.costUsd : unknownPrice),
+            minutes: at?.minutes ?? (atBase ? board.minutes : undefined),
           },
         ];
   }
@@ -1090,52 +1096,71 @@ function chooseBoardModel(
 ): TeamBoardPick | undefined {
   const cost = (pick: TeamBoardPick) => pick.costUsd ?? Number.POSITIVE_INFINITY;
   const axis = subtask === null ? undefined : WRITING_AXIS[subtask];
+  const times = picks.flatMap(({ minutes }) => minutes ?? []);
+  const unknownTime = times.length === 0 ? 1 : Math.max(...times);
+  const time = (pick: TeamBoardPick) => pick.minutes ?? unknownTime;
   // Many sub-scores tie at 100: the broader score decides, then the coding total, then the price.
   const strongest = (a: TeamBoardPick, b: TeamBoardPick) =>
     b.score - a.score ||
     (axis === undefined ? 0 : (b.board.scores[axis] ?? 0) - (a.board.scores[axis] ?? 0)) ||
     b.coding - a.coding ||
     (cost(a) === cost(b) ? 0 : cost(a) - cost(b));
-  if (kind === "best") return [...picks].sort(strongest)[0];
+  if (kind === "best") {
+    const top = [...picks].sort(strongest)[0];
+    const broader = (pick: TeamBoardPick) =>
+      axis === undefined ? pick.coding : (pick.board.scores[axis] ?? 0);
+    return picks
+      .filter(
+        (pick) =>
+          top !== undefined &&
+          pick.score >= top.score - BEST_NEAR_SCORE &&
+          broader(pick) >= broader(top) - BEST_NEAR_BROADER,
+      )
+      .sort((a, b) => (time(a) === time(b) ? strongest(a, b) : time(a) - time(b)))[0];
+  }
+  const nearOwnBest = (pick: TeamBoardPick) =>
+    axis !== undefined || pick.coding >= bestCoding(pick.board) - BALANCED_LEVEL_SLACK;
   const affordable = (pick: TeamBoardPick) => cost(pick) <= CHEAP_MAX_COST_USD;
   const eligible = picks.filter((pick) =>
     kind === "cheap"
-      ? pick.board.chinese === true && (pick.board.newest === true || affordable(pick))
+      ? (pick.board.chinese === true && pick.board.newest === true) || affordable(pick)
       : pick.costUsd !== undefined &&
         pick.board.marketShare !== undefined &&
         pick.board.fading !== true &&
         pick.coding >= BALANCED_MIN_CODING &&
-        pick.coding >= bestCoding(pick.board) - BALANCED_LEVEL_SLACK,
+        nearOwnBest(pick),
   );
   // With none eligible, Cheap keeps its price limit, then takes the lowest price on offer; Balanced
   // still needs a price to judge value by.
   const priced = picks.filter((pick) => pick.costUsd !== undefined);
+  const steady = priced.filter(nearOwnBest);
   const cheapest = Math.min(...picks.map(cost));
   const fallbacks =
     kind === "cheap"
       ? [picks.filter(affordable), picks.filter((pick) => cost(pick) === cheapest)]
-      : [priced];
+      : [steady, priced];
   const chosen = [eligible, ...fallbacks].find((list) => list.length > 0) ?? picks;
-  // A writing sub-score rests on a few items, so one lucky item can't carry a cheap model.
-  const pool = chosen.map((pick) => ({
-    ...pick,
-    score:
-      axis === undefined ? pick.score : (pick.score + (pick.board.scores[axis] ?? pick.score)) / 2,
-  }));
+  // A sub-score rests on a few items, so one lucky item can't carry a cheap model.
+  const broad = (pick: TeamBoardPick) =>
+    axis !== undefined
+      ? (pick.board.scores[axis] ?? pick.score)
+      : kind === "cheap"
+        ? pick.coding
+        : pick.score;
+  const pool = chosen.map((pick) => ({ ...pick, score: (pick.score + broad(pick)) / 2 }));
   const top = Math.max(...pool.map((pick) => pick.score));
   const share = kind === "cheap" ? CHEAP_PASS_SHARE[taskClass] : BALANCED_PASS_SHARE;
   const passing = pool.filter((pick) => pick.score >= top * share);
   if (kind === "cheap") {
-    const times = passing.flatMap(({ minutes }) => minutes ?? []);
-    const unknownTime = times.length === 0 ? 1 : Math.max(...times);
-    const spend = (pick: TeamBoardPick) =>
-      cost(pick) * (pick.minutes ?? unknownTime) ** CHEAP_TIME_POWER;
+    const spend = (pick: TeamBoardPick) => cost(pick) * time(pick) ** CHEAP_TIME_POWER;
     return passing.sort((a, b) =>
       spend(a) === spend(b) ? strongest(a, b) : spend(a) - spend(b),
     )[0];
   }
   const value = (pick: TeamBoardPick) =>
-    pick.score - POINTS_PER_COST_DOUBLING * Math.log2(cost(pick));
+    pick.score -
+    POINTS_PER_COST_DOUBLING * Math.log2(cost(pick)) -
+    POINTS_PER_TIME_DOUBLING * Math.log2(time(pick));
   const best = Math.max(...passing.map(value));
   return passing
     .filter((pick) => value(pick) >= best - VALUE_TIE_POINTS)
@@ -1237,8 +1262,8 @@ function harnessScore(
 
 /**
  * A worker's model for an automatic team, or null. Models on the team board rank by the subtask's
- * score at each measured effort: Cheap takes a capable Chinese model that is fast and cheap, Balanced the best
- * value among models in use, Best the top score. The worker runs at the effort it was picked on.
+ * score at each measured effort: Cheap takes a capable model that is fast and cheap, Balanced the best
+ * value for price and time among models in use, Best the top score, the fastest when close. The worker runs at the effort it was picked on.
  * With none on the board, coarse tiers decide, and the caller routes the effort.
  */
 export function chooseTeamWorkerModel(input: {
