@@ -3674,6 +3674,8 @@ describe("OrchestratorMcpService provider resolution", () => {
       const work = yield* Ref.make<{
         readonly handedBy?: string;
         readonly flowsKey?: string;
+        readonly teamId?: string;
+        readonly leads?: boolean;
         readonly out: boolean;
       }>({ out: false, flowsKey });
       const teamParent = {
@@ -3696,7 +3698,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           isProviderInstanceEnabledForProject: () => Effect.succeed(true),
           getThreadRecords: (threadId) =>
             Ref.get(work).pipe(
-              Effect.map(({ handedBy, flowsKey, out }) =>
+              Effect.map(({ handedBy, flowsKey, out, teamId, leads }) =>
                 threadId === leadThreadId
                   ? ({
                       ...childProjection,
@@ -3704,7 +3706,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                         {
                           childThreadId: parentThreadId,
                           teamMember: {
-                            teamId: "crew",
+                            teamId: teamId ?? "crew",
                             name: "Builder",
                             ...(handedBy === undefined ? {} : { handedBy }),
                             ...(flowsKey === undefined ? {} : { flowsKey }),
@@ -3716,6 +3718,14 @@ describe("OrchestratorMcpService provider resolution", () => {
                   : threadId === parentThreadId
                     ? ({
                         ...teamParent,
+                        ...(leads
+                          ? {
+                              thread: {
+                                ...teamParent.thread,
+                                agentTeam: { id: "crew", name: "Crew" },
+                              },
+                            }
+                          : {}),
                         subagents: out
                           ? [{ threadId: parentThreadId, origin: "app_owned", status: "running" }]
                           : [],
@@ -3793,6 +3803,11 @@ describe("OrchestratorMcpService provider resolution", () => {
         ]) {
           assert.include((yield* refuse(input)).message, "handed no further");
         }
+        yield* Ref.set(work, { out: true, flowsKey, teamId: "gone" });
+        assert.include((yield* refuse({ task: "Review." })).message, "is gone");
+        // Turning a team on in its own thread lifts no limit.
+        yield* Ref.set(work, { out: false, handedBy: "Planner", leads: true });
+        assert.include((yield* refuse({ task: "Review.", member: "Reviewer" })).message, "further");
         // Names can pass to another member, so an edited team lends nothing.
         yield* Ref.set(work, { out: false, flowsKey: "an older team" });
         assert.include(

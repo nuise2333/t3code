@@ -75,6 +75,12 @@ export function agentTeamHandsTo(
 const memberKey = (member: Pick<ModelSelection, "instanceId" | "model">) =>
   `${member.instanceId}\u0000${member.model}`;
 
+const optionsKey = (member: ModelSelection) =>
+  `${memberKey(member)}\u0000${(member.options ?? [])
+    .map((option) => `${option.id}=${String(option.value)}`)
+    .sort()
+    .join()}`;
+
 /** Why a lead could not pick each member apart, or null. Names are matched without case. */
 export function agentTeamMembersProblem(
   team: Pick<RoutingGroup, "members" | "memberRoles">,
@@ -106,11 +112,6 @@ export function realignMemberRoles(
 ): RoutingGroup["memberRoles"] {
   const roles = saved.memberRoles;
   if (roles === undefined || roles.length === 0) return roles;
-  const optionsKey = (member: ModelSelection) =>
-    `${memberKey(member)}\u0000${(member.options ?? [])
-      .map((option) => `${option.id}=${String(option.value)}`)
-      .sort()
-      .join()}`;
   const left = new Set(saved.members.keys());
   const placed = new Map<number, number>();
   const place = (
@@ -146,8 +147,8 @@ export function realignMemberRoles(
 }
 
 /**
- * A team's flows after a client that knows roles but not flows saved it: a flow stays only while
- * both names stay on the models they were on, so none passes to another member.
+ * A team's flows after a client that doesn't know flows saved it: a flow stays only while both
+ * names stay on the models and options they were on, so none passes to another member.
  */
 export function keptMemberFlows(
   saved: Pick<RoutingGroup, "members" | "memberRoles" | "memberFlows">,
@@ -157,7 +158,7 @@ export function keptMemberFlows(
     new Map(
       team.members.map((member, at) => [
         agentTeamRole(team, at)?.name.toLowerCase() ?? "",
-        memberKey(member),
+        optionsKey(member),
       ]),
     );
   const before = keys(saved);
@@ -175,7 +176,7 @@ export function agentTeamFlowsKey(
 ): string {
   return JSON.stringify(
     team.members.map((member, at) => [
-      memberKey(member),
+      optionsKey(member),
       agentTeamRole(team, at)?.name ?? "",
       agentTeamHandsTo(team, at),
     ]),

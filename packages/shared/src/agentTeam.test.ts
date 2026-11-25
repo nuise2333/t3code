@@ -79,6 +79,14 @@ describe("agent team roles", () => {
     expect(
       keptMemberFlows(twins, { members: twins.members, memberRoles: ["A", "C2", "B2"].map(role) }),
     ).toEqual([]);
+    const at = (value: string) => ({ ...member("b"), options: [{ id: "effort", value }] });
+    const efforts = { ...saved, members: [member("a"), at("low"), at("high")] };
+    expect(
+      keptMemberFlows(efforts, {
+        members: [member("a"), at("high"), at("low")],
+        memberRoles: saved.memberRoles,
+      }),
+    ).toEqual([]);
     expect(after(["A", "C"], [members[0]!, members[2]!])).toEqual([]);
   });
 });

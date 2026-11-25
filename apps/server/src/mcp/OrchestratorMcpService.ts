@@ -1384,13 +1384,18 @@ const make = Effect.gen(function* () {
         "A teammate handed you this task, and such a task is handed no further. Do the work yourself.",
       );
     }
-    const team = groups.find((group) => group.team === true && group.id === member?.teamId);
-    if (member?.name === undefined || team === undefined) return null;
+    if (member?.name === undefined || member.flowsKey === undefined) return null;
+    const team = groups.find((group) => group.team === true && group.id === member.teamId);
+    if (team === undefined) {
+      return yield* failure(
+        "invalid_request",
+        "The agent team you got this task from is gone, so you can't hand work on. Do it yourself.",
+      );
+    }
     const name = member.name.toLowerCase();
     const index = [...team.members.keys()].find(
       (at) => agentTeamRole(team, at)?.name.toLowerCase() === name,
     );
-    if (member.flowsKey === undefined) return null;
     const allowed =
       index === undefined || member.flowsKey !== agentTeamFlowsKey(team)
         ? []
@@ -1432,7 +1437,7 @@ const make = Effect.gen(function* () {
       groups: settings.routingGroups,
     });
     const handing =
-      led === null && input.councilLens === undefined
+      input.councilLens === undefined
         ? yield* loadHandingMember(parent.thread, settings.routingGroups)
         : null;
     const team: AgentTeam.ActiveTeam | null =
