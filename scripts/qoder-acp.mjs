@@ -25,7 +25,7 @@ const RUNTIME = NodePath.join(
   RESOURCES,
   "app.asar.unpacked/node_modules/@qoder-ai/qoder-cn-agent-sdk/dist/_worker/qoder-worker-runtime.obf.mjs",
 );
-const CATALOG_TIMEOUT_MS = 10_000;
+const QUERY_TIMEOUT_MS = 10_000;
 const SDK_PROTOCOL = { version: 2, capability: "multi_session_v2" };
 
 function log(...args) {
@@ -197,8 +197,8 @@ class Runtime {
   }
 }
 
-/** The app's own model query; its answer carries the context windows and defaults ACP omits. */
-function queryModels() {
+/** One of the app's own account queries, such as the model catalog or credit usage. */
+function queryAccount(type, body) {
   return new Promise((resolve, reject) => {
     const daemon = NodeChildProcess.spawn(process.execPath, [RUNTIME, "--sdk"], {
       stdio: ["pipe", "pipe", "ignore"],
@@ -210,22 +210,21 @@ function queryModels() {
       settle(value);
     };
     const timer = setTimeout(
-      () => finish(reject, new Error("Qoder model query timed out")),
-      CATALOG_TIMEOUT_MS,
+      () => finish(reject, new Error("Qoder account query timed out")),
+      QUERY_TIMEOUT_MS,
     );
     daemon.on("error", (error) => finish(reject, error));
-    daemon.on("exit", () => finish(reject, new Error("Qoder model query exited")));
+    daemon.on("exit", () => finish(reject, new Error("Qoder account query exited")));
     daemon.stdin.on("error", () => {});
-    const send = (id, type, body) =>
+    const send = (id, request, fields) =>
       daemon.stdin.write(
-        `${JSON.stringify({ type: "control_request", request_id: id, request: { type: `daemon.${type}`, ...body } })}\n`,
+        `${JSON.stringify({ type: "control_request", request_id: id, request: { type: `daemon.${request}`, ...fields } })}\n`,
       );
-    readLines(daemon.stdout, ({ type, response }) => {
-      if (type !== "control_response") return;
+    readLines(daemon.stdout, ({ type: kind, response }) => {
+      if (kind !== "control_response") return;
       if (response.subtype !== "success") finish(reject, new Error(response.error));
-      else if (response.request_id === "init")
-        send("models", "get_models", { fetchStrategy: "live" });
-      else if (response.request_id === "models") finish(resolve, response.response.models);
+      else if (response.request_id === "init") send("query", type, body);
+      else if (response.request_id === "query") finish(resolve, response.response);
     });
     send("init", "initialize", {
       business: { product: "app" },
@@ -274,8 +273,8 @@ function readAppPreferences() {
 
 let catalogQuery;
 function loadCatalog() {
-  catalogQuery ??= queryModels().then(
-    (models) => (models.length === 0 ? null : catalogFromModels(models, readAppPreferences())),
+  catalogQuery ??= queryAccount("get_models", { fetchStrategy: "live" }).then(
+    ({ models }) => (models.length === 0 ? null : catalogFromModels(models, readAppPreferences())),
     (error) => {
       log("model catalog", error.message);
       return null;
@@ -668,33 +667,46 @@ async function handleRuntimeRequest(runtime, { method, params }) {
   return requestClient(method, request, runtime);
 }
 
-readLines(process.stdin, (message) => {
-  if (message.method === undefined) {
-    const pending = clientPending.get(message.id);
-    clientPending.delete(message.id);
-    if (message.error) pending?.reject(new RpcError(message.error));
-    else pending?.resolve(message.result);
-    return;
-  }
-  if (message.id === undefined) {
-    handleClientNotification(message);
-    return;
-  }
-  handleClientRequest(message).then(
-    (result) => writeClient({ id: message.id, result: result ?? {} }),
-    (error) =>
-      writeClient({
-        id: message.id,
-        error: error.error ?? { code: -32603, message: String(error.message ?? error) },
-      }),
-  );
-});
+function serve() {
+  readLines(process.stdin, (message) => {
+    if (message.method === undefined) {
+      const pending = clientPending.get(message.id);
+      clientPending.delete(message.id);
+      if (message.error) pending?.reject(new RpcError(message.error));
+      else pending?.resolve(message.result);
+      return;
+    }
+    if (message.id === undefined) {
+      handleClientNotification(message);
+      return;
+    }
+    handleClientRequest(message).then(
+      (result) => writeClient({ id: message.id, result: result ?? {} }),
+      (error) =>
+        writeClient({
+          id: message.id,
+          error: error.error ?? { code: -32603, message: String(error.message ?? error) },
+        }),
+    );
+  });
 
-async function shutdown() {
-  await Promise.all([...runtimes].map((runtime) => runtime.stop()));
-  process.exit(0);
+  async function shutdown() {
+    await Promise.all([...runtimes].map((runtime) => runtime.stop()));
+    process.exit(0);
+  }
+  process.stdin.on("end", shutdown);
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+  log("started", APP);
 }
-process.stdin.on("end", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
-log("started", APP);
+
+// `qoder usage` prints the account's credit usage for T3's limits and exits.
+if (process.argv[2] === "usage") {
+  queryAccount("get_usage_info", {}).then(
+    ({ usage }) => process.stdout.write(`${JSON.stringify(usage)}\n`),
+    (error) => {
+      process.stderr.write(`${error.message}\n`);
+      process.exitCode = 1;
+    },
+  );
+} else serve();

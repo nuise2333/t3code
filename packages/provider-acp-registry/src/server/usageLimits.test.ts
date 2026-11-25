@@ -10,6 +10,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 import {
   dshApiKeyRef,
+  qoderUsageToWindows,
   readDeepSeekBalance,
   readKimiCodeUsageLimits,
   readZCodeUsageLimits,
@@ -250,4 +251,38 @@ describe("ACP Registry agent limits", () => {
       expect(limits.balances).toEqual([{ currency: "CNY", total: 41.44, granted: 1 }]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+});
+
+describe("qoderUsageToWindows", () => {
+  it("lists each credit pool by what it has used", () => {
+    const windows = qoderUsageToWindows({
+      expiresAt: 4070908800000,
+      userQuota: { total: 2000, used: 500 },
+      // Computed from credits: Qoder's own percentage is rounded.
+      addOnQuota: { total: 600, used: 33 },
+      orgResourcePackage: { available: true, cap: -1, used: 3 },
+      dedicatedResourcePackages: [
+        {
+          id: "qwen",
+          name: "act-1",
+          total: 100,
+          used: 10,
+          expiresAt: 0,
+          displayLabels: [{ dimension: "title", valueI18n: { "en-US": "Qwen Exclusive Credits" } }],
+        },
+        { id: "gone", total: 100, used: 10, available: false },
+      ],
+    });
+    expect(windows).toEqual([
+      {
+        id: "plan",
+        label: "Plan credits",
+        kind: "monthly",
+        usedPercent: 25,
+        resetsAt: "2099-01-01T00:00:00.000Z",
+      },
+      { id: "add-on", label: "Resource package", kind: "other", usedPercent: 5.5 },
+      { id: "qwen", label: "Qwen Exclusive Credits", kind: "other", usedPercent: 10 },
+    ]);
+  });
 });

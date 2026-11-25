@@ -742,7 +742,7 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
     // Checks can overlap; one reader at a time keeps a token refresh from racing itself.
     const usageReads = yield* Semaphore.make(1);
     const checkUsageLimits = readUsage
-      ? readUsage(processEnvironment).pipe(
+      ? readUsage(processEnvironment, effectiveConfig.commandPath).pipe(
           usageReads.withPermits(1),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, pathService),
