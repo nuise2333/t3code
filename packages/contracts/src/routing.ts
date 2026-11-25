@@ -171,6 +171,13 @@ const TeamBoard = Schema.Struct({
   models: Schema.Array(TeamBoardModel),
   /** Keyed by driver, or by agent id for ACP Registry agents. */
   harnesses: Schema.Record(Schema.String, Schema.Finite),
+  /** Models Balanced takes first when they are capable enough, by subtask; the rest use `default`. */
+  balancedFirst: Schema.optionalKey(
+    Schema.Struct({
+      default: Schema.Array(TrimmedNonEmptyString),
+      bySubtask: Schema.Record(Schema.String, Schema.Array(TrimmedNonEmptyString)),
+    }),
+  ),
   /** The harness board's scores by kind of work, with the same keys. */
   harnessScenarios: Schema.optionalKey(
     Schema.Record(

@@ -2338,6 +2338,56 @@ describe("chooseAutoModel", () => {
       entry.models[0] === "model-sol" ? { ...entry, costUsd: 0.05 } : entry,
     );
     expect(worker("cheap", "backend", { models: cheapSol })).toStrictEqual(cn);
+    // Balanced takes its preferred models first, by subtask, while they are capable enough.
+    const firstPick = (subtask: TeamSubtask, models = board.models) =>
+      chooseTeamWorkerModel({
+        kind: "balanced",
+        subtask,
+        table: {
+          ...tableOf(ROWS),
+          teamBoard: {
+            ...board,
+            models,
+            balancedFirst: { default: ["model-opus"], bySubtask: { frontend: ["model-sol"] } },
+          },
+        },
+        taskClass: "implement",
+        providers: all,
+        settings: settingsFor(all),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    expect(firstPick("backend")).toStrictEqual(opus);
+    expect(firstPick("frontend")).toStrictEqual(sol);
+    const weakOpus = board.models.map((entry) =>
+      entry.models[0] === "model-opus" ? { ...entry, scores: scores(50) } : entry,
+    );
+    expect(firstPick("backend", weakOpus)).toStrictEqual(sol);
+    // A subscription with usage left costs Balanced a share of the list price.
+    const subscribed = {
+      ...claude(),
+      usageLimits: {
+        checkedAt: "2026-07-01T00:00:00.000Z",
+        windows: [
+          {
+            id: "weekly",
+            label: "Weekly",
+            kind: "weekly" as const,
+            usedPercent: 10,
+            windowDurationMins: 10_080,
+          },
+        ],
+      },
+    };
+    const nearPrice = board.models.map((entry) =>
+      entry.models[0] === "model-opus" ? { ...entry, costUsd: 25, marketShare: 0.5 } : entry,
+    );
+    const byPrice = (provider: ServerProvider) =>
+      worker("balanced", null, { providers: [provider, codex()], models: nearPrice });
+    expect(byPrice(claude())).toStrictEqual(sol);
+    expect(byPrice(subscribed as ServerProvider)).toStrictEqual(opus);
     // A model Balanced runs a fixed way goes to that agent at that level, or elsewhere at that level.
     const presetOption = {
       id: "preset",

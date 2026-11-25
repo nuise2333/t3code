@@ -224,7 +224,9 @@ beside Favorites):
   reasoning effort that score was measured at. **Best** takes the top score, or the
   fastest of models about as strong, at Max effort only on hard tasks.
   **Balanced** takes the best score for the cost and time among models its
-  adoption board scores above the median and whose usage isn't falling.
+  adoption board scores above the median and whose usage isn't falling. OpenAI's
+  models go first for backend work, and Claude Opus and Gemini 4 Neon for the
+  rest. Models on a subscription with usage left count as cheaper.
   **Cheap** takes a low-priced Chinese model that is fast and good enough for
   the task: simple tasks need less, hard ones more. When several agents offer the model,
   native agents and gateways come first, then remaining quota, then the harness

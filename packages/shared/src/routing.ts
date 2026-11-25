@@ -1004,6 +1004,10 @@ const BALANCED_LEVEL_SLACK = 5;
 /** Best takes the fastest within this many points, when its broader score is about as good too. */
 const BEST_NEAR_SCORE = 3;
 const BEST_NEAR_BROADER = 4;
+/** What a subscription with usage left makes of a model's list price; only Balanced counts it. */
+const SUBSCRIPTION_PRICE_SHARE = 0.3;
+/** Among Balanced's preferred models, this close in score the better value wins. */
+const PREFERRED_NEAR_SCORE = 3;
 /** Balanced waits twice as long only for this many more points. */
 const POINTS_PER_TIME_DOUBLING = 4;
 /** Balanced pays twice the price only for this many more points. */
@@ -1098,6 +1102,8 @@ function chooseBoardModel(
   subtask: TeamSubtask | null,
   taskClass: RoutingTaskClass,
   picks: ReadonlyArray<TeamBoardPick>,
+  /** Balanced's preferred models for the subtask. */
+  first: ReadonlyArray<string> = [],
 ): TeamBoardPick | undefined {
   const cost = (pick: TeamBoardPick) => pick.costUsd ?? Number.POSITIVE_INFINITY;
   const axis = subtask === null ? undefined : WRITING_AXIS[subtask];
@@ -1166,6 +1172,13 @@ function chooseBoardModel(
     pick.score -
     POINTS_PER_COST_DOUBLING * Math.log2(cost(pick)) -
     POINTS_PER_TIME_DOUBLING * Math.log2(time(pick));
+  const preferred = passing.filter((pick) => pick.board.models.some((id) => first.includes(id)));
+  if (preferred.length > 0) {
+    const top = Math.max(...preferred.map((pick) => pick.score));
+    return preferred
+      .filter((pick) => pick.score >= top - PREFERRED_NEAR_SCORE)
+      .sort((a, b) => value(b) - value(a) || strongest(a, b))[0];
+  }
   const best = Math.max(...passing.map(value));
   return passing
     .filter((pick) => value(pick) >= best - VALUE_TIE_POINTS)
@@ -1378,6 +1391,28 @@ export function chooseTeamWorkerModel(input: {
     if (candidate.board === undefined || candidate.score === null) continue;
     boards.set(candidate.board, [...(boards.get(candidate.board) ?? []), candidate]);
   }
+  const onAgent = ({ candidate }: Ranked, run: NonNullable<TeamBoardModel["balancedRun"]>) =>
+    agentIdOf(candidate.provider, input.settings) === run.agentId &&
+    run.options.every((option) => optionSelectionProblem(option, candidate.descriptors) === null);
+  const agentFor = (board: TeamBoardModel, effort: string) => {
+    const run = runOf(board);
+    return ranked
+      .filter(({ candidate }) => candidate.board === board)
+      .sort(
+        (a, b) =>
+          (run === undefined ? 0 : Number(onAgent(b, run)) - Number(onAgent(a, run))) ||
+          levelGap(a.candidate.reasoning, effort, capFor(board)) -
+            levelGap(b.candidate.reasoning, effort, capFor(board)) ||
+          byAgent(a, b),
+      )[0];
+  };
+  const onSubscription = (board: TeamBoardModel, effort: string) => {
+    const agent = agentFor(board, effort)?.candidate;
+    if (agent === undefined) return false;
+    const standing = quotaStanding(agent.provider, agent.slug, input.now);
+    return standing.funding === "subscription" && !standing.inReserve;
+  };
+  const balancedFirst = input.table.teamBoard?.balancedFirst;
   const pick = chooseBoardModel(
     input.kind,
     subtask,
@@ -1397,32 +1432,29 @@ export function chooseTeamWorkerModel(input: {
           return best && nearestLevel(best.levels, effort, capFor(board));
         },
         cap,
+      ).map((entry) =>
+        input.kind === "balanced" &&
+        entry.costUsd !== undefined &&
+        onSubscription(entry.board, entry.effort)
+          ? { ...entry, costUsd: entry.costUsd * SUBSCRIPTION_PRICE_SHARE }
+          : entry,
       ),
     ),
+    subtask === null
+      ? balancedFirst?.default
+      : (balancedFirst?.bySubtask[subtask] ?? balancedFirst?.default),
   );
   if (pick !== undefined) {
     const run = runOf(pick.board);
     const pickCap = capFor(pick.board);
-    const onAgent = ({ candidate }: Ranked) =>
-      run !== undefined &&
-      agentIdOf(candidate.provider, input.settings) === run.agentId &&
-      run.options.every((option) => optionSelectionProblem(option, candidate.descriptors) === null);
-    const chosen = ranked
-      .filter(({ candidate }) => candidate.board === pick.board)
-      .sort(
-        (a, b) =>
-          Number(onAgent(b)) - Number(onAgent(a)) ||
-          levelGap(a.candidate.reasoning, pick.effort, pickCap) -
-            levelGap(b.candidate.reasoning, pick.effort, pickCap) ||
-          byAgent(a, b),
-      )[0];
+    const chosen = agentFor(pick.board, pick.effort);
     const picked = result(chosen?.candidate);
     if (picked === null || chosen === undefined) return null;
     const { reasoning } = chosen.candidate;
     const level = reasoning && nearestLevel(reasoning.levels, pick.effort, pickCap);
     const options = [
       ...(picked.selection.options ?? []),
-      ...(run !== undefined && onAgent(chosen) ? run.options : []),
+      ...(run !== undefined && onAgent(chosen, run) ? run.options : []),
       ...(reasoning !== undefined && level !== undefined
         ? [{ id: reasoning.id, value: level }]
         : []),

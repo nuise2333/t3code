@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-25T20:00:00Z",
+  "updatedAt": "2026-11-25T22:00:00Z",
   "routing": {
     "version": 1,
-    "updatedAt": "2026-11-25T20:00:00Z",
+    "updatedAt": "2026-11-25T22:00:00Z",
     "sources": {
       "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
       "aa-coding": {
@@ -1891,6 +1891,19 @@
           "marketShare": 0.24
         }
       ],
+      "balancedFirst": {
+        "default": ["claude-opus-5-5", "gemini-4-neon"],
+        "bySubtask": {
+          "backend": [
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-astra",
+            "gpt-6-sol"
+          ]
+        }
+      },
       "harnessScenarios": {
         "claudeAgent": {
           "software": 59.97,
