@@ -46,6 +46,11 @@ const BUNDLED_ACP_AGENT_ICONS = {
     fullColor: true,
     svg: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='96 96 832 832'><rect x='96' y='96' width='832' height='832' rx='186'/><path fill='#fff' d='M268.5 294.5h255l-45 64h-210zM563 294.5h203.5l-306 434H257zM545.5 665.5h209v63H501z'/></svg>",
   },
+  // Qoder logo from the official ACP Registry icon.
+  qoder: {
+    commands: ["qoder"],
+    svg: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'><path d='M376.9 130.1c-67 17.5-106.2 40.5-153.6 89.4-49.2 51-80.4 111.7-91.2 176.9-5.4 33.8-5.6 179.4-0.3 209.2 9.4 51.3 36.6 97.5 73.7 124.3 19.6 14.5 298 159.8 320.6 167.5 16.1 5.6 26.6 7.2 53.8 8.3 29.6 1.1 37.1 0.3 62.4-5.9 28.5-6.7 62.1-18.5 79.9-28.2l9.1-4.8 25.8 12.1c22.3 10.5 28.8 12.3 47.9 13.4 20.2 1.1 23.4 0.5 39.3-7 20.2-9.4 36.6-24.7 45.5-43L896 829.8V427.1l-6.2-21.5c-12.9-45.1-36.3-80.6-67.8-104.2-21.8-16.4-301.8-163.8-325.4-171.6-13.5-4.3-26.1-5.9-53.8-6.7-33.4-0.8-38.7-0.3-65.9 7z m99.5 69c11.3 3.8 142.5 71.7 147.4 76 1.1 1.1-3.2 3.5-9.4 5.4-22.3 6.7-69.1 33-93.1 52.6-64.5 53.2-110.3 132.9-121.3 211.9-3.2 23.6-3.8 176.4-0.5 195.5 1.1 7.2 1.6 12.9 1.1 12.9-0.8 0-33.9-17.2-74-38.4-80.4-42.2-94.9-52.6-109.2-79.2-15.1-27.9-16.7-41.1-16.7-134 0-92.9 1.3-104.7 16.1-142.3 34.4-89.4 110.3-151.2 203.1-165.7 13.2-1.9 43.3 0.8 56.5 5.4z m260.9 139.4c45.5 11.8 75.8 45.4 85 93.7 3 15.3 3.2 377.5 0.3 381.8-1.1 1.6-4.6 4.3-7.8 6.2-5.1 2.4-11 0.5-41.4-13.2-20.4-9.4-39.3-16.1-44.4-16.1-5.6 0-19.1 5.4-36.6 14.5-28.2 14.8-64.8 26.6-93.6 29.8-33.9 4-73.2-10.2-96.6-34.9-15.1-15.8-21.8-28.7-28.5-53.7-7.3-28.7-6.7-30.1 18-48.3 49.5-36.5 94.7-98.8 115.1-159.5 11.8-35.2 13.7-50.7 15.3-118.9l1.3-66.3 16.9-5.6c40.3-13.4 69.9-16.4 96.8-9.4z m-187.7 110.1c-1.6 40-7 62.3-23.4 96.7-10.8 22.6-36.3 59.1-49.8 71.2l-7.3 6.7 1.1-40.3c1.3-34.4 2.4-43.5 8.9-63.1 12.6-38.7 32.5-74.4 58.1-103.1 9.5-10.7 13.6-0.1 12.4 31.9z'/></svg>",
+  },
 } as const satisfies Record<
   string,
   {
@@ -366,6 +371,11 @@ export const AcpRegistryProbeModel = Schema.Struct({
   description: AcpRegistryProbeDescription,
   // The reasoning control the agent advertises for this model; null when it has none.
   reasoningEffort: Schema.optionalKey(Schema.NullOr(ProviderOptionDescriptor)),
+  // Every option the agent advertises for this model, when it lists them per model.
+  optionDescriptors: Schema.optionalKey(
+    Schema.Array(ProviderOptionDescriptor).check(Schema.isMaxLength(16)),
+  ),
+  subProvider: Schema.optionalKey(AcpRegistryProbeText),
 });
 export type AcpRegistryProbeModel = typeof AcpRegistryProbeModel.Type;
 

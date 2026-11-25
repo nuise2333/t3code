@@ -2,6 +2,7 @@ import {
   managedRuntimeModeDenial,
   type ManagedPolicySummary,
   type RuntimeMode,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import {
   type LucideIcon,
@@ -55,9 +56,14 @@ export function resolveCompatibleRuntimeMode(
 export function resolveRuntimeModeOptions(
   modes: ReadonlyArray<RuntimeMode>,
   managedPolicy: ManagedPolicySummary | undefined,
+  labels?: ServerProvider["runtimeModeLabels"],
 ) {
   return modes.map((mode) => {
-    const option = { mode, ...runtimeModeConfig[mode] };
+    const option = {
+      ...runtimeModeConfig[mode],
+      ...labels?.find((label) => label.mode === mode),
+      mode,
+    };
     const disabledReason = managedRuntimeModeDenial(managedPolicy, mode);
     return disabledReason === undefined ? option : { ...option, disabledReason };
   });

@@ -20,6 +20,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
@@ -87,6 +88,43 @@ function advertisedReasoningEffort(
       modeState: undefined,
     })[0] ?? null
   );
+}
+
+const decodeModelMeta = Schema.decodeUnknownOption(
+  Schema.Struct({
+    configOptions: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          type: Schema.Literal("select"),
+          id: Schema.String,
+          name: Schema.String,
+          category: Schema.optionalKey(Schema.String),
+          currentValue: Schema.String,
+          options: Schema.Array(Schema.Struct({ value: Schema.String, name: Schema.String })),
+        }),
+      ),
+    ),
+    subProvider: Schema.optionalKey(Schema.String),
+  }),
+);
+
+/** Options and vendor a model lists in `_meta`, in the shape scripts/qoder-acp.mjs uses. */
+function advertisedModelMeta(
+  meta: Readonly<Record<string, unknown>> | null | undefined,
+): Pick<AcpRegistryProbeModel, "optionDescriptors" | "subProvider"> {
+  const decoded = Option.getOrUndefined(decodeModelMeta(meta ?? {}));
+  const subProvider = boundedText(decoded?.subProvider ?? "", MAX_NAME_LENGTH);
+  return {
+    ...(decoded?.configOptions === undefined
+      ? {}
+      : {
+          optionDescriptors: acpProviderOptionDescriptors({
+            configOptions: decoded.configOptions,
+            modeState: undefined,
+          }),
+        }),
+    ...(subProvider ? { subProvider } : {}),
+  };
 }
 
 export function normalizeAcpRegistryWebUrl(value: string): string | undefined {
@@ -239,11 +277,13 @@ export function normalizeAcpRegistryLiveConfiguration(
       : (boundedOpaqueValue(currentModelId, MAX_ID_LENGTH) ?? null);
   const effortOption = configOptions.find((option) => option.category === "thought_level");
   const models = normalizeModels(candidates, boundedCurrentModelId).map((model) => {
-    const reasoningEffort = advertisedReasoningEffort(
-      effortOption,
-      modelState?.availableModels.find((info) => info.modelId === model.id)?._meta,
-    );
-    return reasoningEffort === undefined ? model : { ...model, reasoningEffort };
+    const meta = modelState?.availableModels.find((info) => info.modelId === model.id)?._meta;
+    const reasoningEffort = advertisedReasoningEffort(effortOption, meta);
+    return {
+      ...model,
+      ...advertisedModelMeta(meta),
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    };
   });
   const descriptors = acpProviderOptionDescriptors({ configOptions, modeState });
   const modelOptionIds = new Set(

@@ -1,0 +1,13 @@
+#!/bin/sh
+# ACP entry point for Qoder; runs the bridge on the Qoder app's bundled Node runtime.
+APP="${QODER_APP:-}"
+if [ -z "$APP" ]; then
+  for candidate in "/Applications/Qoder CN.app" "$HOME/Applications/Qoder CN.app"; do
+    [ -d "$candidate" ] && APP="$candidate" && break
+  done
+fi
+if [ -z "$APP" ]; then
+  echo "Qoder CN.app was not found. Set QODER_APP to its path." >&2
+  exit 127
+fi
+QODER_APP="$APP" ELECTRON_RUN_AS_NODE=1 exec "$APP/Contents/MacOS/$(basename "$APP" .app)" "$(dirname "$0")/../qoder-acp.mjs" "$@"

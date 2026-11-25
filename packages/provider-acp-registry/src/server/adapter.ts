@@ -18,6 +18,7 @@ import {
   isCopilotLostSessionError,
   makeCopilotSubagentRouting,
 } from "./copilotAcp.ts";
+import { isQoderAcp, qoderPermissionDisposition, qoderSessionConfigForPolicy } from "./qoderAcp.ts";
 import { prefersHttpMcpTransport } from "./mcpTransport.ts";
 import { defaultInstanceIdForDriver, ProviderDriverKind } from "@t3tools/contracts";
 import { readCustomModelEntries } from "@t3tools/shared/model";
@@ -258,6 +259,12 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
           extractSubagentUpdate: extractClaudeSubagentUpdate,
           isProvisionalSubagentTool: isClaudeProvisionalSubagentTool,
           extractSubagentSessionEvent: extractClaudeSubagentSessionEvent,
+        }
+      : {}),
+    ...(isQoderAcp(options.settings)
+      ? {
+          sessionConfigForPolicy: qoderSessionConfigForPolicy,
+          permissionDisposition: qoderPermissionDisposition,
         }
       : {}),
     ...(isDevin

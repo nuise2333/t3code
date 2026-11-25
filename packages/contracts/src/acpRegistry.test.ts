@@ -62,6 +62,9 @@ describe("ACP Registry contracts", () => {
     expect(bundledAcpIconUrlForCommand("/Users/me/.kimi-code/bin/kimi")).toBe(
       "t3-acp-icon:kimi-code",
     );
+    expect(bundledAcpIconUrlForCommand("/Users/me/t3-code/scripts/bin/qoder")).toBe(
+      "t3-acp-icon:qoder",
+    );
     expect(bundledAcpIconUrlForCommand("/Users/me/t3-code/scripts/bin/zcode")).toBe(
       "t3-acp-icon:zcode",
     );

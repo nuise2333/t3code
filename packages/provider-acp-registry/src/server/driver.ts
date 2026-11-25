@@ -63,6 +63,7 @@ import {
   probeAcpRegistryConfiguration,
   setAcpRegistryProvider,
 } from "./probe.ts";
+import { isQoderAcp, QODER_RUNTIME_MODES } from "./qoderAcp.ts";
 import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpRegistryAuth from "./auth.ts";
@@ -167,8 +168,15 @@ function modelsFromDiscovery(
     (descriptor) => !modelOptionIds.has(descriptor.id),
   );
   const sharedIds = new Set(shared.map((descriptor) => descriptor.id));
-  const capabilitiesFor = ({ id: slug, reasoningEffort }: AcpRegistryProbeModel) => {
+  const capabilitiesFor = ({
+    id: slug,
+    reasoningEffort,
+    optionDescriptors: advertised,
+  }: AcpRegistryProbeModel) => {
     if (slug === discovery?.currentModelId) return capabilities;
+    if (advertised !== undefined) {
+      return createModelCapabilities({ optionDescriptors: [...shared, ...advertised] });
+    }
     // The levels a model advertises replace the ones an earlier session reported.
     const own = (
       previousModels.find((model) => model.slug === slug)?.capabilities?.optionDescriptors ?? []
@@ -198,6 +206,7 @@ function modelsFromDiscovery(
       : discovered.map((model) => ({
           slug: model.id,
           name: model.name,
+          ...(model.subProvider ? { subProvider: model.subProvider } : {}),
           isCustom: false,
           ...(model.id === discovery?.currentModelId ? { isDefault: true } : {}),
           capabilities: capabilitiesFor(model),
@@ -296,6 +305,7 @@ function baseSnapshot(
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     ...(iconUrl ? { iconUrl } : {}),
     continuation: { groupKey: input.continuationKey },
+    ...(isQoderAcp(input.settings) ? QODER_RUNTIME_MODES : {}),
     supportsTextGeneration: false,
     enabled: input.settings.enabled,
     installed: input.installed,

@@ -357,6 +357,60 @@ describe("acpRegistrySnapshotReadiness", () => {
     ]);
   });
 
+  it("gives each model the options and vendor it lists in _meta", () => {
+    const contextWindow = {
+      id: "context_window",
+      name: "Context window",
+      category: "model_config",
+      type: "select" as const,
+      currentValue: "200000",
+      options: [{ value: "200000", name: "200K" }],
+    };
+    const provider = buildCheckedAcpRegistrySnapshot({
+      ...identity,
+      settings: decodeSettings({ source: "local", commandPath: "/opt/qoder" }),
+      checkedAt: "2026-08-13T10:00:00.000Z",
+      inspection: { status: "failed", message: "probe not run" },
+    });
+    expect(provider.supportedRuntimeModes).toEqual(["auto-accept-edits", "auto", "full-access"]);
+    const models = applyAcpRegistryLiveConfiguration(
+      provider,
+      normalizeAcpRegistryLiveConfiguration([contextWindow], undefined, {
+        currentModelId: "auto",
+        availableModels: [
+          { modelId: "auto", name: "Auto" },
+          {
+            modelId: "max",
+            name: "Max",
+            _meta: {
+              subProvider: "Custom",
+              configOptions: [
+                {
+                  ...contextWindow,
+                  currentValue: "1000000",
+                  options: [{ value: "1000000", name: "1M" }],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      [],
+    ).models;
+    expect(models[1]).toMatchObject({
+      subProvider: "Custom",
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "context_window",
+            currentValue: "1000000",
+            options: [{ id: "1000000", label: "1M" }],
+          },
+        ],
+      },
+    });
+  });
+
   it("drops a plan tag the agent prefixes to every model name", () => {
     const names = normalizeAcpRegistryLiveConfiguration([], undefined, {
       currentModelId: "qwen4-max",

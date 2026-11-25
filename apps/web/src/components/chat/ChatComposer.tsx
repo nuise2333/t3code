@@ -938,6 +938,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const compatibleRuntimeModeOptions = resolveRuntimeModeOptions(
     compatibleRuntimeModes,
     managedPolicy,
+    selectedProviderEntry?.snapshot.runtimeModeLabels,
   );
   // A thread or draft already above the ceiling would be refused; offer the broadest mode left.
   const runtimeModeCeilingDenial = managedRuntimeModeDenial(managedPolicy, compatibleRuntimeMode);
@@ -2587,7 +2588,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       variant="ghost"
                       onClick={() => handleRuntimeModeChange(runtimeModeCeilingFallback)}
                     >
-                      Switch to {runtimeModeConfig[runtimeModeCeilingFallback].label}
+                      Switch to{" "}
+                      {
+                        (
+                          compatibleRuntimeModeOptions.find(
+                            (option) => option.mode === runtimeModeCeilingFallback,
+                          ) ?? runtimeModeConfig[runtimeModeCeilingFallback]
+                        ).label
+                      }
                     </Button>
                   ),
                 }),

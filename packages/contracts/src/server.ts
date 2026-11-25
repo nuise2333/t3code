@@ -233,6 +233,16 @@ export const ServerProvider = Schema.Struct({
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
   reportsContextWindow: Schema.optional(Schema.Boolean),
   supportedRuntimeModes: Schema.optional(ForwardCompatibleArray(RuntimeMode)),
+  // The provider's own names for modes it presents differently.
+  runtimeModeLabels: Schema.optional(
+    ForwardCompatibleArray(
+      Schema.Struct({
+        mode: RuntimeMode,
+        label: TrimmedNonEmptyString,
+        description: TrimmedNonEmptyString,
+      }),
+    ),
+  ),
   supportsConversationRollback: Schema.optional(Schema.Boolean),
   supportsTextGeneration: Schema.optional(Schema.Boolean),
   setup: Schema.optional(

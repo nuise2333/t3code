@@ -2,6 +2,7 @@ import {
   managedRuntimeModeDenial,
   type ManagedPolicySummary,
   type RuntimeMode,
+  type ServerProvider,
 } from "@t3tools/contracts";
 
 export const RUNTIME_MODE_CHOICES: ReadonlyArray<{
@@ -33,10 +34,18 @@ export const RUNTIME_MODE_CHOICES: ReadonlyArray<{
 
 export function runtimeModeChoicesForSupportedModes(
   supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined,
+  labels?: ServerProvider["runtimeModeLabels"],
 ) {
-  return supportedRuntimeModes && supportedRuntimeModes.length > 0
-    ? RUNTIME_MODE_CHOICES.filter((choice) => supportedRuntimeModes.includes(choice.mode))
-    : RUNTIME_MODE_CHOICES;
+  const choices =
+    supportedRuntimeModes && supportedRuntimeModes.length > 0
+      ? RUNTIME_MODE_CHOICES.filter((choice) => supportedRuntimeModes.includes(choice.mode))
+      : RUNTIME_MODE_CHOICES;
+  return labels === undefined
+    ? choices
+    : choices.map((choice) => ({
+        ...choice,
+        ...labels.find((label) => label.mode === choice.mode),
+      }));
 }
 
 export type RuntimeModeChoice = (typeof RUNTIME_MODE_CHOICES)[number] & {

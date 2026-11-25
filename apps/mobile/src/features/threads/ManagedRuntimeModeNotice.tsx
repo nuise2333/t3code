@@ -3,6 +3,7 @@ import {
   managedRuntimeModeDenial,
   type ManagedPolicySummary,
   type RuntimeMode,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { View } from "react-native";
 
@@ -22,13 +23,17 @@ export function ManagedRuntimeModeNotice(props: {
   readonly threadKey: string;
   readonly threadRuntimeMode: RuntimeMode;
   readonly supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined;
+  readonly runtimeModeLabels?: ServerProvider["runtimeModeLabels"];
   readonly policy: ManagedPolicySummary | undefined;
 }) {
   const draftSettings = useComposerDraftSettings(props.threadKey);
   const runtimeMode = draftSettings.runtimeMode ?? props.threadRuntimeMode;
   const denial = managedRuntimeModeDenial(props.policy, runtimeMode);
   if (denial === undefined) return null;
-  const choices = runtimeModeChoicesForSupportedModes(props.supportedRuntimeModes);
+  const choices = runtimeModeChoicesForSupportedModes(
+    props.supportedRuntimeModes,
+    props.runtimeModeLabels,
+  );
   const target = clampManagedRuntimeMode(
     props.policy,
     runtimeMode,

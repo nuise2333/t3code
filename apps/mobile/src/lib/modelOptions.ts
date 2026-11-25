@@ -10,6 +10,7 @@ import type {
   ProjectId,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
+  ServerProvider,
 } from "@t3tools/contracts";
 import {
   disallowedProviderMessage,
@@ -33,6 +34,7 @@ export type ModelOption = {
   readonly providerLabel: string;
   readonly providerDriver: string;
   readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
+  readonly runtimeModeLabels?: ServerProvider["runtimeModeLabels"];
   readonly providerIconUrl?: string | undefined;
   readonly providerBadge?: {
     readonly displayName: string;
@@ -403,6 +405,9 @@ export function buildModelOptions(
         ...(provider.supportedRuntimeModes === undefined
           ? {}
           : { supportedRuntimeModes: provider.supportedRuntimeModes }),
+        ...(provider.runtimeModeLabels === undefined
+          ? {}
+          : { runtimeModeLabels: provider.runtimeModeLabels }),
         ...(provider.iconUrl ? { providerIconUrl: provider.iconUrl } : {}),
         isHidden: !model.isCustom && hiddenModels.has(model.slug),
         canHide: !model.isCustom,

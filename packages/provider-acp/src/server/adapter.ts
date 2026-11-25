@@ -7777,7 +7777,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               }),
             );
           }
-          for (const selection of flavor.sessionConfigForPolicy?.(runtimePolicy) ?? []) {
+          const policyConfig = flavor.sessionConfigForPolicy?.(runtimePolicy) ?? [];
+          for (const selection of policyConfig) {
             const option = (yield* runtime.getConfigOptions).find(
               (candidate) => candidate.id === selection.id,
             );
@@ -7811,7 +7812,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               { readonly type: "select" }
             > =>
               option.type === "select" &&
-              (option.category === "mode" || option.category === "collaboration_mode"),
+              (option.category === "mode" || option.category === "collaboration_mode") &&
+              // Leaving plan mode must not restore a permission the policy has since changed.
+              !policyConfig.some((selection) => selection.id === option.id),
           );
           if (runtimePolicy.interactionMode === "plan") {
             if (!nativeBuildConfigurationBySessionId.has(startResult.sessionId)) {

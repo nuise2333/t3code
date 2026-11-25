@@ -547,7 +547,10 @@ function ThreadSettingsSessionProvider(
     props.providerGroups.flatMap((group) => group.models).find((option) => isApplied(option)) ??
     null;
   const runtimeModeChoices = withManagedRuntimeModeLimits(
-    runtimeModeChoicesForSupportedModes(displayedModel?.supportedRuntimeModes),
+    runtimeModeChoicesForSupportedModes(
+      displayedModel?.supportedRuntimeModes,
+      displayedModel?.runtimeModeLabels,
+    ),
     [config?.managedPolicy],
   );
   const compatibleRuntimeMode = compatibleRuntimeModeForChoices(
