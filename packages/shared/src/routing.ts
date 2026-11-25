@@ -677,6 +677,13 @@ function quotaFunding(
   if (provider.driver === "codex" && windows.every((window) => window.id === "individual")) {
     return "credits";
   }
+  // An Enterprise account's only window can be its spend budget, which bills at list price.
+  if (
+    provider.driver === "claudeAgent" &&
+    windows.every((window) => window.id === "monthly_spend")
+  ) {
+    return "credits";
+  }
   return "subscription";
 }
 
