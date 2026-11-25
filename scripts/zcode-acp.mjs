@@ -1,7 +1,7 @@
 // Bridges ACP on stdio to ZCode's private `zcode app-server` protocol (launched by bin/zcode).
-// Models: ZCODE_ACP_API_KEY + ZCODE_ACP_TEMPLATE (default bigmodel-api) write a provider config;
-// otherwise ZCODE_PERSONAL_PROVIDER_CONFIG_FILE or ZCode's own provider_config.json is used.
-// Also: ZCODE_APP, ZCODE_ACP_BASE_URL, ZCODE_ACP_MODELS, ZCODE_ACP_DEFAULT_MODE, ZCODE_ACP_LOG.
+// API key: ZCODE_ACP_API_KEY, ZCODE_ACP_TEMPLATE/BASE_URL/MODELS, else ZCode's provider_config.json.
+// Account login (`~/.zcode-t3/zcode login bigmodel`) runs ZCode's `--prompt` CLI, which owns the
+// sign-in: tools needing approval are denied and T3's MCP servers are not passed.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -191,6 +191,211 @@ function pickReasoningLevel(levels, preferred) {
 
 let modelCatalog = [];
 
+// Account login. The CLI signs in under its own directory, apart from the desktop app's.
+const ACCOUNT_DIR =
+  process.env.ZCODE_ACP_ACCOUNT_DIR || NodePath.join(NodeOS.homedir(), ".zcode-t3");
+const ACCOUNT_SECRET = NodePath.join(ACCOUNT_DIR, "credential-secret");
+const ACCOUNT_SESSIONS = NodePath.join(ACCOUNT_DIR, "t3-sessions");
+const ACCOUNT_PROVIDERS = [
+  "account:bigmodel-individual-coding-plan",
+  "account:zai-individual-coding-plan",
+];
+const ACCOUNT_MAX_PROMPT_BYTES = 500_000; // One argv string; macOS caps argv plus env at 1 MB.
+// The CLI has no `auto` mode; `build` is the stricter one.
+const ACCOUNT_MODES = new Set(["build", "edit", "plan", "guarded", "yolo"]);
+const accountMode = (mode) => (ACCOUNT_MODES.has(mode) ? mode : "build");
+const isAccountProvider = (providerId) => ACCOUNT_PROVIDERS.includes(providerId);
+
+function accountModelCatalog() {
+  // Entry names only; their values are encrypted and belong to ZCode.
+  const entries = readJson(NodePath.join(ACCOUNT_DIR, ".zcode/v2/credentials.json")) ?? {};
+  if (!NodeFS.existsSync(ACCOUNT_SECRET)) return [];
+  const rules = readJson(BUILTIN_CONFIG)?.config?.providerConfigRules?.providerRules ?? [];
+  return rules
+    .filter(
+      (rule) =>
+        isAccountProvider(rule.providerId) &&
+        entries[`account-provider:${rule.providerId}:identity`],
+    )
+    .flatMap((rule) =>
+      (rule.config?.builtinModelIds ?? []).map((modelId) => ({
+        providerId: rule.providerId,
+        modelId,
+        label: `${modelId} (account)`,
+        providerName: `${rule.providerName ?? rule.providerId}, account login`,
+        apiType: rule.config?.api?.type ?? "",
+      })),
+    );
+}
+
+function accountSelection(ref, preferredLevel) {
+  const entry = modelCatalog.find(
+    (m) => m.providerId === ref.providerId && m.modelId === ref.modelId,
+  );
+  if (!entry) throw new RpcError(-32602, `ZCode account model ${ref.modelId} is not available`);
+  const levels = reasoningLevelsFor(ref.modelId, entry.apiType);
+  return {
+    providerId: ref.providerId,
+    modelId: ref.modelId,
+    level: pickReasoningLevel(levels, preferredLevel),
+    levels,
+  };
+}
+
+const accountSessionFile = (sessionId) =>
+  NodePath.join(ACCOUNT_SESSIONS, `${encodeURIComponent(sessionId)}.json`);
+
+function saveAccountSession(session, mode = session.settings?.mode?.current) {
+  const { providerId, modelId, level } = session.account;
+  const file = accountSessionFile(session.id);
+  const temp = `${file}.${NodeCrypto.randomUUID()}.tmp`;
+  try {
+    NodeFS.mkdirSync(ACCOUNT_SESSIONS, { recursive: true, mode: 0o700 });
+    NodeFS.writeFileSync(
+      temp,
+      JSON.stringify({
+        cliSessionId: session.cliSessionId,
+        providerId,
+        modelId,
+        level,
+        mode,
+      }),
+      { mode: 0o600 },
+    );
+    NodeFS.renameSync(temp, file);
+  } catch (error) {
+    try {
+      NodeFS.rmSync(temp, { force: true });
+    } catch {}
+    throw new RpcError(-32603, `Could not save the ZCode account session: ${error.message}`);
+  }
+}
+
+// Null when this is not an account session; a damaged record must not resume as an API key one.
+function loadAccountSession(sessionId) {
+  const file = accountSessionFile(sessionId);
+  if (!NodeFS.existsSync(file)) return null;
+  const saved = readJson(file);
+  if (
+    !isAccountProvider(saved?.providerId) ||
+    typeof saved.modelId !== "string" ||
+    !(saved.cliSessionId === null || /^[\w-]+$/.test(saved.cliSessionId ?? ""))
+  ) {
+    throw new RpcError(-32603, `The saved ZCode account session ${sessionId} is unreadable`);
+  }
+  return saved;
+}
+
+async function accountPrompt(session, text) {
+  if (Buffer.byteLength(text) > ACCOUNT_MAX_PROMPT_BYTES) {
+    throw new RpcError(-32602, "This message is too long for ZCode account login");
+  }
+  const { providerId, modelId, level } = session.account;
+  // Locked and on disk before the CLI starts: from here on this conversation is the account's.
+  saveAccountSession(session);
+  session.route = "account";
+  const configFile = NodePath.join(
+    NodeOS.tmpdir(),
+    `zcode-acp-${process.pid}-${NodeCrypto.randomUUID()}.json`,
+  );
+  NodeFS.writeFileSync(
+    configFile,
+    JSON.stringify({
+      schemaVersion: 1,
+      config: {
+        providerConfigRules: { providerRules: [] },
+        modelConfigRules: { providerModelRules: [], manualProviderModelRules: [] },
+        defaultModelSelection: {
+          providerId,
+          modelId,
+          ...(level ? { options: { reasoningLevel: level } } : {}),
+        },
+      },
+    }),
+    { mode: 0o600 },
+  );
+  const env = {
+    ...process.env,
+    ELECTRON_RUN_AS_NODE: "1",
+    ZCODE_DATA_BASE_DIR: ACCOUNT_DIR,
+    ZCODE_CREDENTIAL_SECRET_FILE: ACCOUNT_SECRET,
+    ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: BUILTIN_CONFIG,
+    ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: configFile,
+  };
+  delete env.ZCODE_ACP_API_KEY;
+  delete env.ZCODE_CREDENTIAL_SECRET;
+  const args = [
+    ZCODE_CLI,
+    // The CLI runs a leading slash as its own command (`/logout`); a message never is one.
+    `--prompt=${text.trimStart().startsWith("/") ? `Message: ${text}` : text}`,
+    "--mode",
+    accountMode(session.settings?.mode?.current ?? "plan"),
+    "--output-format",
+    "stream-json",
+    ...(session.cliSessionId ? ["--resume", session.cliSessionId] : []),
+  ];
+  let failure = null;
+  let saveFailure = null;
+  let finished = false;
+  let stderr = "";
+  let killTimer;
+  try {
+    const code = await new Promise((resolve, reject) => {
+      const child = NodeChildProcess.spawn(ZCODE_BIN, args, {
+        cwd: session.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      session.accountChild = child;
+      session.stopAccount = () => {
+        child.kill("SIGINT");
+        killTimer ??= setTimeout(() => child.kill("SIGKILL"), 5000);
+      };
+      if (session.cancelRequested) session.stopAccount();
+      child.on("error", reject);
+      child.on("close", resolve);
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (d) => {
+        stderr = (stderr + d).slice(-2000);
+      });
+      lineReader(child.stdout, (event) => {
+        if (!event.sessionId || saveFailure) return;
+        if (!session.cliSessionId) {
+          session.cliSessionId = event.sessionId;
+          try {
+            saveAccountSession(session);
+          } catch (error) {
+            saveFailure = error;
+            session.stopAccount();
+            return;
+          }
+        }
+        // Subagents stream under their own sessions.
+        if (event.sessionId !== session.cliSessionId) return;
+        if (event.type === "result") finished = true;
+        if (event.type === "turn.failed") failure = turnFailure(event.payload ?? {});
+        if (event.type === "turn.completed") failure = null;
+        // The CLI may run more turns for background work; its exit ends the prompt.
+        if (event.type === "turn.completed" || event.type === "turn.failed") return;
+        onSessionEvent({ ...event, sessionId: session.id });
+      });
+    });
+    if (saveFailure) throw saveFailure;
+    if (session.cancelRequested) return { stopReason: "cancelled" };
+    if (failure) throw failure;
+    if (code !== 0 || !finished) {
+      const reason = /^Error: (.*)$/m.exec(stderr)?.[1];
+      throw new RpcError(-32603, reason ?? `ZCode CLI exited (${code ?? "killed"})`);
+    }
+    return { stopReason: "end_turn" };
+  } finally {
+    clearTimeout(killTimer);
+    session.accountChild = null;
+    session.stopAccount = null;
+    NodeFS.rmSync(configFile, { force: true });
+  }
+}
+
 function lineReader(stream, onMessage) {
   let buf = "";
   stream.setEncoding("utf8");
@@ -239,7 +444,10 @@ function startZcode() {
     ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: BUILTIN_CONFIG,
     ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: resolvePersonalConfig(),
   };
-  modelCatalog = personalModelCatalog(env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE);
+  modelCatalog = [
+    ...personalModelCatalog(env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE),
+    ...accountModelCatalog(),
+  ];
   delete env.ZCODE_ACP_API_KEY;
   zc = NodeChildProcess.spawn(ZCODE_BIN, [ZCODE_CLI, "app-server", "--surface", "desktop"], {
     env,
@@ -294,10 +502,10 @@ function parseModelValue(value) {
 
 function configOptions(session) {
   const settings = session.settings ?? {};
-  const current = settings.model?.current;
+  const current = session.account ?? settings.model?.current;
   const choices = modelCatalog.map((m) => ({
     value: modelValue(m),
-    name: m.modelId,
+    name: m.label ?? m.modelId,
     description: m.providerName,
   }));
   for (const m of settings.model?.available ?? []) {
@@ -320,7 +528,19 @@ function configOptions(session) {
     });
   }
   const levels = settings.thoughtLevel?.enabled ? (settings.thoughtLevel.available ?? []) : [];
-  if (levels.length > 0) {
+  if (session.account) {
+    const { level, levels: accountLevels } = session.account;
+    if (level) {
+      options.push({
+        id: "thought_level",
+        name: "Reasoning",
+        category: "thought_level",
+        type: "select",
+        currentValue: level,
+        options: accountLevels.map((value) => ({ value, name: value })),
+      });
+    }
+  } else if (levels.length > 0) {
     options.push({
       id: "thought_level",
       name: "Reasoning",
@@ -470,6 +690,13 @@ function resultText(result) {
   return JSON.stringify(result).slice(0, 4000);
 }
 
+function turnFailure(p) {
+  const base = p.error?.message || "ZCode turn failed";
+  const underlying = p.error?.underlyingErrorMessage;
+  const message = underlying && underlying !== base ? `${base} ${underlying}` : base;
+  return new RpcError(-32603, message, { code: p.error?.code });
+}
+
 function onSessionEvent(params) {
   const session = sessions.get(params.sessionId);
   if (!session) return;
@@ -572,10 +799,7 @@ function onSessionEvent(params) {
       if (session.cancelRequested) {
         session.turn?.resolve({ stopReason: "cancelled" });
       } else {
-        const base = p.error?.message || "ZCode turn failed";
-        const underlying = p.error?.underlyingErrorMessage;
-        const message = underlying && underlying !== base ? `${base} ${underlying}` : base;
-        session.turn?.reject(new RpcError(-32603, message, { code: p.error?.code }));
+        session.turn?.reject(turnFailure(p));
       }
       break;
     }
@@ -687,11 +911,18 @@ async function openSession(sessionId, cwd, mcpServers, resume) {
     tools: new Map(),
     turn: null,
     cancelRequested: false,
+    account: null, // { providerId, modelId, level, levels } while on account login
+    cliSessionId: null,
+    configChange: Promise.resolve(),
+    route: null, // "account" or "api" once a message was sent; their histories are separate
   };
   sessions.set(sessionId, session);
   const servers = toZcodeMcpServers(mcpServers);
+  // Account turns live in the CLI's own session; the app-server one was never persisted.
+  const saved = resume ? loadAccountSession(sessionId) : null;
+  if (resume && !saved) session.route = "api";
   try {
-    if (resume) {
+    if (resume && !saved) {
       await zcRequest("session/resume", {
         sessionId,
         workspace: workspaceFor(cwd),
@@ -710,6 +941,16 @@ async function openSession(sessionId, cwd, mcpServers, resume) {
     }
     await zcRequest("session/subscribe", { sessionId, deliveryKind: "desktop-continuous" });
     await refreshSettings(session);
+    if (saved) {
+      session.route = "account";
+      session.cliSessionId = saved.cliSessionId;
+      await zcRequest("session/setMode", { sessionId, mode: saved.mode ?? "plan" });
+      await refreshSettings(session);
+      session.account = accountSelection(saved, saved.level);
+    } else if (!session.settings?.model?.current) {
+      const first = modelCatalog.find((m) => isAccountProvider(m.providerId));
+      if (first) session.account = accountSelection(first);
+    }
   } catch (error) {
     sessions.delete(sessionId);
     throw error;
@@ -742,40 +983,76 @@ function promptText(blocks) {
 async function prompt(params) {
   const session = requireSession(params.sessionId);
   if (session.turn) throw new RpcError(-32010, "A prompt is already running for this session");
-  if (session.settingsDirty) {
-    session.settingsDirty = false;
-    await refreshSettings(session).catch(() => {});
-  }
+  // Claimed before any await, so a cancel or model switch during it sees this turn.
+  session.turn = { resolve() {}, reject() {} };
   session.cancelRequested = false;
   session.tools.clear();
-  const done = new Promise((resolve, reject) => {
-    session.turn = { resolve, reject };
-  });
   try {
-    const modelSelection = currentModelSelection(session);
-    if (!modelSelection) {
-      throw new RpcError(
-        -32603,
-        "ZCode has no model configured. Set ZCODE_ACP_API_KEY (and ZCODE_ACP_TEMPLATE) on this provider, or add an API-key provider in ZCode settings.",
-      );
+    await session.configChange;
+    if (session.settingsDirty) {
+      session.settingsDirty = false;
+      await refreshSettings(session).catch(() => {});
     }
-    await zcRequest("session/send", {
-      sessionId: session.id,
-      modelSelection,
-      content: promptText(params.prompt),
-    });
-    return await done;
+    if (session.cancelRequested) return { stopReason: "cancelled" };
+    if (session.account) return await accountPrompt(session, promptText(params.prompt));
+    return await apiPrompt(session, params);
   } finally {
     session.turn = null;
   }
 }
 
-async function setConfigOption(params) {
+async function apiPrompt(session, params) {
+  const done = new Promise((resolve, reject) => {
+    session.turn = { resolve, reject };
+  });
+  const modelSelection = currentModelSelection(session);
+  if (!modelSelection) {
+    throw new RpcError(
+      -32603,
+      "ZCode has no model configured. Set ZCODE_ACP_API_KEY (and ZCODE_ACP_TEMPLATE) on this provider, add an API-key provider in ZCode settings, or sign in with `~/.zcode-t3/zcode login bigmodel`.",
+    );
+  }
+  session.route = "api";
+  await zcRequest("session/send", {
+    sessionId: session.id,
+    modelSelection,
+    content: promptText(params.prompt),
+  });
+  return await done;
+}
+
+// One change at a time, and a prompt waits for them: a model switch spans several requests.
+function setConfigOption(params) {
   const session = requireSession(params.sessionId);
+  const change = session.configChange.then(() => applyConfigOption(session, params));
+  session.configChange = change.catch(() => {});
+  return change;
+}
+
+async function applyConfigOption(session, params) {
   const value = String(params.value);
   if (params.configId === "model") {
     const ref = parseModelValue(value);
     if (!ref) throw new RpcError(-32602, `Invalid model value ${value}`);
+    const toAccount = isAccountProvider(ref.providerId);
+    // The two keep separate histories, so a switch would silently drop the conversation.
+    if (session.route && session.route !== (toAccount ? "account" : "api")) {
+      throw new RpcError(
+        -32602,
+        "Start a new thread to switch between ZCode account login and an API key",
+      );
+    }
+    if (session.turn && toAccount !== Boolean(session.account)) {
+      throw new RpcError(-32010, "A prompt is already running for this session");
+    }
+    if (toAccount) {
+      session.account = accountSelection(
+        ref,
+        session.account?.level ?? session.settings?.thoughtLevel?.current,
+      );
+      if (session.route === "account") saveAccountSession(session);
+      return { configOptions: configOptions(session) };
+    }
     const entry = modelCatalog.find(
       (m) => m.providerId === ref.providerId && m.modelId === ref.modelId,
     );
@@ -787,10 +1064,29 @@ async function setConfigOption(params) {
       sessionId: session.id,
       model: { ...ref, ...(level ? { options: { reasoningLevel: level } } : {}) },
     });
+    session.account = null;
+  } else if (params.configId === "thought_level" && session.account) {
+    if (!session.account.levels.includes(value)) {
+      throw new RpcError(-32602, `Invalid reasoning level ${value}`);
+    }
+    session.account.level = value;
+    if (session.route === "account") saveAccountSession(session);
   } else if (params.configId === "thought_level") {
     await zcRequest("session/setThoughtLevel", { sessionId: session.id, thoughtLevel: value });
   } else if (params.configId === "mode") {
-    await zcRequest("session/setMode", { sessionId: session.id, mode: value });
+    if (!MODES.some((mode) => mode.id === value)) {
+      throw new RpcError(-32602, `Unknown mode ${value}`);
+    }
+    // Saved first: a mode that failed to save would come back wider after a restart.
+    const account = session.route === "account";
+    const previous = session.settings?.mode?.current;
+    if (account) saveAccountSession(session, value);
+    try {
+      await zcRequest("session/setMode", { sessionId: session.id, mode: value });
+    } catch (error) {
+      if (account) saveAccountSession(session, previous);
+      throw error;
+    }
   } else {
     throw new RpcError(-32602, `Unknown config option ${params.configId}`);
   }
@@ -846,6 +1142,10 @@ async function handleAcpNotification(msg) {
     const session = sessions.get(msg.params?.sessionId);
     if (!session) return;
     session.cancelRequested = true;
+    if (session.account) {
+      session.stopAccount?.();
+      return;
+    }
     await zcRequest("session/stop", { sessionId: session.id }).catch((e) =>
       log("stop failed", e.message),
     );
@@ -886,6 +1186,7 @@ function shutdown() {
   try {
     zc?.kill();
   } catch {}
+  for (const session of sessions.values()) session.accountChild?.kill("SIGTERM");
   if (tempConfigFile) NodeFS.rmSync(tempConfigFile, { force: true });
   process.exit(0);
 }
