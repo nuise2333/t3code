@@ -217,9 +217,17 @@ beside Favorites):
 
 - **No team**: a single agent.
 - **Cheap team**, **Balanced team** and **Best team**: your thread's model leads
-  and T3 picks each worker's model for its task: the cheapest model likely to
-  pass, the cheapest one tier stronger, or the strongest available. The kind you
-  pick is remembered, and new threads start with it until you pick **No team**.
+  and T3 picks each worker's model by what the task mostly tests: backend,
+  frontend, visual design, reasoning or maintainability, or one of eight reading
+  and writing skills, as scored by
+  [ModelDial](https://modeldial.com/leaderboard/coding). **Best** takes the top
+  score. **Balanced** takes the best score for the cost among models its adoption
+  board scores above the median and whose usage isn't falling. **Cheap** takes a Chinese
+  model close to the best Chinese score: the cheapest for quick edits, the best
+  score for the cost for ordinary work, and mostly the score for hard tasks. When several
+  agents offer the model, native agents and gateways come first, then remaining
+  quota, then the harness board. The kind you pick is remembered, and new threads start with
+  it until you pick **No team**.
 - **Your teams**: the teams you saved, led by the thread's model.
 
 While the **Agent team** tab is open, the picker's bottom section switches to

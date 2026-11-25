@@ -55,8 +55,17 @@ describe("activeAgentTeam", () => {
     expect(active).toMatchObject({ kind: "auto", auto: "balanced", name: "Balanced team" });
     if (active?.kind !== "auto") return;
     const prompt = autoTeamLeadPrompt(active, "");
-    expect(prompt).toContain("Leave `target` out");
-    expect(prompt).toContain("best value for the cost");
+    expect(prompt).toContain("Leave `target` out and set `subtask`");
+    expect(prompt).toContain("best value among widely used models");
+    expect(prompt).not.toContain("At most two rounds");
+    const best = activeAgentTeam({
+      routing: null,
+      agentTeam: { id: "auto-best", name: "Best team" },
+      modelSelection: { instanceId: claude, model: "opus-fake" },
+      groups: [],
+    });
+    if (best?.kind !== "auto") throw new Error("expected the Best team");
+    expect(autoTeamLeadPrompt(best, "")).toContain("At most two rounds");
   });
 
   const lead = { instanceId: claude, model: "opus-fake" };

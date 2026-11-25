@@ -32,7 +32,7 @@ import {
   ThreadPullRequestKey,
   ThreadPullRequestLinkSource,
 } from "./threadPullRequest.ts";
-import { RoutingGroupId } from "./routing.ts";
+import { RoutingGroupId, TeamSubtask } from "./routing.ts";
 import { CouncilLens } from "./council.ts";
 import { secretRequestPageUrl } from "./secretRequest.ts";
 import { hasOnlyPairedSurrogates } from "./threadMetadataMcp.ts";
@@ -181,6 +181,10 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   role: Schema.optional(OrchestratorMcpTaskRole).annotate({
     description:
       "Without a target, the user's Auto settings may pick the child's model: review on another vendor, research cheaper. A vendor the user requires still needs target.model. Web research: give the task a search budget, and ask it to check that cited links open and quotes appear, and to list sources it couldn't reach apart from ones that had nothing.",
+  }),
+  subtask: Schema.optional(TeamSubtask).annotate({
+    description:
+      "Automatic agent teams only: what the task mostly tests; picks the worker's model.",
   }),
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({

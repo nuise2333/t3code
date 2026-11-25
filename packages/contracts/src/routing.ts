@@ -77,6 +77,71 @@ const RoutingTableRow = Schema.Struct({
   sourceIds: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
 });
 
+/** What an automatic team's task mostly tests: the benchmark boards' own sub-scores. */
+export const TeamSubtask = Schema.Literals([
+  "backend",
+  "frontend",
+  "visual",
+  "reasoning",
+  "maintainability",
+  "intent",
+  "instructions",
+  "synthesis",
+  "accuracy",
+  "expression",
+  "completeness",
+  "style",
+  "structure",
+]);
+export type TeamSubtask = typeof TeamSubtask.Type;
+
+const TeamScores = Schema.Struct({
+  backend: Schema.Finite,
+  frontend: Schema.Finite,
+  visual: Schema.Finite,
+  reasoning: Schema.Finite,
+  maintainability: Schema.Finite,
+  coding: Schema.Finite,
+  intent: Schema.optionalKey(Schema.Finite),
+  instructions: Schema.optionalKey(Schema.Finite),
+  synthesis: Schema.optionalKey(Schema.Finite),
+  accuracy: Schema.optionalKey(Schema.Finite),
+  understanding: Schema.optionalKey(Schema.Finite),
+  expression: Schema.optionalKey(Schema.Finite),
+  completeness: Schema.optionalKey(Schema.Finite),
+  style: Schema.optionalKey(Schema.Finite),
+  structure: Schema.optionalKey(Schema.Finite),
+  output: Schema.optionalKey(Schema.Finite),
+});
+
+const TeamBoardModel = Schema.Struct({
+  /** The same model's ids across agents and gateways. */
+  models: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+  /** The level the coding scores and cost come from: the best one below max when there is one. */
+  effort: TrimmedNonEmptyString,
+  /** 0-100; the writing scores are absent for a model the writing board lacks. */
+  scores: TeamScores,
+  costUsd: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
+  /** From a Chinese lab: the pool Cheap picks from. */
+  chinese: Schema.optionalKey(Schema.Boolean),
+  /** Priced from its published token counts at its predecessor's rates. */
+  costEstimated: Schema.optionalKey(Schema.Boolean),
+  /** A Chinese lab's latest model that stays in Cheap above its price limit. */
+  newest: Schema.optionalKey(Schema.Boolean),
+  /** Percent of OpenRouter tokens over 14 days; absent when the adoption board doesn't list it. */
+  marketShare: Schema.optionalKey(Schema.Finite),
+  /** Usage dropped off after launch, so Balanced passes it over. */
+  fading: Schema.optionalKey(Schema.Boolean),
+});
+export type TeamBoardModel = typeof TeamBoardModel.Type;
+
+const TeamBoard = Schema.Struct({
+  sourceIds: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  models: Schema.Array(TeamBoardModel),
+  /** Keyed by driver, or by agent id for ACP Registry agents. */
+  harnesses: Schema.Record(Schema.String, Schema.Finite),
+});
+
 const RoutingTableEnvelope = Schema.Struct({
   version: Schema.Literal(1),
   updatedAt: Schema.String,
@@ -86,10 +151,12 @@ const RoutingTableEnvelope = Schema.Struct({
   ),
   defaultEffortByClass: EffortByClass,
   rows: Schema.Array(RoutingTableRow),
+  teamBoard: Schema.optionalKey(TeamBoard),
 });
 
 const hasValidRoutingRows = (table: typeof RoutingTableEnvelope.Type): boolean => {
   const keys = new Set<string>();
+  if (table.teamBoard?.sourceIds.some((id) => table.sources[id] === undefined)) return false;
   return table.rows.every((row) => {
     const key = `${row.driver}\u0000${row.model}`;
     if (keys.has(key)) return false;
@@ -146,8 +213,8 @@ export const RoutingGroup = Schema.Struct({
 export type RoutingGroup = typeof RoutingGroup.Type;
 
 /**
- * Automatic teams: the thread's model leads, and T3 picks each worker's model for its task, the
- * cheapest likely to pass, the best value, or the strongest. They need no saved team.
+ * Automatic teams: the thread's model leads, and T3 picks each worker's model for its
+ * subtask: a cheap Chinese model, the best value on the market, or the strongest. They need no saved team.
  */
 export const AutoTeamKind = Schema.Literals(["cheap", "balanced", "best"]);
 export type AutoTeamKind = typeof AutoTeamKind.Type;
@@ -163,19 +230,19 @@ export const AUTO_TEAMS: ReadonlyArray<{
     kind: "cheap",
     id: "auto-cheap",
     name: "Cheap team",
-    description: "Cheapest model likely to pass",
+    description: "Cheap, capable Chinese models",
   },
   {
     kind: "balanced",
     id: "auto-balanced",
     name: "Balanced team",
-    description: "Best value for the cost",
+    description: "Best value among widely used models",
   },
   {
     kind: "best",
     id: "auto-best",
     name: "Best team",
-    description: "Strongest model for each worker",
+    description: "Strongest model for each subtask",
   },
 ];
 

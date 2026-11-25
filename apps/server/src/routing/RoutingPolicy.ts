@@ -4,6 +4,7 @@ import {
   type CrossVendorModelResult,
   type LaunchRoutingRequest,
   type ModelSelection,
+  type OrchestratorMcpTaskRole,
   type ProjectId,
   type ProviderInteractionMode,
   ProviderInstanceId,
@@ -14,6 +15,7 @@ import {
   RoutingSkipReason,
   type RoutingEffort,
   type RoutingTaskClass,
+  type TeamSubtask,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { isReasoningSelect } from "@t3tools/shared/model";
@@ -22,6 +24,7 @@ import {
   chooseAutoModel,
   chooseTeamFallbackModel,
   chooseTeamWorkerModel,
+  inferTeamSubtask,
   classifyTask,
   crossVendorModel,
   isFrontendPrompt,
@@ -123,6 +126,8 @@ export interface RoutingDelegationInput {
 
 export interface RoutingTeamWorkerInput {
   readonly kind: AutoTeamKind;
+  readonly role?: OrchestratorMcpTaskRole | undefined;
+  readonly subtask?: TeamSubtask | undefined;
   readonly prompt: string;
   readonly interactionMode: ProviderInteractionMode;
   readonly runtimeMode: RuntimeMode;
@@ -552,6 +557,7 @@ const make = Effect.gen(function* () {
       const providers = yield* providerRegistry.getProviders;
       const chosen = chooseTeamWorkerModel({
         kind: input.kind,
+        subtask: input.subtask ?? inferTeamSubtask({ role: input.role, prompt: input.prompt }),
         table: ModelManifest.resolveRoutingTable(yield* manifest.current),
         taskClass,
         providers,

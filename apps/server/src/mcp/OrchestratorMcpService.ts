@@ -1426,6 +1426,8 @@ const make = Effect.gen(function* () {
       }
       const picked = yield* routingPolicy.routeTeamWorker({
         kind: team.auto,
+        role: input.role,
+        subtask: input.subtask,
         prompt: input.task,
         interactionMode: parent.thread.interactionMode,
         runtimeMode: parent.thread.runtimeMode,

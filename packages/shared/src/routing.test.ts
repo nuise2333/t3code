@@ -14,6 +14,7 @@ import {
   type RoutingTier,
   type RuntimeMode,
   type ServerProvider,
+  type TeamSubtask,
   type ServerSettings,
 } from "@t3tools/contracts";
 
@@ -21,6 +22,7 @@ import {
   chooseAutoModel,
   chooseTeamFallbackModel,
   chooseTeamWorkerModel,
+  inferTeamSubtask,
   crossVendorModel,
   classifyTask,
   isFrontendPrompt,
@@ -2239,6 +2241,137 @@ describe("chooseAutoModel", () => {
         now: NOW,
       })?.selection,
     ).toStrictEqual({ instanceId: codexId, model: "model-sol" });
+  });
+
+  it("ranks automatic team workers by subtask on the team board", () => {
+    const scores = (value: number, writing?: number) => ({
+      backend: value,
+      frontend: value,
+      visual: value,
+      reasoning: value,
+      maintainability: value,
+      coding: value,
+      ...(writing === undefined ? {} : { synthesis: writing, understanding: value }),
+    });
+    const openProvider = provider(opencodeId, "opencode", ["fake-cn", "fake-cn-pro"]);
+    const all = [claude(), codex(), openProvider];
+    const board: NonNullable<RoutingTable["teamBoard"]> = {
+      sourceIds: [],
+      harnesses: { grok: 50, opencode: 60 },
+      models: [
+        {
+          models: ["model-opus"],
+          effort: "high",
+          scores: scores(80, 100),
+          costUsd: 100,
+          marketShare: 2,
+        },
+        {
+          models: ["model-sol"],
+          effort: "high",
+          scores: { ...scores(79, 100), frontend: 90 },
+          costUsd: 10,
+          marketShare: 1,
+        },
+        // Never measured on writing, and on no tier row: only the board makes it a candidate.
+        { models: ["fake-cn"], effort: "high", scores: scores(52), costUsd: 0.1, chinese: true },
+        {
+          models: ["fake-cn-pro"],
+          effort: "high",
+          scores: scores(60, 90),
+          costUsd: 5,
+          chinese: true,
+        },
+      ],
+    };
+    const worker = (
+      kind: "cheap" | "balanced" | "best",
+      subtask: TeamSubtask | null,
+      options: {
+        readonly taskClass?: "implement" | "hard";
+        readonly providers?: ReadonlyArray<ServerProvider>;
+        readonly models?: typeof board.models;
+      } = {},
+    ) => {
+      const providers = options.providers ?? all;
+      return chooseTeamWorkerModel({
+        kind,
+        subtask,
+        table: {
+          ...tableOf(ROWS),
+          teamBoard: { ...board, models: options.models ?? board.models },
+        },
+        taskClass: options.taskClass ?? "implement",
+        providers,
+        settings: settingsFor(providers),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    };
+    const opus = { instanceId: claudeId, model: "model-opus" };
+    const sol = { instanceId: codexId, model: "model-sol" };
+    const cn = { instanceId: opencodeId, model: "fake-cn" };
+    const cnPro = { instanceId: opencodeId, model: "fake-cn-pro" };
+    expect(worker("best", "backend")).toStrictEqual(opus);
+    expect(worker("best", "frontend")).toStrictEqual(sol);
+    // Tied at 100 on synthesis, so the broader understanding score decides.
+    expect(worker("best", "synthesis")).toStrictEqual(opus);
+    expect(worker("balanced", "backend")).toStrictEqual(sol);
+    const fadingSol = board.models.map((entry) =>
+      entry.models[0] === "model-sol" ? { ...entry, fading: true } : entry,
+    );
+    expect(worker("balanced", "backend", { models: fadingSol })).toStrictEqual(opus);
+    const closeValue = board.models.map((entry) =>
+      entry.models[0] === "model-opus" ? { ...entry, costUsd: 10 } : entry,
+    );
+    expect(worker("balanced", null, { models: closeValue })).toStrictEqual(opus);
+    expect(worker("cheap", "backend")).toStrictEqual(cn);
+    expect(worker("cheap", "backend", { taskClass: "hard" })).toStrictEqual(cnPro);
+    expect(worker("cheap", "synthesis")).toStrictEqual(cnPro);
+    const cnSpike = board.models.map((entry) =>
+      entry.models[0] === "fake-cn" ? { ...entry, scores: scores(10, 100) } : entry,
+    );
+    expect(worker("cheap", "synthesis", { models: cnSpike })).toStrictEqual(cnPro);
+    const cnProPricey = board.models.map((entry) =>
+      entry.models[0] === "fake-cn-pro" ? { ...entry, costUsd: 30 } : entry,
+    );
+    expect(worker("cheap", "backend", { taskClass: "hard", models: cnProPricey })).toStrictEqual(
+      cn,
+    );
+    const newestPricey = cnProPricey.map((entry) =>
+      entry.models[0] === "fake-cn-pro" ? { ...entry, newest: true } : entry,
+    );
+    expect(worker("cheap", "backend", { taskClass: "hard", models: newestPricey })).toStrictEqual(
+      cnPro,
+    );
+    expect(worker("cheap", "backend", { models: newestPricey })).toStrictEqual(cn);
+    const listedCn = board.models.map((entry) =>
+      entry.models[0] === "fake-cn"
+        ? { ...entry, scores: { ...scores(79), coding: 40 }, marketShare: 30 }
+        : entry,
+    );
+    expect(worker("balanced", "backend", { models: listedCn })).toStrictEqual(sol);
+    // With no Chinese model set up, Cheap takes the cheapest that passes.
+    expect(worker("cheap", "backend", { providers: [claude(), codex()] })).toStrictEqual(sol);
+    // The better harness runs a model no agent owns.
+    const grok = provider(ProviderInstanceId.make("grok"), "grok", ["fake-cn"]);
+    expect(worker("cheap", "backend", { providers: [grok, openProvider] })).toStrictEqual(cn);
+  });
+
+  it.each([
+    { role: "test", prompt: "Cover the parser", subtask: "backend" },
+    { role: "review", prompt: "Review the diff", subtask: "maintainability" },
+    { role: "research", prompt: "Compare the options", subtask: "synthesis" },
+    { role: "implementation", prompt: "Implement the queue", subtask: "backend" },
+    { role: "implementation", prompt: "Add a translation table to the API", subtask: "backend" },
+    { role: "design", prompt: "Plan the storage format", subtask: "reasoning" },
+    { role: undefined, prompt: "润色这段文案", subtask: "expression" },
+    { role: undefined, prompt: "把说明翻译成英文", subtask: "accuracy" },
+    { role: undefined, prompt: "Look into the failure", subtask: null },
+  ] as const)("infers $subtask for a $role task: $prompt", ({ role, prompt, subtask }) => {
+    expect(inferTeamSubtask({ role, prompt })).toBe(subtask);
   });
 
   it.each<{

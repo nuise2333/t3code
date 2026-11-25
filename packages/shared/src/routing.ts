@@ -3,6 +3,7 @@ import {
   type AutoTeamKind,
   resolveProjectProviderInstanceEnabled,
   type ModelSelection,
+  type OrchestratorMcpTaskRole,
   type ProjectId,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -19,6 +20,8 @@ import {
   type RuntimeMode,
   type ServerProvider,
   type ServerSettings,
+  type TeamBoardModel,
+  type TeamSubtask,
 } from "@t3tools/contracts";
 
 import {
@@ -569,7 +572,9 @@ function modelKey(id: string): string {
   }
   bare = bare.replace(/\([^()]*\)$/, "");
   return bare
-    .slice(bare.lastIndexOf("/") + 1)
+    .slice(
+      Math.max(bare.lastIndexOf("/") + 1, bare.includes("::") ? bare.lastIndexOf("::") + 2 : 0),
+    )
     .toLowerCase()
     .replaceAll(".", "-");
 }
@@ -944,14 +949,161 @@ export function chooseAutoModel(input: {
   };
 }
 
+const WRITING_AXIS: Readonly<Partial<Record<TeamSubtask, "understanding" | "output">>> = {
+  intent: "understanding",
+  instructions: "understanding",
+  synthesis: "understanding",
+  accuracy: "understanding",
+  expression: "output",
+  completeness: "output",
+  style: "output",
+  structure: "output",
+};
+
+const WRITING_PROMPT =
+  /\b(copywriting|ui copy|blog post|essay|rewrite the (text|copy)|proofread)\b|文案|润色|写作|撰写|文章|公文|讲话稿/i;
+const TRANSLATION_PROMPT = /\btranslat(e|ion)\b|翻译/i;
+const VISUAL_PROMPT =
+  /\b(visual design|look and feel|typography|colou?r palette)\b|视觉|美观|配色|排版/i;
+
+/** A lead that names no subtask still gets one from its role and words; null is all-round coding. */
+export function inferTeamSubtask(input: {
+  readonly role?: OrchestratorMcpTaskRole | undefined;
+  readonly prompt: string;
+}): TeamSubtask | null {
+  const { role } = input;
+  if (role === "test") return "backend";
+  if (role === "review") return "maintainability";
+  if (role === "research") return "synthesis";
+  const prompt = stripPasted(input.prompt);
+  if (role !== "implementation") {
+    if (TRANSLATION_PROMPT.test(prompt)) return "accuracy";
+    if (WRITING_PROMPT.test(prompt)) return "expression";
+  }
+  if (VISUAL_PROMPT.test(prompt)) return "visual";
+  if (isFrontendPrompt(prompt)) return role === "design" ? "visual" : "frontend";
+  if (role === "design") return "reasoning";
+  return role === "implementation" ? "backend" : null;
+}
+
+/** The share of the best Chinese model's score a Cheap worker needs. */
+const CHEAP_PASS_SHARE: Readonly<Record<RoutingTaskClass, number>> = {
+  quick_edit: 0.75,
+  readonly: 0.85,
+  implement: 0.85,
+  hard: 0.95,
+};
+/** Points Cheap wants for each price doubling; null takes the cheapest that passes. */
+const CHEAP_POINTS_PER_COST_DOUBLING: Readonly<Record<RoutingTaskClass, number | null>> = {
+  quick_edit: null,
+  readonly: 2,
+  implement: 2,
+  hard: 0.5,
+};
+/** Cheap stops here except for `newest` models, so a coarse score can't buy an old flagship. */
+const CHEAP_MAX_COST_USD = 10;
+/** The adoption board's own line between high and low scores: the median coding total. */
+const BALANCED_MIN_CODING = 47.97;
+/** The share of the best listed model's score a Balanced worker needs. */
+const BALANCED_PASS_SHARE = 0.75;
+/** Balanced pays twice the price only for this many more points. */
+const POINTS_PER_COST_DOUBLING = 5;
+/** Balanced treats value this close as a tie and takes the more used model. */
+const VALUE_TIE_POINTS = 2;
+
+interface TeamBoardPick {
+  readonly board: TeamBoardModel;
+  readonly score: number;
+}
+
+/** The board model an automatic team wants, before choosing which agent runs it. */
+function chooseBoardModel(
+  kind: AutoTeamKind,
+  subtask: TeamSubtask | null,
+  taskClass: RoutingTaskClass,
+  picks: ReadonlyArray<TeamBoardPick>,
+): TeamBoardModel | undefined {
+  const cost = (pick: TeamBoardPick) => pick.board.costUsd ?? Number.POSITIVE_INFINITY;
+  const axis = subtask === null ? undefined : WRITING_AXIS[subtask];
+  // Many sub-scores tie at 100: the broader score decides, then the coding total, then the price.
+  const strongest = (a: TeamBoardPick, b: TeamBoardPick) =>
+    b.score - a.score ||
+    (axis === undefined ? 0 : (b.board.scores[axis] ?? 0) - (a.board.scores[axis] ?? 0)) ||
+    b.board.scores.coding - a.board.scores.coding ||
+    (cost(a) === cost(b) ? 0 : cost(a) - cost(b));
+  if (kind === "best") return [...picks].sort(strongest)[0]?.board;
+  const eligible = picks.filter(({ board }) =>
+    kind === "cheap"
+      ? board.chinese === true &&
+        (board.newest === true || (board.costUsd ?? Number.POSITIVE_INFINITY) <= CHEAP_MAX_COST_USD)
+      : board.marketShare !== undefined &&
+        board.fading !== true &&
+        board.scores.coding >= BALANCED_MIN_CODING,
+  );
+  // A writing sub-score rests on a few items, so one lucky item can't carry a cheap model.
+  const pool = (eligible.length > 0 ? eligible : picks).map(({ board, score }) => ({
+    board,
+    score: axis === undefined ? score : (score + (board.scores[axis] ?? score)) / 2,
+  }));
+  const top = Math.max(...pool.map((pick) => pick.score));
+  const share = kind === "cheap" ? CHEAP_PASS_SHARE[taskClass] : BALANCED_PASS_SHARE;
+  const passing = pool.filter((pick) => pick.score >= top * share);
+  const points =
+    kind === "cheap" ? CHEAP_POINTS_PER_COST_DOUBLING[taskClass] : POINTS_PER_COST_DOUBLING;
+  const value = (pick: TeamBoardPick) =>
+    points === null ? -cost(pick) : pick.score - points * Math.log2(cost(pick));
+  if (kind === "cheap") {
+    return passing.sort((a, b) =>
+      value(a) === value(b) ? strongest(a, b) : value(b) - value(a),
+    )[0]?.board;
+  }
+  const best = Math.max(...passing.map(value));
+  return passing
+    .filter((pick) => value(pick) >= best - VALUE_TIE_POINTS)
+    .sort((a, b) => (b.board.marketShare ?? 0) - (a.board.marketShare ?? 0) || strongest(a, b))[0]
+    ?.board;
+}
+
+const NATIVE_DRIVER: Readonly<Record<ModelVendor, string>> = {
+  anthropic: "claudeAgent",
+  openai: "codex",
+  google: "antigravity",
+  xai: "grok",
+};
+
+function boardModelFor(
+  table: RoutingTable,
+  driver: string,
+  model: ProviderModel,
+): TeamBoardModel | undefined {
+  if (isOpaqueRouter(driver, model.slug) || model.slug === "auto" || model.slug === "default") {
+    return undefined;
+  }
+  const keys = new Set([model.slug, ...(model.aliases ?? [])].map(modelKey));
+  return table.teamBoard?.models.find((entry) => entry.models.some((id) => keys.has(modelKey(id))));
+}
+
+/** How well the agent itself scored at multi-step work; ACP Registry agents go by agent id. */
+function harnessScore(
+  table: RoutingTable,
+  provider: ServerProvider,
+  settings: Pick<ServerSettings, "providerInstances">,
+): number {
+  const config = settings.providerInstances[provider.instanceId]?.config;
+  const agentId =
+    typeof config === "object" && config !== null && "agentId" in config ? config.agentId : null;
+  const key = typeof agentId === "string" ? agentId : provider.driver;
+  return table.teamBoard?.harnesses[key] ?? 0;
+}
+
 /**
- * A worker's model for an automatic team, from every ready instance. Cheap takes the cheapest
- * model at the task's tier or above; Balanced the cheapest one tier higher or above; Best the priciest at
- * the highest tier on offer, since a tier is too coarse to separate e.g. Fable 5.2 from Opus 5.5.
- * Null when no model in the table can run here.
+ * A worker's model for an automatic team, or null. Models on the team board rank by the subtask's
+ * score: Cheap takes a capable Chinese model at a low price, Balanced the best value among models in
+ * use, Best the top score. With none on the board, coarse tiers decide.
  */
 export function chooseTeamWorkerModel(input: {
   readonly kind: AutoTeamKind;
+  readonly subtask?: TeamSubtask | null | undefined;
   readonly table: RoutingTable;
   readonly taskClass: RoutingTaskClass;
   readonly providers: ReadonlyArray<ServerProvider>;
@@ -961,12 +1113,15 @@ export function chooseTeamWorkerModel(input: {
   readonly interactionMode: ProviderInteractionMode;
   readonly runnableInstanceIds?: ReadonlySet<ProviderInstanceId> | undefined;
   readonly now: number;
-}): { readonly selection: ModelSelection; readonly tier: RoutingTier } | null {
+}): { readonly selection: ModelSelection; readonly tier: RoutingTier | null } | null {
+  const subtask = input.subtask ?? null;
   const candidates: Array<{
     readonly provider: ServerProvider;
     readonly slug: string;
-    readonly tier: RoutingTier;
+    readonly tier: RoutingTier | null;
     readonly relativeCost: number;
+    readonly board: TeamBoardModel | undefined;
+    readonly score: number | null;
     readonly own: boolean;
     readonly route: number;
     readonly options: ReadonlyArray<OptionValue>;
@@ -974,8 +1129,11 @@ export function chooseTeamWorkerModel(input: {
   for (const provider of input.providers) {
     for (const model of provider.models) {
       const row = teamRowFor(input.table, provider.driver, model);
-      const tier = row?.tierByClass?.[input.taskClass];
-      if (row === undefined || tier === undefined || row.relativeCost === undefined) continue;
+      const tier = row?.tierByClass?.[input.taskClass] ?? null;
+      const board = boardModelFor(input.table, provider.driver, model);
+      const score = board?.scores[subtask ?? "coding"] ?? null;
+      const tiered = tier !== null && row?.relativeCost !== undefined;
+      if (!tiered && score === null) continue;
       const options = economyOptions(model.capabilities?.optionDescriptors ?? []);
       if (options === null) continue;
       const reason = memberSkipReason({
@@ -985,58 +1143,92 @@ export function chooseTeamWorkerModel(input: {
         runnableInstanceIds: input.runnableInstanceIds,
       });
       if (reason !== null) continue;
+      const vendor = modelVendor(provider.driver, model.slug);
       candidates.push({
         provider,
         slug: model.slug,
         tier,
-        relativeCost: row.relativeCost,
-        own: row.driver === provider.driver,
+        relativeCost: row?.relativeCost ?? Number.POSITIVE_INFINITY,
+        board,
+        score,
+        own:
+          row?.driver === provider.driver ||
+          (vendor !== null && NATIVE_DRIVER[vendor] === provider.driver),
         route: routeRank(model.slug),
         options,
       });
     }
   }
-  if (candidates.length === 0) return null;
-  const rank = (tier: RoutingTier) => TIER_ORDER.indexOf(tier);
-  const desired = rank(DESIRED_TIER[input.taskClass]);
-  const available = [...new Set(candidates.map((candidate) => rank(candidate.tier)))].sort(
-    (a, b) => a - b,
+  const ranked = candidates.map((candidate) => ({
+    candidate,
+    ...quotaRank(candidate.provider, candidate.slug, input.now),
+  }));
+  type Ranked = (typeof ranked)[number];
+  const byAgent = (a: Ranked, b: Ranked) =>
+    Number(b.candidate.own) - Number(a.candidate.own) ||
+    a.candidate.route - b.candidate.route ||
+    a.bucket - b.bucket ||
+    harnessScore(input.table, b.candidate.provider, input.settings) -
+      harnessScore(input.table, a.candidate.provider, input.settings) ||
+    b.score - a.score;
+  const result = (chosen: Ranked["candidate"] | undefined) =>
+    chosen === undefined
+      ? null
+      : {
+          selection: {
+            instanceId: chosen.provider.instanceId,
+            model: chosen.slug,
+            ...(chosen.options.length === 0 ? {} : { options: [...chosen.options] }),
+          },
+          tier: chosen.tier,
+        };
+
+  const board = chooseBoardModel(
+    input.kind,
+    subtask,
+    input.taskClass,
+    candidates.flatMap((candidate) =>
+      candidate.board === undefined || candidate.score === null
+        ? []
+        : [{ board: candidate.board, score: candidate.score }],
+    ),
   );
+  if (board !== undefined) {
+    return result(
+      ranked.filter(({ candidate }) => candidate.board === board).sort(byAgent)[0]?.candidate,
+    );
+  }
+
+  const tiered = ranked.flatMap((entry) =>
+    entry.candidate.tier === null
+      ? []
+      : [{ ...entry, level: TIER_ORDER.indexOf(entry.candidate.tier) }],
+  );
+  const desired = TIER_ORDER.indexOf(DESIRED_TIER[input.taskClass]);
+  const available = [...new Set(tiered.map((entry) => entry.level))].sort((a, b) => a - b);
   const atOrAbove = (floor: number) => available.find((level) => level >= floor);
   const level =
     input.kind === "best"
       ? available.at(-1)
       : input.kind === "balanced"
-        ? (atOrAbove(Math.min(desired + 1, rank("S"))) ?? atOrAbove(desired) ?? available.at(-1))
+        ? (atOrAbove(Math.min(desired + 1, TIER_ORDER.indexOf("S"))) ??
+          atOrAbove(desired) ??
+          available.at(-1))
         : (atOrAbove(desired) ?? available.at(-1));
-  const chosen = candidates
-    // Cheap and Balanced take a cheaper model above their tier over a pricier one at it.
-    .filter((candidate) =>
-      input.kind === "best" ? rank(candidate.tier) === level : rank(candidate.tier) >= (level ?? 0),
-    )
-    .map((candidate) => ({
-      candidate,
-      ...quotaRank(candidate.provider, candidate.slug, input.now),
-    }))
-    .sort(
-      (a, b) =>
-        (input.kind === "best" ? -1 : 1) * (a.candidate.relativeCost - b.candidate.relativeCost) ||
-        rank(b.candidate.tier) - rank(a.candidate.tier) ||
-        Number(b.candidate.own) - Number(a.candidate.own) ||
-        a.candidate.route - b.candidate.route ||
-        a.bucket - b.bucket ||
-        b.score - a.score,
-    )[0]?.candidate;
-  return chosen === undefined
-    ? null
-    : {
-        selection: {
-          instanceId: chosen.provider.instanceId,
-          model: chosen.slug,
-          ...(chosen.options.length === 0 ? {} : { options: [...chosen.options] }),
-        },
-        tier: chosen.tier,
-      };
+  return result(
+    tiered
+      // Cheap and Balanced take a cheaper model above their tier over a pricier one at it.
+      .filter((entry) =>
+        input.kind === "best" ? entry.level === level : entry.level >= (level ?? 0),
+      )
+      .sort(
+        (a, b) =>
+          (input.kind === "best" ? -1 : 1) *
+            (a.candidate.relativeCost - b.candidate.relativeCost) ||
+          b.level - a.level ||
+          byAgent(a, b),
+      )[0]?.candidate,
+  );
 }
 
 /**

@@ -59,11 +59,32 @@ export function autoTeamLeadPrompt(
   const extra = guidance.trim();
   return [
     `<t3_code_agent_team name="${escapeAttribute(team.name)}">`,
-    `You lead the automatic agent team "${team.name}" the user picked for this thread. Plan the work, split it into self-contained tasks, and hand each to a worker with \`delegate_task\`. Leave \`target\` out: T3 picks each worker's model for its task (${team.description.toLowerCase()}). Name a model only when the user asks for one. Independent tasks run in parallel. Check each result, then answer the user yourself; do small steps yourself.`,
+    `You lead the automatic agent team "${team.name}" the user picked for this thread. Plan the work, split it into self-contained tasks, and hand each to a worker with \`delegate_task\`. Leave \`target\` out and set \`subtask\`: T3 picks each worker's model for it (${team.description.toLowerCase()}). Name a model only when the user asks for one. Independent tasks run in parallel. Check each result, then answer the user yourself; do small steps yourself.`,
+    ...SUBTASK_RULES,
+    ...(team.auto === "best" ? BEST_TEAM_RULES : []),
     ...(extra === "" ? [] : ["", "Lead guidance from the user:", extra]),
     "</t3_code_agent_team>",
   ].join("\n");
 }
+
+const SUBTASK_RULES = [
+  "",
+  "`subtask` is what the task mostly tests; split a task that mixes several. Set `role` too:",
+  "- Coding: `backend` services, data, algorithms, tests; `frontend` page behavior and state; `visual` interface design; `reasoning` hard problems, plans, root causes; `maintainability` refactors and code review.",
+  "- Reading: `intent` what someone really wants; `instructions` strict rules and formats; `synthesis` research and merging sources; `accuracy` fact checks and translation.",
+  "- Writing: `expression` polished wording and UI copy; `completeness` full drafts; `style` tone for an audience; `structure` outlines and long documents.",
+];
+
+/** Best team's division of labor; the benchmark boards decide which model takes each subtask. */
+const BEST_TEAM_RULES = [
+  "",
+  "- Do it yourself: edits of a few dozen lines and review fixes. A handoff costs more than a small task.",
+  "- `implementation`, `test`: only self-contained modules whose interface is settled, such as backend, algorithms, data processing or performance. Give the interface, acceptance criteria and the sibling places to change. When it returns, read its diff and run the tests yourself.",
+  "- `design`: for a large plan, an independent plan written in parallel with yours; give it the user's own words and needed context, never your draft or leaning. Also an adviser on UI copy and interaction after your first version, told who the page is for and what it should get done.",
+  "- `research`: multi-step browsing or research across many sources; state the question, scope and what to bring back, with sources.",
+  "- `review`: a final review before you report done. Only findings that would lose data, miscompute money, bypass permissions, send a wrong message or break a release, with how it happens, block; the rest are suggestions. At most two rounds, then let the user decide.",
+  "Merge an independent plan into yours: where they differ, the code and live data decide; check what it marks as a guess. Tell the user what both agreed on, what you took from it, what you rejected and why, and lay out a split you cannot settle for the user to decide.",
+];
 
 function memberLabel(member: ModelSelection): string {
   const options = (member.options ?? []).map((option) => `${option.id}: ${String(option.value)}`);

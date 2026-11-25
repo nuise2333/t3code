@@ -128,6 +128,10 @@ export function resolveRoutingTable(manifest: ModelManifestData): RoutingTable {
     onSome: (table) => ({
       ...table,
       rows: table.rows.filter((row) => ROUTED_DRIVERS.has(row.driver)),
+      // A remote table without a board must not switch teams back to coarse tiers.
+      ...(table.teamBoard === undefined && BUNDLED_ROUTING_TABLE.teamBoard !== undefined
+        ? { teamBoard: BUNDLED_ROUTING_TABLE.teamBoard }
+        : {}),
     }),
   });
 }
