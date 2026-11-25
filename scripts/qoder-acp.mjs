@@ -207,8 +207,14 @@ function queryAccount(type, body) {
     const finish = (settle, value) => {
       clearTimeout(timer);
       daemon.kill("SIGTERM");
+      const force = setTimeout(() => daemon.kill("SIGKILL"), 2_000);
+      daemon.once("exit", () => clearTimeout(force));
       settle(value);
     };
+    // Whatever ends this process, the query's own process goes with it.
+    const killWithParent = () => daemon.kill("SIGKILL");
+    process.once("exit", killWithParent);
+    daemon.once("exit", () => process.off("exit", killWithParent));
     const timer = setTimeout(
       () => finish(reject, new Error("Qoder account query timed out")),
       QUERY_TIMEOUT_MS,
@@ -700,8 +706,10 @@ function serve() {
   log("started", APP);
 }
 
-// `qoder usage` prints the account's credit usage for T3's limits and exits.
-if (process.argv[2] === "usage") {
+// `qoder [args] usage` prints the account's credit usage for T3's limits and exits.
+if (process.argv.at(-1) === "usage") {
+  process.on("SIGTERM", () => process.exit(143));
+  process.on("SIGINT", () => process.exit(130));
   queryAccount("get_usage_info", {}).then(
     ({ usage }) => process.stdout.write(`${JSON.stringify(usage)}\n`),
     (error) => {

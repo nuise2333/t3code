@@ -1,3 +1,4 @@
+import type { AcpRegistrySettings } from "../settings.ts";
 import type { ServerProviderUsageWindow } from "@t3tools/contracts";
 import {
   clampPercent,
@@ -477,6 +478,9 @@ export const readDeepSeekBalance = Effect.fn("readDeepSeekBalance")(function* (
   };
 });
 
+/** How the instance starts its agent; arguments can select the account. */
+type UsageLaunch = Pick<AcpRegistrySettings, "commandPath" | "commandArgs">;
+
 const QoderQuota = Schema.Struct({ total: Schema.Number, used: Schema.Number });
 const QoderUsage = Schema.Struct({
   // Epoch milliseconds; 0 when the plan has no renewal date.
@@ -562,12 +566,12 @@ export function qoderUsageToWindows(usage: typeof QoderUsage.Type) {
 /** Qoder credits, read through the launcher with the account the Qoder runtime is signed in to. */
 export const readQoderUsageLimits = Effect.fn("readQoderUsageLimits")(function* (
   environment: NodeJS.ProcessEnv,
-  commandPath: string,
+  launch: UsageLaunch,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const output = yield* (yield* ChildProcessSpawner.ChildProcessSpawner)
     .string(
-      ChildProcess.make(commandPath, ["usage"], {
+      ChildProcess.make(launch.commandPath, [...launch.commandArgs, "usage"], {
         env: environment,
         stdin: "ignore",
         stderr: "ignore",
@@ -603,7 +607,7 @@ export function acpRegistryUsageReader(
 ):
   | ((
       environment: NodeJS.ProcessEnv,
-      commandPath: string,
+      launch: UsageLaunch,
     ) => Effect.Effect<
       Effect.Success<UsageRead>,
       Effect.Error<UsageRead>,

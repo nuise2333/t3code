@@ -13,6 +13,7 @@ import {
   qoderUsageToWindows,
   readDeepSeekBalance,
   readKimiCodeUsageLimits,
+  readQoderUsageLimits,
   readZCodeUsageLimits,
   tokenPlanUsageToWindows,
   zhipuQuotaToWindows,
@@ -250,6 +251,27 @@ describe("ACP Registry agent limits", () => {
       expect(limits.windows).toEqual([]);
       expect(limits.balances).toEqual([{ currency: "CNY", total: 41.44, granted: 1 }]);
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+it.layer(NodeServices.layer)("readQoderUsageLimits", (it) => {
+  it.effect("asks the launcher with the instance's own arguments", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const launcher = path.join(dir, "qoder");
+      yield* fs.writeFileString(
+        launcher,
+        `#!/bin/sh\n[ "$*" = "--account b usage" ] && echo '{"userQuota":{"total":10,"used":4}}'\n`,
+      );
+      yield* fs.chmod(launcher, 0o755);
+      const limits = yield* readQoderUsageLimits(
+        {},
+        { commandPath: launcher, commandArgs: ["--account", "b"] },
+      );
+      expect(limits.windows).toMatchObject([{ id: "plan", usedPercent: 40 }]);
+    }).pipe(Effect.scoped),
   );
 });
 
