@@ -2371,7 +2371,9 @@ describe("chooseAutoModel", () => {
     const solPick = (kind: "balanced" | "best", models: typeof board.models) =>
       worker(kind, "backend", { providers: codexOnly, models })?.options;
     expect(solPick("best", solAt(50, 60, 70))).toStrictEqual([{ id: "effort", value: "high" }]);
-    expect(solPick("balanced", solAt(55, 60, 90))).toStrictEqual([{ id: "effort", value: "low" }]);
+    expect(solPick("balanced", solAt(58, 60, 61))).toStrictEqual([{ id: "effort", value: "low" }]);
+    // Low's sub-score is no bargain when the level loses that much overall.
+    expect(solPick("balanced", solAt(55, 70, 90))).toStrictEqual([{ id: "effort", value: "high" }]);
     expect(
       worker("best", "backend", {
         providers: codexOnly,
@@ -2430,6 +2432,18 @@ describe("chooseAutoModel", () => {
         ),
       })?.model,
     ).toBe("fake-cn");
+    // A capable model twice as slow must cost a quarter; one of unknown speed counts as the slowest.
+    const timed = (cnMinutes: number, proMinutes: number | undefined, cnCost: number) =>
+      board.models.map((entry) =>
+        entry.models[0] === "fake-cn"
+          ? { ...entry, costUsd: cnCost, minutes: cnMinutes }
+          : entry.models[0] === "fake-cn-pro" && proMinutes !== undefined
+            ? { ...entry, minutes: proMinutes }
+            : entry,
+      );
+    expect(worker("cheap", "backend", { models: timed(200, 100, 2) })).toStrictEqual(cnPro);
+    expect(worker("cheap", "backend", { models: timed(200, 100, 1) })).toStrictEqual(cn);
+    expect(worker("cheap", "backend", { models: timed(200, undefined, 2) })).toStrictEqual(cn);
     // Writing was measured at one level of its own.
     expect(
       worker("best", "synthesis", {

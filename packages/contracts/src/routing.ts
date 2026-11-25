@@ -116,6 +116,8 @@ const TeamScores = Schema.Struct({
 
 const TeamEffortScores = Schema.Struct({
   effort: TrimmedNonEmptyString,
+  /** How long the coding suite took at this level. */
+  minutes: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
   scores: Schema.Struct({
     backend: Schema.Finite,
     frontend: Schema.Finite,
@@ -132,6 +134,8 @@ const TeamBoardModel = Schema.Struct({
   models: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
   /** The level the coding scores and cost come from: the best one below max when there is one. */
   effort: TrimmedNonEmptyString,
+  /** How long the coding suite took at `effort`. */
+  minutes: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
   /** Every level measured on coding, when there is more than one; a worker runs at the one picked. */
   efforts: Schema.optionalKey(Schema.Array(TeamEffortScores)),
   /** The level the writing scores come from, when it is not `effort`. */
