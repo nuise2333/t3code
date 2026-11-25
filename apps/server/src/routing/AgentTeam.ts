@@ -8,7 +8,7 @@ import {
   type RoutingGroup,
   type ThreadAgentTeam,
 } from "@t3tools/contracts";
-import { threadAgentTeamRef } from "@t3tools/shared/agentTeam";
+import { agentTeamRole, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
 
 /** A saved team with its members, or an automatic team whose workers T3 picks per task. */
 export type ActiveTeam =
@@ -86,36 +86,76 @@ const BEST_TEAM_RULES = [
   "Merge an independent plan into yours: where they differ, the code and live data decide; check what it marks as a guess. Tell the user what both agreed on, what you took from it, what you rejected and why, and lay out a split you cannot settle for the user to decide.",
 ];
 
-function memberLabel(member: ModelSelection): string {
+function modelLabel(member: ModelSelection): string {
   const options = (member.options ?? []).map((option) => `${option.id}: ${String(option.value)}`);
-  return `- providerInstanceId \`${member.instanceId}\`, model \`${member.model}\`${options.length === 0 ? "" : ` (${options.join(", ")})`}`;
+  return `providerInstanceId \`${member.instanceId}\`, model \`${member.model}\`${options.length === 0 ? "" : ` (${options.join(", ")})`}`;
 }
+
+function memberLabel(team: RoutingGroup, index: number): string {
+  const member = team.members[index];
+  if (member === undefined) return "";
+  const role = agentTeamRole(team, index);
+  return [
+    "- ",
+    role?.name ? `member \`${role.name}\`, ` : "",
+    modelLabel(member),
+    role?.description ? `: ${role.description}` : "",
+  ].join("");
+}
+
+const memberList = (team: RoutingGroup) =>
+  team.members.map((_member, index) => memberLabel(team, index));
 
 const escapeAttribute = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+
+const hasNames = (team: RoutingGroup) =>
+  team.members.some((_member, index) => Boolean(agentTeamRole(team, index)?.name));
 
 /** Rides on every lead turn, so a compacted conversation never loses it. */
 export function agentTeamLeadPrompt(team: RoutingGroup, sharedGuidance: string): string {
   // A team's own guidance replaces the one every team shares.
   const extra = (team.leadGuidance?.trim() || sharedGuidance).trim();
+  const shared = team.sharedGuidance?.trim() ?? "";
   const limit = team.maxParallel ?? 0;
   return [
     `<t3_code_agent_team name="${escapeAttribute(team.name)}">`,
-    `You lead the agent team "${team.name}" the user picked for this thread. Plan the work, split it into self-contained tasks, and hand each to a member with \`delegate_task\`: set \`target.providerInstanceId\` and \`target.model\` to a member below and leave \`target.options\` out to use its saved settings. Independent tasks run in parallel. Check each result, then answer the user yourself. Delegate only to these members; do small steps yourself. If a member's model is out of quota or inaccessible, T3 automatically routes the task to the same model on another agent, or to the next capability level down across agents.`,
+    `You lead the agent team "${team.name}" the user picked for this thread. Plan the work, split it into self-contained tasks, and hand each to a member with \`delegate_task\`: set \`target.providerInstanceId\` and \`target.model\` to a member below and leave \`target.options\` out to use its saved settings. Independent tasks run in parallel. Check each result, then answer the user yourself. ${hasNames(team) ? "For a named member, set `member` to its name and leave `target` out; T3 adds its own instructions to the task. " : ""}Delegate only to these members; do small steps yourself. If a member's model is out of quota or inaccessible, T3 automatically routes the task to the same model on another agent, or to the next capability level down across agents.`,
     "Members:",
-    ...team.members.map(memberLabel),
+    ...memberList(team),
     ...(limit > 0
       ? [
           `At most ${limit} ${limit === 1 ? "task runs" : "tasks run"} at once; wait for a result before delegating more.`,
         ]
       : []),
+    ...(shared === ""
+      ? []
+      : ["", "Team guidance from the user; T3 adds it to every member's task too:", shared]),
     ...(extra === "" ? [] : ["", "Lead guidance from the user:", extra]),
     "</t3_code_agent_team>",
   ].join("\n");
 }
 
+/** A delegated task with who the member is and the team's guidance after it. */
+export function agentTeamMemberTask(team: RoutingGroup, index: number, task: string): string {
+  const role = agentTeamRole(team, index);
+  const shared = team.sharedGuidance?.trim() ?? "";
+  if (role === null && shared === "") return task;
+  const name = role?.name ?? "";
+  return [
+    task,
+    "",
+    `<t3_code_team_member team="${escapeAttribute(team.name)}"${name === "" ? "" : ` name="${escapeAttribute(name)}"`}>`,
+    `${name === "" ? "You are a member" : `You are "${name}"`} of the agent team "${team.name}". The team's lead gave you the task above; your final message goes back to it.`,
+    ...(role?.description ? ["", "Your role:", role.description] : []),
+    ...(role?.instructions ? ["", "Your instructions from the user:", role.instructions] : []),
+    ...(shared === "" ? [] : ["", "Team guidance from the user:", shared]),
+    "</t3_code_team_member>",
+  ].join("\n");
+}
+
 export type AgentTeamTargetResult =
-  | { readonly ok: true; readonly target: OrchestratorMcpTarget }
+  | { readonly ok: true; readonly index: number; readonly target: OrchestratorMcpTarget }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -125,29 +165,42 @@ export type AgentTeamTargetResult =
 export function agentTeamTarget(
   team: RoutingGroup,
   target: OrchestratorMcpTarget | undefined,
+  memberName?: string,
 ): AgentTeamTargetResult {
-  const members = team.members.map(memberLabel).join("\n");
+  const members = memberList(team).join("\n");
+  const wanted = memberName?.trim().toLowerCase();
   if (target?.environmentId !== undefined) {
     return {
       ok: false,
       message: `This thread leads the agent team "${team.name}", whose members run here. Omit target.environmentId and pick a member:\n${members}`,
     };
   }
-  const candidates = team.members.filter(
-    (member) =>
+  const candidates = [...team.members.entries()].filter(
+    ([index, member]) =>
+      (wanted === undefined || agentTeamRole(team, index)?.name.toLowerCase() === wanted) &&
       (target?.model === undefined || member.model === target.model) &&
       (target?.providerInstanceId === undefined || member.instanceId === target.providerInstanceId),
   );
-  const member = candidates.length === 1 ? candidates[0] : undefined;
-  if (member === undefined) {
+  // Of members on one model, that model alone means the one without a name.
+  const oneModel = candidates.every(
+    ([, member]) =>
+      member.instanceId === candidates[0]?.[1].instanceId &&
+      member.model === candidates[0]?.[1].model,
+  );
+  const unnamed = oneModel ? candidates.filter(([index]) => !agentTeamRole(team, index)?.name) : [];
+  const match =
+    candidates.length === 1 ? candidates[0] : unnamed.length === 1 ? unnamed[0] : undefined;
+  if (match === undefined) {
     return {
       ok: false,
-      message: `This thread leads the agent team "${team.name}" and delegates only to its members. Set target.providerInstanceId and target.model to one of them:\n${members}`,
+      message: `This thread leads the agent team "${team.name}" and delegates only to its members. Set ${hasNames(team) ? "`member` to a name below, or " : ""}target.providerInstanceId and target.model to one of them:\n${members}`,
     };
   }
+  const [index, member] = match;
   const { driverKind: _driverKind, ...rest } = target ?? {};
   return {
     ok: true,
+    index,
     target: {
       ...rest,
       providerInstanceId: member.instanceId,

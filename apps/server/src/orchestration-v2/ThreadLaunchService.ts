@@ -277,6 +277,8 @@ const make = Effect.gen(function* () {
    */
   const launchAssists = Effect.fn("ThreadLaunchService.launchAssists")(function* (
     input: ThreadLaunchInput,
+    /** The launch picked a saved team, which the remembered automatic team must not replace. */
+    launchedTeam: boolean,
   ) {
     const defaults =
       input.createdBy === "user" &&
@@ -303,7 +305,7 @@ const make = Effect.gen(function* () {
     const agentTeam =
       input.agentTeam !== undefined
         ? input.agentTeam
-        : defaultTeam === undefined
+        : defaultTeam === undefined || launchedTeam
           ? null
           : { id: defaultTeam.id, name: defaultTeam.name };
     const now = DateTime.toEpochMillis(yield* DateTime.now);
@@ -1320,7 +1322,7 @@ const make = Effect.gen(function* () {
               })
             : null;
         const modelSelection = routed?.selection ?? input.modelSelection;
-        const assists = yield* launchAssists(input);
+        const assists = yield* launchAssists(input, routed?.decision.group?.team === true);
         if (
           routed?.decision.group !== undefined ||
           modelSelection.instanceId !== input.modelSelection.instanceId

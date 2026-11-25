@@ -234,6 +234,10 @@ While the **Agent team** tab is open, the picker's bottom section switches to
 **Architect & workers**, the team setup: pick the architect (the lead) and its
 workers, set each one's reasoning effort with the gauge button beside its model,
 add lead guidance for this team, and limit how many tasks run at once.
+Give a worker a name to set it apart, and open **Add role & instructions** to say which tasks the
+lead should give it and the instructions it gets with each one. Members on the same model
+need names, such as a builder and a reviewer; one of them may stay unnamed. **Team guidance**
+reaches everyone: the lead, and each worker with its tasks.
 **Save setup** keeps it as **Custom setup** and turns it on; **Save as…** keeps
 it as a named profile you can pick later, and **Use a single agent** turns the
 team off. The lead plans the work, delegates each task to a team model as a
@@ -253,11 +257,13 @@ time the team starts working in a session. **Agents** lists the lead and each
 worker with what it is doing now (planning, working on a task, waiting, idle)
 and how many of its tasks are done; below it, **Handovers** shows every
 handover in order with what the lead asked for and what came back, and a way to
-stop a task that is still working. **Round 2** marks a task a member got after its earlier one
+stop a task that is still working. Pick a worker to see only its handovers, and pick it again to see all.
+**Rerouted** marks a task that ran on another model because the worker's own
+couldn't run. **Round 2** marks a task a member got after its earlier one
 ended, such as a fix sent back after a review.
 
-**Lead guidance** under the teams is added to every lead's instructions from its
-next turn, for example "you only lead; never edit files yourself".
+**Default lead guidance** under the teams is added to the instructions of every lead
+whose team has no lead guidance of its own, from its next turn, for example "you only lead; never edit files yourself".
 
 In a thread that launched through a team, picking another model leaves the
 team; one turned on with the Team button stays on until you turn it off. Deleting

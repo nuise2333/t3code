@@ -1,4 +1,5 @@
 import {
+  type AgentTeamTaskMember,
   CommandId,
   type RunId,
   isProviderAvailable,
@@ -120,6 +121,7 @@ import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingEr
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import { agentTeamRole } from "@t3tools/shared/agentTeam";
 import * as AgentTeam from "../routing/AgentTeam.ts";
 import * as ThreadAssists from "../assist/ThreadAssists.ts";
 import { councilApplies } from "@t3tools/shared/council";
@@ -1357,6 +1359,11 @@ const make = Effect.gen(function* () {
     return { scope: threadScope, parent } as const;
   });
 
+  interface FittedDelegation {
+    readonly input: OrchestratorMcpDelegateTaskInput;
+    readonly memberTask?: (task: string) => string;
+    readonly teamMember?: AgentTeamTaskMember;
+  }
   /**
    * A team lead delegates only to its members, with their saved options. Threads load only while
    * the environment has a team, so other delegations skip the read.
@@ -1364,7 +1371,7 @@ const make = Effect.gen(function* () {
   const fitAgentTeamTarget = Effect.fn("OrchestratorMcpService.fitAgentTeamTarget")(function* (
     scope: McpInvocationScope,
     input: OrchestratorMcpDelegateTaskInput,
-  ) {
+  ): Effect.fn.Return<FittedDelegation, OrchestratorMcpFailure> {
     const settings = yield* serverSettings.getSettings.pipe(
       Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
     );
@@ -1384,7 +1391,13 @@ const make = Effect.gen(function* () {
       modelSelection: parent.thread.modelSelection,
       groups: settings.routingGroups,
     });
-    if (team === null) return input;
+    if (input.member !== undefined && team?.kind !== "saved") {
+      return yield* failure(
+        "invalid_request",
+        "`member` names a member of the agent team this thread leads, and it leads none with named members. Omit member.",
+      );
+    }
+    if (team === null) return { input };
     const teamName = AgentTeam.activeTeamName(team);
     if (input.routingGroupId !== undefined) {
       return yield* failure(
@@ -1395,10 +1408,10 @@ const make = Effect.gen(function* () {
     if (team.kind === "auto") {
       // The lead named a model, as the user may ask; otherwise T3 picks one for the task.
       if (input.target?.environmentId !== undefined) {
-        return input;
+        return { input };
       }
       if (input.target?.model !== undefined) {
-        if (routingPolicy.routeTeamMember === undefined) return input;
+        if (routingPolicy.routeTeamMember === undefined) return { input };
         const fallback = yield* routingPolicy.routeTeamMember({
           target: {
             instanceId: input.target.providerInstanceId,
@@ -1412,15 +1425,17 @@ const make = Effect.gen(function* () {
           projectId: parent.thread.projectId,
           runnableInstanceIds: yield* loadOrchestrationCapableInstanceIds(),
         });
-        if (fallback === null) return input;
+        if (fallback === null) return { input };
         const { driverKind: _driverKind, ...restTarget } = input.target;
         return {
-          ...input,
-          target: {
-            ...restTarget,
-            providerInstanceId: fallback.instanceId,
-            model: fallback.model,
-            ...(fallback.options === undefined ? {} : { options: [...fallback.options] }),
+          input: {
+            ...input,
+            target: {
+              ...restTarget,
+              providerInstanceId: fallback.instanceId,
+              model: fallback.model,
+              ...(fallback.options === undefined ? {} : { options: [...fallback.options] }),
+            },
           },
         };
       }
@@ -1434,20 +1449,39 @@ const make = Effect.gen(function* () {
         projectId: parent.thread.projectId,
         runnableInstanceIds: yield* loadOrchestrationCapableInstanceIds(),
       });
-      return picked === null
-        ? input
+      return {
+        input:
+          picked === null
+            ? input
+            : {
+                ...input,
+                target: {
+                  ...input.target,
+                  providerInstanceId: picked.instanceId,
+                  model: picked.model,
+                  ...(picked.options === undefined ? {} : { options: [...picked.options] }),
+                },
+              },
+      };
+    }
+    const fitted = AgentTeam.agentTeamTarget(team.team, input.target, input.member);
+    if (!fitted.ok) return yield* failure("invalid_request", fitted.message);
+    const member = team.team.members[fitted.index];
+    const memberName = agentTeamRole(team.team, fitted.index)?.name;
+    // A Council reviewer carries its lens instead of a member's role.
+    const asMember =
+      member === undefined || input.councilLens !== undefined
+        ? {}
         : {
-            ...input,
-            target: {
-              ...input.target,
-              providerInstanceId: picked.instanceId,
-              model: picked.model,
-              ...(picked.options === undefined ? {} : { options: [...picked.options] }),
+            memberTask: (task: string) =>
+              AgentTeam.agentTeamMemberTask(team.team, fitted.index, task),
+            teamMember: {
+              teamId: team.team.id,
+              ...(memberName ? { name: memberName } : {}),
+              instanceId: member.instanceId,
+              model: member.model,
             },
           };
-    }
-    const fitted = AgentTeam.agentTeamTarget(team.team, input.target);
-    if (!fitted.ok) return yield* failure("invalid_request", fitted.message);
     const limit = team.team.maxParallel ?? 0;
     if (limit > 0 && input.councilLens === undefined) {
       const { subagents } = yield* threadManagement
@@ -1458,6 +1492,7 @@ const make = Effect.gen(function* () {
           task.threadId === parent.thread.id &&
           task.origin === "app_owned" &&
           task.councilLens === undefined &&
+          task.workflow === undefined &&
           (task.status === "pending" || task.status === "running" || task.status === "waiting"),
       ).length;
       if (out >= limit) {
@@ -1482,17 +1517,20 @@ const make = Effect.gen(function* () {
       });
       if (fallback !== null) {
         return {
-          ...input,
-          target: {
-            ...fitted.target,
-            providerInstanceId: fallback.instanceId,
-            model: fallback.model,
-            ...(fallback.options === undefined ? {} : { options: [...fallback.options] }),
+          ...asMember,
+          input: {
+            ...input,
+            target: {
+              ...fitted.target,
+              providerInstanceId: fallback.instanceId,
+              model: fallback.model,
+              ...(fallback.options === undefined ? {} : { options: [...fallback.options] }),
+            },
           },
         };
       }
     }
-    return { ...input, target: fitted.target };
+    return { ...asMember, input: { ...input, target: fitted.target } };
   });
 
   const resolveProjectTarget = (
@@ -2810,13 +2848,19 @@ const make = Effect.gen(function* () {
               agentTeam: {
                 name: AgentTeam.activeTeamName(agentTeam),
                 // An automatic team's workers are picked per task, so it lists none.
-                members: (agentTeam.kind === "saved" ? agentTeam.team.members : []).map(
-                  (member) => ({
-                    providerInstanceId: member.instanceId,
-                    model: member.model,
-                    ...(member.options === undefined ? {} : { options: [...member.options] }),
-                  }),
-                ),
+                members:
+                  agentTeam.kind === "saved"
+                    ? agentTeam.team.members.map((member, index) => {
+                        const role = agentTeamRole(agentTeam.team, index);
+                        return {
+                          ...(role?.name ? { name: role.name } : {}),
+                          ...(role?.description ? { description: role.description } : {}),
+                          providerInstanceId: member.instanceId,
+                          model: member.model,
+                          ...(member.options === undefined ? {} : { options: [...member.options] }),
+                        };
+                      })
+                    : [],
               },
             }),
         features: {
@@ -2833,7 +2877,7 @@ const make = Effect.gen(function* () {
     }),
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(
       function* (callerScope, requested) {
-        const input = yield* fitAgentTeamTarget(callerScope, requested);
+        const { input, memberTask, teamMember } = yield* fitAgentTeamTarget(callerScope, requested);
         const groupId = input.routingGroupId;
         const explicitTarget =
           input.target?.providerInstanceId !== undefined ||
@@ -3003,7 +3047,7 @@ const make = Effect.gen(function* () {
             parentNodeId: parentRun.rootNodeId,
             task:
               input.councilLens === undefined
-                ? taskPrompt(input)
+                ? (memberTask?.(taskPrompt(input)) ?? taskPrompt(input))
                 : ThreadAssists.councilReviewerTask(input.councilLens, taskPrompt(input)),
             ...(input.title !== undefined
               ? { title: input.title }
@@ -3011,6 +3055,7 @@ const make = Effect.gen(function* () {
                 ? { title: `Council: ${input.councilLens}` }
                 : {}),
             ...(input.councilLens === undefined ? {} : { councilLens: input.councilLens }),
+            ...(teamMember === undefined ? {} : { teamMember }),
             modelSelection,
             runtimeMode,
             interactionMode,

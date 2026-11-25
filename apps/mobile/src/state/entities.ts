@@ -301,6 +301,17 @@ export function useThreadRouting(ref: ScopedThreadRef | null) {
   );
 }
 
+const selectThreadAgentTeam = (thread: EnvironmentThread | null) =>
+  thread?.projection.thread.agentTeam;
+
+/** The team turned on or off after launch; undefined when the user never did either. */
+export function useThreadAgentTeam(ref: ScopedThreadRef | null) {
+  return useAtomValue(
+    ref === null ? EMPTY_THREAD_ATOM : environmentThreadDetails.threadAtom(ref),
+    selectThreadAgentTeam,
+  );
+}
+
 export function useThreadReportedModelSelection(ref: ScopedThreadRef | null) {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_ATOM : environmentThreadDetails.threadAtom(ref),

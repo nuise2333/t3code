@@ -26,6 +26,7 @@ import {
   type ServerConfig as T3ServerConfig,
   type UsageLimitsReport,
   type RouteDecision,
+  type ThreadAgentTeam,
 } from "@t3tools/contracts";
 import {
   collectProviderUsageLimits,
@@ -222,6 +223,7 @@ export interface ThreadComposerProps {
   /** A new thread's draft launches through this routing group. */
   readonly draftRoutingGroupName?: string | null;
   readonly threadRouting?: RouteDecision | null;
+  readonly threadAgentTeam?: ThreadAgentTeam | null | undefined;
   readonly canOperateThread: boolean;
   readonly placeholder: string;
   readonly contentMaxWidth?: number;
@@ -769,6 +771,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     ? null
     : routedGroupDisplay({
         routing: props.threadRouting,
+        agentTeam: props.threadAgentTeam,
         selection: currentModelSelection,
         providers: props.serverConfig?.providers ?? [],
       });
