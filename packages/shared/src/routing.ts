@@ -1029,6 +1029,8 @@ function teamBoardPicks(
   board: TeamBoardModel,
   subtask: TeamSubtask | null,
   offered: (effort: string) => boolean,
+  /** The level a worker asked for this one would run at; undefined when no agent sets it. */
+  runsAt: (effort: string) => string | undefined,
   cap: string,
 ): ReadonlyArray<TeamBoardPick> {
   const measured = board.efforts ?? [];
@@ -1038,7 +1040,8 @@ function teamBoardPicks(
   if (subtask !== null && subtask in WRITING_AXIS) {
     const score = board.scores[subtask];
     const effort = board.writingEffort ?? board.effort;
-    const at = measured.find((row) => row.effort === effort);
+    const level = runsAt(effort);
+    const at = measured.find((row) => row.effort === level);
     return score === undefined
       ? []
       : [
@@ -1047,7 +1050,7 @@ function teamBoardPicks(
             effort,
             score,
             coding: board.scores.coding,
-            costUsd: at?.costUsd ?? (effort === board.effort ? board.costUsd : unknownPrice),
+            costUsd: at?.costUsd ?? (level === board.effort ? board.costUsd : unknownPrice),
           },
         ];
   }
@@ -1148,6 +1151,14 @@ function nearestLevel(
       Math.abs(effortLevel(a) - target) - Math.abs(effortLevel(b) - target) ||
       effortLevel(a) - effortLevel(b),
   )[0];
+}
+
+/** How far from the wanted level, within the cap, an agent would run; none set or over it is last. */
+function levelGap(reasoning: ReasoningLevels | undefined, wanted: string, cap: string): number {
+  if (effortLevel(wanted) < 0) return 0;
+  const level = reasoning && nearestLevel(reasoning.levels, wanted, cap);
+  if (level === undefined || effortLevel(level) > effortLevel(cap)) return EFFORT_LEVELS.length;
+  return Math.abs(effortLevel(level) - Math.min(effortLevel(wanted), effortLevel(cap)));
 }
 
 const NATIVE_DRIVER: Readonly<Record<ModelVendor, string>> = {
@@ -1313,16 +1324,24 @@ export function chooseTeamWorkerModel(input: {
         board,
         subtask,
         (effort) => own.some((candidate) => candidate.reasoning?.levels.includes(effort)),
+        (effort) => {
+          const best = [...own].sort(
+            (a, b) => levelGap(a.reasoning, effort, cap) - levelGap(b.reasoning, effort, cap),
+          )[0]?.reasoning;
+          return best && nearestLevel(best.levels, effort, cap);
+        },
         cap,
       ),
     ),
   );
   if (pick !== undefined) {
-    const offers = (entry: Ranked) =>
-      Number(entry.candidate.reasoning?.levels.includes(pick.effort) === true);
     const chosen = ranked
       .filter(({ candidate }) => candidate.board === pick.board)
-      .sort((a, b) => offers(b) - offers(a) || byAgent(a, b))[0]?.candidate;
+      .sort(
+        (a, b) =>
+          levelGap(a.candidate.reasoning, pick.effort, cap) -
+            levelGap(b.candidate.reasoning, pick.effort, cap) || byAgent(a, b),
+      )[0]?.candidate;
     const picked = result(chosen);
     const level = chosen?.reasoning && nearestLevel(chosen.reasoning.levels, pick.effort, cap);
     if (picked === null || !chosen?.reasoning || level === undefined) return picked;

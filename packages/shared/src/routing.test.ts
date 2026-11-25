@@ -2288,7 +2288,7 @@ describe("chooseAutoModel", () => {
       kind: "cheap" | "balanced" | "best",
       subtask: TeamSubtask | null,
       options: {
-        readonly taskClass?: "implement" | "hard";
+        readonly taskClass?: "implement" | "hard" | "quick_edit";
         readonly providers?: ReadonlyArray<ServerProvider>;
         readonly models?: typeof board.models;
       } = {},
@@ -2389,6 +2389,47 @@ describe("chooseAutoModel", () => {
     expect(
       worker("cheap", "backend", { providers: fixedLevel, models: pricier, taskClass: "hard" }),
     ).toStrictEqual({ instanceId: opencodeId, model: "fake-cn" });
+    // Of two agents, the one that can run within Best's cap does.
+    const withLevels = (id: string, ...levels: ReadonlyArray<string>) =>
+      provider(ProviderInstanceId.make(id), "opencode", ["model-opus"], {}, [
+        {
+          id: "effort",
+          label: "Effort",
+          type: "select",
+          options: levels.map((level) => ({ id: level, label: level })),
+        },
+      ]);
+    expect(
+      worker("best", "visual", {
+        taskClass: "quick_edit",
+        providers: [withLevels("over", "max"), withLevels("within", "high")],
+        models: board.models.map((entry) => ({ ...entry, effort: "max" })),
+      }),
+    ).toStrictEqual(at(ProviderInstanceId.make("within"), "model-opus"));
+    // Writing counts the price of the level it runs at, not the one it was measured at.
+    const cnHigh = provider(ProviderInstanceId.make("cn"), "opencode", ["fake-cn"], {}, [
+      { id: "effort", label: "Effort", type: "select", options: [{ id: "high", label: "High" }] },
+    ]);
+    const cnProOnly = provider(opencodeId, "opencode", ["fake-cn-pro"]);
+    expect(
+      worker("cheap", "synthesis", {
+        providers: [cnHigh, cnProOnly],
+        models: board.models.map((entry) =>
+          entry.models[0] === "fake-cn"
+            ? {
+                ...entry,
+                scores: scores(60, 90),
+                costUsd: 4,
+                writingEffort: "max",
+                efforts: [
+                  { effort: "high", scores: scores(60), costUsd: 4 },
+                  { effort: "max", scores: scores(60), costUsd: 6 },
+                ],
+              }
+            : entry,
+        ),
+      })?.model,
+    ).toBe("fake-cn");
     // Writing was measured at one level of its own.
     expect(
       worker("best", "synthesis", {
