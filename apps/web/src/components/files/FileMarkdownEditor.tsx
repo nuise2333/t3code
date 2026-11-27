@@ -4,7 +4,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
-import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
@@ -25,7 +25,12 @@ import { useAtomCommand } from "~/state/use-atom-command";
 
 import { contentsOnClose, reconcileIncoming } from "./fileMarkdownPublish";
 import { FileMarkdownPreview, markdownFileBaseDir } from "./FileMarkdownPreview";
-import { changeFileSaveSession, type FileSaveTarget } from "./fileSaveSessions";
+import {
+  changeFileSaveSession,
+  type FileSaveConflict,
+  type FileSaveTarget,
+  subscribeFileSaveConflict,
+} from "./fileSaveSessions";
 import { setProjectFileQueryData } from "./projectFilesQueryState";
 
 // Keystrokes are published after a pause, and at once on blur, page hide and unmount.
@@ -131,6 +136,8 @@ export function FileMarkdownEditor(props: {
     dirty: false,
     conflicted: false,
     conflict: null as { readonly base: string; readonly disk: string } | null,
+    /** A save the disk refused is waiting on the conflict bar, which reads the session's draft. */
+    saveConflict: false,
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
   });
   const saveTarget: FileSaveTarget = { environmentId, cwd, relativePath };
@@ -156,8 +163,20 @@ export function FileMarkdownEditor(props: {
     current.latest = next;
     current.dirty = true;
     clearTimeout(current.timer);
-    current.timer = setTimeout(publish, PUBLISH_DELAY_MS);
+    // The conflict bar writes the session's draft, so every keystroke reaches it at once.
+    if (current.saveConflict) publish();
+    else current.timer = setTimeout(publish, PUBLISH_DELAY_MS);
   };
+
+  const onSaveConflict = useEffectEvent((conflict: FileSaveConflict | null) => {
+    status.current.saveConflict = conflict !== null;
+    if (conflict) publish();
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the save session reports refused writes from outside React
+  useEffect(
+    () => subscribeFileSaveConflict({ environmentId, cwd, relativePath }, onSaveConflict),
+    [environmentId, cwd, relativePath],
+  );
 
   const settle = () => {
     setConflict(null);
