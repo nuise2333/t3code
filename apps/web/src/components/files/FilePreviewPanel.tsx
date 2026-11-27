@@ -46,6 +46,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import {
+  AppWindowIcon,
   BookOpenIcon,
   FileDownIcon,
   FolderTree,
@@ -69,6 +70,7 @@ import {
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
+import { useFileContextMenu } from "~/fileContextMenu";
 import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
 import { useRemoteOpenState } from "~/remoteOpen";
@@ -1178,6 +1180,7 @@ export default function FilePreviewPanel({
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const hostEnvironmentId = useAtomValue(hostEnvironmentIdAtom);
   const remoteOpenState = useRemoteOpenState(environmentId);
+  const defaultAppOpener = useFileContextMenu(environmentId);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const previewAvailable = usePreviewAvailable(environmentId);
@@ -1626,6 +1629,20 @@ export default function FilePreviewPanel({
               compact
               revealFileManager={revealsInFileManager}
             />
+          ) : null}
+          {absolutePath && file.isFile && defaultAppOpener.capabilities.canOpenDefault ? (
+            <FileSurfaceAction
+              label="Open in default app"
+              onPress={() =>
+                void defaultAppOpener.activate("open", {
+                  environmentId,
+                  filePath: absolutePath,
+                  workspaceRoot: undefined,
+                })
+              }
+            >
+              <AppWindowIcon className="size-3.5" />
+            </FileSurfaceAction>
           ) : null}
           {canToggleRendered && renderedMode ? (
             <FileSurfaceAction

@@ -143,7 +143,7 @@ export const cacheName = (filePath: string, file: OpenMediaFile) =>
 
 const SOFFICE_TIMEOUT_MS = 60_000;
 // Office files larger than this are not converted; LibreOffice's output can outgrow its input.
-export const OFFICE_RENDER_MAX_SOURCE_BYTES = 100 * 1024 * 1024;
+const OFFICE_RENDER_MAX_SOURCE_BYTES = 100 * 1024 * 1024;
 
 /**
  * Runs one conversion. On Linux and macOS `soffice` is a launcher that starts `soffice.bin`, so
