@@ -3,11 +3,15 @@ import {
   AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH,
   AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH,
   type AgentTeamRole,
+  type AutoTeamKind,
+  autoTeamKind,
   MAX_ROUTING_GROUP_MEMBERS,
   MAX_ROUTING_GROUPS,
   type ModelSelection,
   type RoutingGroup,
 } from "@t3tools/contracts";
+import type { AgentTeamLeads } from "@t3tools/contracts/settings";
+import { useGT, useMessages } from "gt-react";
 import { InfoIcon, MoreHorizontalIcon, PlusIcon, XIcon } from "lucide-react";
 import { Fragment, memo, useId, useState } from "react";
 
@@ -47,12 +51,15 @@ import {
   namedTeamFlows,
   type TeamRowFlow,
   teamRowFlows,
+  useTeamMembersProblemText,
 } from "./AgentTeamRoleFields";
+import { AUTO_TEAM_TEXT, teamDisplayName } from "./agentTeamPick.logic";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { TraitsPicker } from "./TraitsPicker";
 
 /** The setup kept when no named profile is picked; it is a team like any other. */
 const CUSTOM_TEAM_ID = "custom-setup";
+// Saved with the team, so it stays English as data; only its label follows the UI language.
 const CUSTOM_TEAM_NAME = "Custom setup";
 
 interface SetupWorker {
@@ -174,6 +181,7 @@ function ModelSelect(props: {
   readonly entries: ReadonlyArray<ProviderInstanceEntry>;
   readonly onChange: (selection: ModelSelection) => void;
 }) {
+  const gt = useGT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const options = props.entries.filter((entry) => entry.enabled && entry.models.length > 0);
@@ -237,17 +245,17 @@ function ModelSelect(props: {
             <span className="truncate">{modelName}</span>
           </span>
         ) : (
-          <span className="text-muted-foreground">Choose a model</span>
+          <span className="text-muted-foreground">{gt("Choose a model")}</span>
         )}
       </ComboboxTrigger>
       <ComboboxPopup align="start" className="w-72">
         <ComboboxSearchInput
-          aria-label="Search models"
-          placeholder="Search models..."
+          aria-label={gt("Search models")}
+          placeholder={gt("Search models...")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <ComboboxEmpty>No models found.</ComboboxEmpty>
+        <ComboboxEmpty>{gt("No models found.")}</ComboboxEmpty>
         <ComboboxList className="max-h-64">
           {visible.map((choice, index) => {
             const groupStart =
@@ -292,8 +300,9 @@ function EntryIcon(props: { readonly entry: ProviderInstanceEntry }) {
 
 /**
  * Architect & workers, beside the model picker's Agent team tab: the architect leads this thread
- * and delegates to the workers; Save setup keeps it as a team and turns it on here. Keyed by the
- * team in use, so it starts from that team each time.
+ * and delegates to the workers; Save setup keeps it as a team and turns it on here. An automatic
+ * team picks its own workers, so it shows only its architect. Keyed by the team in use, so it
+ * starts from that team each time.
  */
 export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   readonly teams: ReadonlyArray<RoutingGroup>;
@@ -310,13 +319,19 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   readonly flowsSupported: boolean;
   /** Every saved team and routing group, which share one limit. */
   readonly groupIds: ReadonlyArray<string>;
-  /** After Apply or Use a single agent, such as closing the picker. */
+  /** After Apply, such as closing the picker. */
   readonly onDone: () => void;
   readonly disabledReason?: string | null;
   readonly onSaveTeams: (teams: ReadonlyArray<RoutingGroup>) => void;
   readonly onApply: (team: RoutingGroup) => void;
-  readonly onDisable: () => void;
+  /** The architect set for each automatic team; one without keeps the thread's model. */
+  readonly autoLeads: AgentTeamLeads | undefined;
+  readonly onAutoLeadChange: (kind: AutoTeamKind, lead: ModelSelection) => void;
 }) {
+  const gt = useGT();
+  const m = useMessages();
+  const problemText = useTeamMembersProblemText();
+  const teamLabel = (name: string) => (name === CUSTOM_TEAM_NAME ? gt("Custom setup") : name);
   const active = props.active;
   const initialProfile =
     active && props.teams.some((team) => team.id === active.id) ? active.id : CUSTOM_TEAM_ID;
@@ -392,17 +407,21 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
   });
   const problem =
     setup.architect === null
-      ? "Choose an architect."
+      ? gt("Choose an architect.")
       : workers.length === 0
-        ? "Add a worker."
+        ? gt("Add a worker.")
         : members.length > MAX_ROUTING_GROUP_MEMBERS
-          ? `A team takes at most ${MAX_ROUTING_GROUP_MEMBERS} models.`
-          : agentTeamMembersProblem({
-              members: members.map((member) => member.selection),
-              ...(rolesSupported ? { memberRoles: members.map((member) => member.role) } : {}),
-            });
+          ? gt("A team takes at most {count} models.", { count: MAX_ROUTING_GROUP_MEMBERS })
+          : problemText(
+              agentTeamMembersProblem({
+                members: members.map((member) => member.selection),
+                ...(rolesSupported ? { memberRoles: members.map((member) => member.role) } : {}),
+              }),
+            );
   const full = props.groupIds.length >= MAX_ROUTING_GROUPS;
-  const fullReason = `You can save at most ${MAX_ROUTING_GROUPS} teams and routing groups.`;
+  const fullReason = gt("You can save at most {count} teams and routing groups.", {
+    count: MAX_ROUTING_GROUPS,
+  });
   // Custom setup is saved the first time it is applied, so it needs a free place then.
   const saveProblem = problem ?? (profile === undefined && full ? fullReason : null);
 
@@ -440,20 +459,68 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
     load(CUSTOM_TEAM_ID);
   };
 
+  // Matches the effort column's header, so one rule runs across the top of the popup.
+  const header = (
+    <div className="shrink-0 px-3 pt-2.5">
+      <div className="flex h-8.25 -translate-y-px items-center gap-2 border-b border-border/70 pb-1.5 text-sm">
+        <h2 className="text-muted-foreground">{gt("Architect & workers")}</h2>
+        <span className="ms-auto min-w-0 truncate text-muted-foreground text-xs">
+          {active ? teamLabel(teamDisplayName(active, m)) : gt("No team")}
+        </span>
+      </div>
+    </div>
+  );
+  const autoKind = active ? autoTeamKind(active.id) : null;
+  if (autoKind !== null) {
+    return (
+      <>
+        {header}
+        <div
+          data-composer-team-setup
+          role="group"
+          aria-label={gt("Architect & workers")}
+          className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain px-3 pt-2.5 pb-3"
+        >
+          <section className="grid gap-2">
+            <div className="flex items-baseline justify-between">
+              <span className="font-medium text-sm">{gt("Architect")}</span>
+              <span className="text-muted-foreground text-xs">{gt("Plans & reviews")}</span>
+            </div>
+            <ModelField
+              label={gt("Architect model")}
+              value={props.autoLeads?.[autoKind] ?? null}
+              entries={props.entries}
+              onChange={(lead) => props.onAutoLeadChange(autoKind, lead)}
+            />
+            <p className="text-muted-foreground text-xs">
+              {gt(
+                "Threads that work as this team run on this model. With none chosen, a thread keeps its own.",
+              )}
+            </p>
+          </section>
+          <section className="grid gap-1">
+            <span className="font-medium text-sm">{gt("Workers")}</span>
+            <p className="grid gap-1 text-muted-foreground text-xs">
+              <span>{m(AUTO_TEAM_TEXT[autoKind].description)}</span>
+              <span>{gt("The team picks a worker for each task.")}</span>
+            </p>
+          </section>
+          {props.disabledReason ? (
+            <p role="alert" className="text-destructive-foreground text-xs">
+              {props.disabledReason}
+            </p>
+          ) : null}
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
-      {/* Matches the effort column's header, so one rule runs across the top of the popup. */}
-      <div className="shrink-0 px-3 pt-2.5">
-        <div className="flex h-8.25 -translate-y-px items-center gap-2 border-b border-border/70 pb-1.5 text-sm">
-          <h2 className="text-muted-foreground">Architect &amp; workers</h2>
-          <span className="ms-auto min-w-0 truncate text-muted-foreground text-xs">
-            {active?.name ?? "No team"}
-          </span>
-        </div>
-      </div>
+      {header}
       <form
         data-composer-team-setup
-        aria-label="Architect & workers"
+        aria-label={gt("Architect & workers")}
         className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain px-3 pt-2.5 pb-3"
         onSubmit={(event) => {
           event.preventDefault();
@@ -461,7 +528,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
         }}
       >
         <section className="grid gap-1.5">
-          <span className="text-muted-foreground text-xs">Team profile</span>
+          <span className="text-muted-foreground text-xs">{gt("Team profile")}</span>
           <div className="flex items-center gap-1.5">
             <Select
               value={profileId}
@@ -469,11 +536,11 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 if (typeof next === "string") load(next);
               }}
             >
-              <SelectTrigger aria-label="Team profile" className="min-w-0 flex-1">
-                <SelectValue>{profile?.name ?? CUSTOM_TEAM_NAME}</SelectValue>
+              <SelectTrigger aria-label={gt("Team profile")} className="min-w-0 flex-1">
+                <SelectValue>{teamLabel(profile?.name ?? CUSTOM_TEAM_NAME)}</SelectValue>
               </SelectTrigger>
               <SelectPopup>
-                <SelectItem value={CUSTOM_TEAM_ID}>{CUSTOM_TEAM_NAME}</SelectItem>
+                <SelectItem value={CUSTOM_TEAM_ID}>{gt("Custom setup")}</SelectItem>
                 {named.map((team) => (
                   <SelectItem key={team.id} value={team.id}>
                     {team.name}
@@ -488,7 +555,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                     size="icon-sm"
                     variant="ghost"
                     type="button"
-                    aria-label="Manage team profile"
+                    aria-label={gt("Manage team profile")}
                     disabled={!profile || profile.id === CUSTOM_TEAM_ID}
                   />
                 }
@@ -497,10 +564,10 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
               </MenuTrigger>
               <MenuPopup align="end">
                 <MenuItem onClick={() => setNaming({ kind: "rename", value: profile?.name ?? "" })}>
-                  Rename profile
+                  {gt("Rename profile")}
                 </MenuItem>
                 <MenuItem variant="destructive" onClick={remove}>
-                  Delete profile
+                  {gt("Delete profile")}
                 </MenuItem>
               </MenuPopup>
             </Menu>
@@ -515,14 +582,14 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
               onClick={() => setNaming({ kind: "new", value: "" })}
             >
               <PlusIcon />
-              Save as…
+              {gt("Save as…")}
             </Button>
           ) : (
             <div className="flex items-center gap-1.5">
               <Input
                 autoFocus
-                aria-label="Profile name"
-                placeholder="Profile name"
+                aria-label={gt("Profile name")}
+                placeholder={gt("Profile name")}
                 maxLength={64}
                 value={naming.value}
                 onChange={(event) => setNaming({ ...naming, value: event.target.value })}
@@ -539,7 +606,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 }}
               />
               <Button type="button" size="sm" variant="ghost" onClick={() => setNaming(null)}>
-                Cancel
+                {gt("Cancel")}
               </Button>
               <Button
                 type="button"
@@ -547,7 +614,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 disabled={!naming.value.trim() || (naming.kind === "new" && problem !== null)}
                 onClick={submitName}
               >
-                {naming.kind === "rename" ? "Rename" : "Save profile"}
+                {naming.kind === "rename" ? gt("Rename") : gt("Save profile")}
               </Button>
             </div>
           )}
@@ -555,11 +622,11 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
 
         <section className="grid gap-2">
           <div className="flex items-baseline justify-between">
-            <span className="font-medium text-sm">Architect</span>
-            <span className="text-muted-foreground text-xs">Plans &amp; reviews</span>
+            <span className="font-medium text-sm">{gt("Architect")}</span>
+            <span className="text-muted-foreground text-xs">{gt("Plans & reviews")}</span>
           </div>
           <ModelField
-            label="Architect model"
+            label={gt("Architect model")}
             value={setup.architect}
             entries={props.entries}
             onChange={(architect) =>
@@ -577,27 +644,29 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
           {rolesSupported && profile && agentTeamRole(profile, 0) ? (
             <>
               <AgentTeamRoleName
-                label="Architect"
-                placeholder="Name as a worker, when another model leads"
+                label={gt("Architect")}
+                placeholder={gt("Name as a worker, when another model leads")}
                 role={setup.architectRole}
                 onChange={(architectRole) => setSetup((current) => ({ ...current, architectRole }))}
               />
               <AgentTeamRoleDetails
-                label="Architect"
+                label={gt("Architect")}
                 role={setup.architectRole}
                 onChange={(architectRole) => setSetup((current) => ({ ...current, architectRole }))}
               >
-                {handsTo("Architect", { key: ARCHITECT_KEY, role: setup.architectRole })}
+                {handsTo(gt("Architect"), { key: ARCHITECT_KEY, role: setup.architectRole })}
               </AgentTeamRoleDetails>
             </>
           ) : null}
           <div className="flex items-center gap-1.5">
             <label htmlFor={guidanceId} className="text-muted-foreground text-xs">
-              Lead guidance
+              {gt("Lead guidance")}
             </label>
             <InfoMark
-              label="About lead guidance"
-              text="Extra instructions for the architect only, sent with the built-in team rules. They replace the default lead guidance in Settings → Providers → Agent teams; leave it empty to use that."
+              label={gt("About lead guidance")}
+              text={gt(
+                "Extra instructions for the architect only, sent with the built-in team rules. They replace the default lead guidance in Settings → Providers → Agent teams; leave it empty to use that.",
+              )}
             />
           </div>
           <Textarea
@@ -606,7 +675,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
             maxLength={AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH}
             placeholder={
               props.sharedGuidance.trim() ||
-              "Extra instructions for the lead, on top of the built-in team rules."
+              gt("Extra instructions for the lead, on top of the built-in team rules.")
             }
             value={setup.guidance}
             onChange={(event) =>
@@ -621,25 +690,25 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
             disabled={setup.guidance === ""}
             onClick={() => setSetup((current) => ({ ...current, guidance: "" }))}
           >
-            Reset to default
+            {gt("Reset to default")}
           </Button>
         </section>
 
         <section className="grid gap-2">
           <div className="flex items-center justify-between">
-            <span className="font-medium text-sm">Workers</span>
+            <span className="font-medium text-sm">{gt("Workers")}</span>
             <Button
               type="button"
               size="xs"
               variant="ghost"
-              aria-label="Add worker"
+              aria-label={gt("Add worker")}
               disabled={setup.workers.length + 1 >= MAX_ROUTING_GROUP_MEMBERS}
               onClick={() =>
                 setSetup((current) => ({ ...current, workers: [...current.workers, newWorker()] }))
               }
             >
               <PlusIcon />
-              Add
+              {gt("Add")}
             </Button>
           </div>
           {setup.workers.map((worker, index) => (
@@ -649,19 +718,19 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 <div className="min-w-0 flex-1">
                   {rolesSupported ? (
                     <AgentTeamRoleName
-                      label={`Worker ${index + 1}`}
+                      label={gt("Worker {number}", { number: index + 1 })}
                       role={worker.role}
                       onChange={(role) => setWorker(index, { role })}
                     />
                   ) : (
-                    `Worker ${index + 1}`
+                    gt("Worker {number}", { number: index + 1 })
                   )}
                 </div>
                 <Button
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label={`Remove worker ${index + 1}`}
+                  aria-label={gt("Remove worker {number}", { number: index + 1 })}
                   onClick={() =>
                     setSetup((current) => ({
                       ...current,
@@ -673,18 +742,18 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 </Button>
               </div>
               <ModelField
-                label={`Worker ${index + 1} model`}
+                label={gt("Worker {number} model", { number: index + 1 })}
                 value={worker.selection}
                 entries={props.entries}
                 onChange={(selection) => setWorker(index, { selection })}
               />
               {rolesSupported ? (
                 <AgentTeamRoleDetails
-                  label={`Worker ${index + 1}`}
+                  label={gt("Worker {number}", { number: index + 1 })}
                   role={worker.role}
                   onChange={(role) => setWorker(index, { role })}
                 >
-                  {handsTo(`Worker ${index + 1}`, worker)}
+                  {handsTo(gt("Worker {number}", { number: index + 1 }), worker)}
                 </AgentTeamRoleDetails>
               ) : null}
             </div>
@@ -695,18 +764,20 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
           <section className="grid gap-1.5">
             <div className="flex items-center gap-1.5">
               <label htmlFor={`${guidanceId}-team`} className="font-medium text-sm">
-                Team guidance, for everyone
+                {gt("Team guidance, for everyone")}
               </label>
               <InfoMark
-                label="About team guidance"
-                text="Rules for everyone: the architect gets them each turn, and every worker with each task."
+                label={gt("About team guidance")}
+                text={gt(
+                  "Rules for everyone: the architect gets them each turn, and every worker with each task.",
+                )}
               />
             </div>
             <Textarea
               id={`${guidanceId}-team`}
               rows={2}
               maxLength={AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH}
-              placeholder="Never push to main. Run the tests before you finish."
+              placeholder={gt("Never push to main. Run the tests before you finish.")}
               value={setup.sharedGuidance}
               onChange={(event) =>
                 setSetup((current) => ({ ...current, sharedGuidance: event.target.value }))
@@ -718,11 +789,13 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
         <section className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <label htmlFor={parallelId} className="text-sm">
-              At once
+              {gt("At once")}
             </label>
             <InfoMark
-              label="How parallel workers run"
-              text="Most tasks the architect keeps out at once. Independent work runs in parallel; a task over the limit waits for a result."
+              label={gt("How parallel workers run")}
+              text={gt(
+                "Most tasks the architect keeps out at once. Independent work runs in parallel; a task over the limit waits for a result.",
+              )}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -733,7 +806,7 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
                 min={1}
                 max={32}
                 className="w-16"
-                aria-label="Workers at once"
+                aria-label={gt("Workers at once")}
                 value={String(setup.parallel)}
                 onChange={(event) =>
                   setSetup((current) => ({
@@ -746,20 +819,20 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={setup.unlimited}
-                aria-label="Unlimited workers"
+                aria-label={gt("Unlimited workers")}
                 onCheckedChange={(checked) =>
                   setSetup((current) => ({ ...current, unlimited: checked === true }))
                 }
               />
-              Unlimited
+              {gt("Unlimited")}
             </label>
           </div>
         </section>
 
         <p className="grid gap-1 text-muted-foreground text-xs">
-          <span>Workers run as delegated tasks in this thread&apos;s checkout.</span>
+          <span>{gt("Workers run as delegated tasks in this thread's checkout.")}</span>
           <span>
-            They keep this thread&apos;s permissions; their results come back to the architect.
+            {gt("They keep this thread's permissions; their results come back to the architect.")}
           </span>
         </p>
 
@@ -770,29 +843,17 @@ export const ComposerTeamSetup = memo(function ComposerTeamSetup(props: {
         ) : null}
 
         <div className="flex items-center justify-between gap-2 border-t pt-3">
-          {active ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                props.onDisable();
-                props.onDone();
-              }}
-            >
-              Use a single agent
-            </Button>
-          ) : (
-            <span className="text-muted-foreground text-xs">
-              {props.newThread ? "Starts this thread as a team" : "Applies from your next message"}
-            </span>
-          )}
+          <span className="text-muted-foreground text-xs">
+            {props.newThread
+              ? gt("Starts this thread as a team")
+              : gt("Applies from your next message")}
+          </span>
           <Button
             type="submit"
             size="sm"
             disabled={saveProblem !== null || Boolean(props.disabledReason)}
           >
-            {active ? "Apply setup" : "Save setup"}
+            {active ? gt("Apply setup") : gt("Save setup")}
           </Button>
         </div>
       </form>

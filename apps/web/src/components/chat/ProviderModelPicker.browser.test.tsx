@@ -407,6 +407,15 @@ it("lists agent teams in a tab under Favorites and closes on a pick", async () =
   await expect
     .element(page.getByRole("option", { name: /Content team/ }))
     .toHaveAttribute("aria-checked", "true");
+  // A model picked in a provider tab leaves the team, so the tab lists teams only.
+  expect(
+    Array.from(document.querySelectorAll("[role=option]"), (option) => option.textContent),
+  ).toEqual([
+    expect.stringContaining("Cheap team"),
+    expect.stringContaining("Balanced team"),
+    expect.stringContaining("Best team"),
+    expect.stringContaining("Content team"),
+  ]);
   await page.getByRole("option", { name: /Balanced team/ }).click();
   expect(onSelect).toHaveBeenCalledWith({ kind: "auto", auto: "balanced" });
   await expect.element(page.getByPlaceholder("Search models...")).not.toBeInTheDocument();
@@ -538,7 +547,8 @@ it("edits the team setup inside the picker without closing it", async () => {
             onDone={() => {}}
             onSaveTeams={onSaveTeams}
             onApply={onApply}
-            onDisable={() => {}}
+            autoLeads={undefined}
+            onAutoLeadChange={() => {}}
           />
         ),
       }}
@@ -597,4 +607,82 @@ it("edits the team setup inside the picker without closing it", async () => {
       memberFlows: [{ from: "Builder", to: "Reviewer" }],
     }),
   );
+});
+
+it("sets an automatic team's architect in place of the worker setup", async () => {
+  const entries = deriveProviderInstanceEntries([
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready" as const,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: ["Alpha", "Beta"].map((name) => ({
+        slug: name.toLowerCase(),
+        name: `${name} model`,
+        isCustom: false,
+        capabilities: createModelCapabilities({
+          optionDescriptors: [
+            {
+              id: "thought_level",
+              label: "Thinking",
+              type: "select",
+              role: "reasoning",
+              currentValue: "medium",
+              options: [
+                { id: "medium", label: "Medium" },
+                { id: "high", label: "High" },
+              ],
+            },
+          ],
+        }),
+      })),
+      slashCommands: [],
+      skills: [],
+    },
+  ]);
+  const [codex] = entries;
+  const beta = { instanceId: codex!.instanceId, model: "beta" };
+  const onAutoLeadChange = vi.fn();
+  const setup = (lead?: typeof beta) => (
+    <ComposerTeamSetup
+      teams={[]}
+      active={{ id: "auto-balanced", name: "Balanced team" }}
+      newThread
+      entries={entries}
+      currentSelection={{ instanceId: codex!.instanceId, model: "alpha" }}
+      sharedGuidance=""
+      rolesSupported
+      flowsSupported
+      groupIds={[]}
+      onDone={() => {}}
+      onSaveTeams={() => {}}
+      onApply={() => {}}
+      autoLeads={lead ? { balanced: lead } : {}}
+      onAutoLeadChange={onAutoLeadChange}
+    />
+  );
+
+  await using screen = await render(setup());
+  const group = screen.getByRole("group", { name: "Architect & workers" });
+  await expect.element(group.getByText("Best value among widely used models")).toBeVisible();
+  // The way out of a team is a model picked in a provider tab, not a button here.
+  expect(group.element().querySelectorAll("button")).toHaveLength(1);
+  await group.getByRole("combobox", { name: "Architect model" }).click();
+  await page.getByRole("option", { name: /Beta model/ }).click();
+  expect(onAutoLeadChange).toHaveBeenLastCalledWith("balanced", beta);
+
+  await screen.rerender(setup(beta));
+  await expect
+    .element(group.getByRole("combobox", { name: "Architect model" }))
+    .toHaveTextContent("Beta model");
+  (group.element().querySelector("[data-team-member-effort] button") as HTMLButtonElement).click();
+  await page.getByRole("menuitemradio", { name: "High" }).click();
+  expect(onAutoLeadChange).toHaveBeenLastCalledWith("balanced", {
+    ...beta,
+    options: [{ id: "thought_level", value: "high" }],
+  });
 });

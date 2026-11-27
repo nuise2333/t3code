@@ -16,6 +16,7 @@ import {
   type ProviderDriverKind,
   type LaunchRoutingRequest,
   AUTO_TEAMS,
+  autoTeamKind,
   type CouncilSettings,
   type ThreadAgentTeam,
   type TokenSaverSettings,
@@ -309,12 +310,17 @@ const make = Effect.gen(function* () {
           ? null
           : { id: defaultTeam.id, name: defaultTeam.name };
     const now = DateTime.toEpochMillis(yield* DateTime.now);
+    const autoKind = agentTeam === null ? null : autoTeamKind(agentTeam.id);
     return {
-      ...(agentTeam === null ? {} : { agentTeam }),
-      ...(tokenSaver === null || tokenSaver.packs.length === 0
-        ? {}
-        : { tokenSaver: { ...tokenSaver, changedAt: now } }),
-      ...(council === null ? {} : { council: { ...council, since: now } }),
+      assists: {
+        ...(agentTeam === null ? {} : { agentTeam }),
+        ...(tokenSaver === null || tokenSaver.packs.length === 0
+          ? {}
+          : { tokenSaver: { ...tokenSaver, changedAt: now } }),
+        ...(council === null ? {} : { council: { ...council, since: now } }),
+      },
+      /** An automatic team's thread runs on the lead the user set for it. */
+      lead: autoKind === null ? undefined : defaults?.agentTeamLeads[autoKind],
     };
   });
   const textGeneration = yield* TextGeneration.TextGeneration;
@@ -1321,8 +1327,11 @@ const make = Effect.gen(function* () {
                 requested: input.routing,
               })
             : null;
-        const modelSelection = routed?.selection ?? input.modelSelection;
-        const assists = yield* launchAssists(input, routed?.decision.group?.team === true);
+        const { assists, lead } = yield* launchAssists(
+          input,
+          routed?.decision.group?.team === true,
+        );
+        const modelSelection = lead ?? routed?.selection ?? input.modelSelection;
         if (
           routed?.decision.group !== undefined ||
           modelSelection.instanceId !== input.modelSelection.instanceId

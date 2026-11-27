@@ -12,7 +12,6 @@ import {
   moveListItem,
   newRoutingGroupId,
   plainRoutingGroups,
-  ROUTING_TASK_CLASS_LABELS,
   ROUTING_TASK_CLASSES,
   routingGroupProblems,
   routingMemberLabel,
@@ -33,6 +32,7 @@ import { ListRowLayout } from "../../components/ui/ListRowLayout";
 import { Menu } from "../../components/ui/Menu";
 import { RowPressable } from "../../components/ui/RowPressable";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
+import { I18nProvider, useGT } from "../../i18n/I18nProvider";
 import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { useEnvironmentServerConfig } from "../../state/entities";
@@ -51,7 +51,6 @@ import {
 import { type SettingsTarget, useSettingsEnvironmentFilter } from "./settings-environment-filter";
 
 const NO_GROUP = "__none__";
-const RANK_LABELS = { order: "In order", quota: "Most quota left" } as const;
 
 function useRoutingSettingsWriter() {
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
@@ -101,6 +100,15 @@ function MenuRow(props: {
 
 /** Each machine's routing groups and Auto rules; groups belong to the machine that runs them. */
 export function SettingsRoutingGroupsRouteScreen() {
+  return (
+    <I18nProvider>
+      <RoutingGroupsScreen />
+    </I18nProvider>
+  );
+}
+
+function RoutingGroupsScreen() {
+  const gt = useGT();
   const environmentMenu = useSettingsEnvironmentMenu();
   const { selectedTargets } = useSettingsEnvironmentFilter();
   const supported = selectedTargets.filter(
@@ -110,7 +118,7 @@ export function SettingsRoutingGroupsRouteScreen() {
   const insets = useSafeAreaInsets();
 
   return (
-    <SettingsScreen title="Routing groups" menus={[environmentMenu]}>
+    <SettingsScreen title={gt("Routing groups")} menus={[environmentMenu]}>
       <ScreenScrollView
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
@@ -118,14 +126,13 @@ export function SettingsRoutingGroupsRouteScreen() {
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
         <Text className="px-2 text-sm text-foreground-muted">
-          A group is an ordered list of models. Pick it in a new thread's model picker, and the
-          thread starts on the first model that can run it: set up, with usage left, and able to use
-          the thread's permissions and plan mode. A group set to start on the most quota left picks
-          by usage instead. It decides once, when the thread starts.
+          {gt(
+            "A group is an ordered list of models. Pick it in a new thread's model picker, and the thread starts on the first model that can run it: set up, with usage left, and able to use the thread's permissions and plan mode. A group set to start on the most quota left picks by usage instead. It decides once, when the thread starts.",
+          )}
         </Text>
         {supported.length === 0 ? (
           <Text className="px-2 text-foreground-muted">
-            Connect an environment that supports routing groups.
+            {gt("Connect an environment that supports routing groups.")}
           </Text>
         ) : (
           supported.map((target) => (
@@ -145,6 +152,7 @@ function EnvironmentRoutingGroups(props: {
   readonly target: SettingsTarget;
   readonly canWrite: boolean;
 }) {
+  const gt = useGT();
   const navigation = useNavigation();
   const write = useRoutingSettingsWriter();
   const config = useEnvironmentServerConfig(props.target.environmentId);
@@ -158,6 +166,13 @@ function EnvironmentRoutingGroups(props: {
   const rules = settings.routingGroupRules;
   const problems = routingGroupProblems({ groups, rules, providers });
   const seed = seedMember(config);
+  // client-runtime's ROUTING_TASK_CLASS_LABELS, repeated so the catalog can pick them up.
+  const taskClassLabels: Record<RoutingTaskClass, string> = {
+    readonly: gt("Questions"),
+    quick_edit: gt("Small edits"),
+    implement: gt("Implementation"),
+    hard: gt("Large changes and plans"),
+  };
   const saveGroups = (next: ReadonlyArray<RoutingGroup>) =>
     void write(target.environmentId, { routingGroups: [...next, ...teams] });
   const setRule = (taskClass: RoutingTaskClass, groupId: string | null) =>
@@ -168,10 +183,10 @@ function EnvironmentRoutingGroups(props: {
   const addGroup = () => {
     if (!seed) return;
     Dialog.prompt({
-      title: "New routing group",
-      placeholder: "Fast",
+      title: gt("New routing group"),
+      placeholder: gt("Fast", { $context: "Example name for a routing group" }),
       initialValue: "",
-      confirmText: "Next",
+      confirmText: gt("Next"),
       onConfirm: (value) => {
         const name = value.trim().slice(0, 64);
         if (!name) return;
@@ -197,13 +212,16 @@ function EnvironmentRoutingGroups(props: {
   const deleteGroup = (group: RoutingGroup) => {
     const usedBy = rulesUsingRoutingGroup(rules, group.id).length;
     Dialog.confirm({
-      title: `Delete ${group.name}?`,
-      message: `Threads that already started through it keep their model.${
+      title: gt("Delete {name}?", { name: group.name }),
+      message: `${gt("Threads that already started through it keep their model.")}${
         usedBy > 0
-          ? ` ${usedBy === 1 ? "One Auto rule uses" : `${usedBy} Auto rules use`} it; those launches fail until you change the rule.`
+          ? gt(
+              "{count, plural, =1 { One Auto rule uses it; those launches fail until you change the rule.} other { # Auto rules use it; those launches fail until you change the rule.}}",
+              { count: usedBy },
+            )
           : ""
       }`,
-      confirmText: "Delete",
+      confirmText: gt("Delete"),
       destructive: true,
       onConfirm: () => saveGroups(groups.filter((entry) => entry.id !== group.id)),
     });
@@ -221,20 +239,20 @@ function EnvironmentRoutingGroups(props: {
               description={group.members
                 .map((member, memberIndex) =>
                   missing?.includes(memberIndex)
-                    ? `${member.model} (provider removed)`
+                    ? gt("{model} (provider removed)", { model: member.model })
                     : routingMemberLabel(member, providers),
                 )
                 .join(" → ")}
               disabled={!canWrite}
               actions={[
-                { id: "edit", title: "Edit" },
-                { id: "up", title: "Move up", attributes: { disabled: index === 0 } },
+                { id: "edit", title: gt("Edit") },
+                { id: "up", title: gt("Move up"), attributes: { disabled: index === 0 } },
                 {
                   id: "down",
-                  title: "Move down",
+                  title: gt("Move down"),
                   attributes: { disabled: index === groups.length - 1 },
                 },
-                { id: "delete", title: "Delete", attributes: { destructive: true } },
+                { id: "delete", title: gt("Delete"), attributes: { destructive: true } },
               ]}
               onAction={(action) => {
                 if (action === "edit") {
@@ -253,13 +271,15 @@ function EnvironmentRoutingGroups(props: {
           );
         })}
         {canWrite && seed && groups.length + teams.length < MAX_ROUTING_GROUPS ? (
-          <ListActionRow icon="plus" label="Add group" onPress={addGroup} />
+          <ListActionRow icon="plus" label={gt("Add group")} onPress={addGroup} />
         ) : null}
       </SettingsSection>
       {groups.length > 0 || problems.missingRuleGroups.length > 0 ? (
         <SettingsSection
-          title="Auto rules"
-          footer="When a new thread asks for Auto effort and its first message is this kind of task, it starts through the chosen group. A rule naming a deleted group makes those launches fail until you change it."
+          title={gt("Auto rules")}
+          footer={gt(
+            "When a new thread asks for Auto effort and its first message is this kind of task, it starts through the chosen group. A rule naming a deleted group makes those launches fail until you change it.",
+          )}
         >
           {ROUTING_TASK_CLASSES.map((taskClass) => {
             const groupId = rules[taskClass] ?? null;
@@ -267,19 +287,19 @@ function EnvironmentRoutingGroups(props: {
             return (
               <MenuRow
                 key={taskClass}
-                label={ROUTING_TASK_CLASS_LABELS[taskClass]}
+                label={taskClassLabels[taskClass]}
                 detail={
                   groupId === null
-                    ? "Auto effort only"
+                    ? gt("Auto effort only")
                     : missing
-                      ? "Missing group"
+                      ? gt("Missing group")
                       : (groups.find((group) => group.id === groupId)?.name ?? groupId)
                 }
                 disabled={!canWrite}
                 actions={[
                   {
                     id: NO_GROUP,
-                    title: missing ? "Clear" : "Auto effort only",
+                    title: missing ? gt("Clear") : gt("Auto effort only"),
                     ...(groupId === null ? { state: "on" as const } : {}),
                   },
                   ...groups.map((group) => ({
@@ -299,6 +319,15 @@ function EnvironmentRoutingGroups(props: {
 }
 
 export function SettingsRoutingGroupEditRouteScreen() {
+  return (
+    <I18nProvider>
+      <RoutingGroupEditScreen />
+    </I18nProvider>
+  );
+}
+
+function RoutingGroupEditScreen() {
+  const gt = useGT();
   const navigation = useNavigation();
   const editor = useAtomValue(routingGroupEditorAtom);
   const config = useEnvironmentServerConfig(editor?.environmentId ?? null);
@@ -306,8 +335,10 @@ export function SettingsRoutingGroupEditRouteScreen() {
   const insets = useSafeAreaInsets();
   if (!editor || !config) {
     return (
-      <SettingsScreen title="Routing group">
-        <Text className="p-5 text-base text-foreground-muted">Open a routing group first.</Text>
+      <SettingsScreen title={gt("Routing group")}>
+        <Text className="p-5 text-base text-foreground-muted">
+          {gt("Open a routing group first.")}
+        </Text>
       </SettingsScreen>
     );
   }
@@ -318,6 +349,7 @@ export function SettingsRoutingGroupEditRouteScreen() {
   // An older server strips `rank`, so it gets neither the choice nor the key.
   const quotaSupported = config.environment.capabilities.routingGroupQuota === true;
   const rank = group.rank ?? "order";
+  const rankLabels = { order: gt("In order"), quota: gt("Most quota left") } as const;
   const setMembers = (members: ReadonlyArray<ModelSelection>) =>
     updateRoutingGroupEditor((current) => ({ ...current, group: { ...current.group, members } }));
   const save = async () => {
@@ -330,22 +362,24 @@ export function SettingsRoutingGroupEditRouteScreen() {
   };
 
   return (
-    <SettingsScreen title={editor.index === null ? "New routing group" : "Edit routing group"}>
+    <SettingsScreen
+      title={editor.index === null ? gt("New routing group") : gt("Edit routing group")}
+    >
       <ScreenScrollView
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
-        <SettingsSection title="Name">
+        <SettingsSection title={gt("Name")}>
           <ListActionRow
             label={group.name}
-            description="Rename"
+            description={gt("Rename")}
             onPress={() =>
               Dialog.prompt({
-                title: "Rename group",
+                title: gt("Rename group"),
                 initialValue: group.name,
-                confirmText: "Rename",
+                confirmText: gt("Rename"),
                 onConfirm: (value) => {
                   const name = value.trim().slice(0, 64);
                   if (name)
@@ -360,18 +394,20 @@ export function SettingsRoutingGroupEditRouteScreen() {
         </SettingsSection>
         {quotaSupported ? (
           <SettingsSection
-            title="Start on"
+            title={gt("Start on")}
             footer={
               rank === "quota"
-                ? "The model whose subscription has the most usage left to spend per hour before it resets."
-                : "The first model that can run the thread, top to bottom."
+                ? gt(
+                    "The model whose subscription has the most usage left to spend per hour before it resets.",
+                  )
+                : gt("The first model that can run the thread, top to bottom.")
             }
           >
             <MenuRow
-              label={RANK_LABELS[rank]}
+              label={rankLabels[rank]}
               actions={(["order", "quota"] as const).map((id) => ({
                 id,
-                title: RANK_LABELS[id],
+                title: rankLabels[id],
                 ...(id === rank ? { state: "on" as const } : {}),
               }))}
               onAction={(id) => {
@@ -385,8 +421,8 @@ export function SettingsRoutingGroupEditRouteScreen() {
           </SettingsSection>
         ) : null}
         <SettingsSection
-          title={rank === "quota" ? "Models, ties in order" : "Models, in order"}
-          footer="Each model keeps the options you set for it here."
+          title={rank === "quota" ? gt("Models, ties in order") : gt("Models, in order")}
+          footer={gt("Each model keeps the options you set for it here.")}
         >
           {group.members.map((member, index) => (
             <MenuRow
@@ -395,18 +431,18 @@ export function SettingsRoutingGroupEditRouteScreen() {
               label={`${index + 1}. ${routingMemberLabel(member, providers)}`}
               {...(providers.some((provider) => provider.instanceId === member.instanceId)
                 ? {}
-                : { description: "Provider removed" })}
+                : { description: gt("Provider removed") })}
               actions={[
-                { id: "model", title: "Change model or options" },
-                { id: "up", title: "Move up", attributes: { disabled: index === 0 } },
+                { id: "model", title: gt("Change model or options") },
+                { id: "up", title: gt("Move up"), attributes: { disabled: index === 0 } },
                 {
                   id: "down",
-                  title: "Move down",
+                  title: gt("Move down"),
                   attributes: { disabled: index === group.members.length - 1 },
                 },
                 {
                   id: "remove",
-                  title: "Remove",
+                  title: gt("Remove"),
                   attributes: { destructive: true, disabled: group.members.length === 1 },
                 },
               ]}
@@ -424,13 +460,13 @@ export function SettingsRoutingGroupEditRouteScreen() {
           {seed && group.members.length < MAX_ROUTING_GROUP_MEMBERS ? (
             <ListActionRow
               icon="plus"
-              label="Add model"
+              label={gt("Add model")}
               onPress={() => setMembers([...group.members, seed])}
             />
           ) : null}
         </SettingsSection>
         <SettingsSection>
-          <ListActionRow label="Save" onPress={() => void save()} />
+          <ListActionRow label={gt("Save")} onPress={() => void save()} />
         </SettingsSection>
       </ScreenScrollView>
     </SettingsScreen>
@@ -438,6 +474,15 @@ export function SettingsRoutingGroupEditRouteScreen() {
 }
 
 export function SettingsRoutingGroupMemberRouteScreen() {
+  return (
+    <I18nProvider>
+      <RoutingGroupMemberScreen />
+    </I18nProvider>
+  );
+}
+
+function RoutingGroupMemberScreen() {
+  const gt = useGT();
   const navigation = useNavigation();
   const editor = useAtomValue(routingGroupEditorAtom);
   const config = useEnvironmentServerConfig(editor?.environmentId ?? null);
@@ -448,8 +493,10 @@ export function SettingsRoutingGroupMemberRouteScreen() {
   );
   if (!editor || !member) {
     return (
-      <SettingsScreen title="Model">
-        <Text className="p-5 text-base text-foreground-muted">Open a routing group first.</Text>
+      <SettingsScreen title={gt("Model")}>
+        <Text className="p-5 text-base text-foreground-muted">
+          {gt("Open a routing group first.")}
+        </Text>
       </SettingsScreen>
     );
   }

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useGT, useMessages } from "gt-react";
 import type { ChatComposerProps } from "./ChatComposer";
 import type { PromptUltrathink } from "./TraitsPicker";
 import type { ProviderInstanceEntry } from "../../providerInstances";
@@ -26,12 +27,12 @@ import {
   autoRoutingNote,
   routedEffortDisplay,
   pickerRoutingGroups,
-  agentTeamSummary,
+  routingMemberLabel,
   routingProviderSource,
   routedGroupDisplay,
   routedModelDisplay,
 } from "@t3tools/client-runtime/routing";
-import { threadAgentTeamRef } from "@t3tools/shared/agentTeam";
+import { agentTeamRole, threadAgentTeamRef } from "@t3tools/shared/agentTeam";
 import {
   type EnvironmentId,
   type ModelSelection,
@@ -39,6 +40,7 @@ import {
   type RoutingGroup,
   AUTO_TEAMS,
   type AutoTeamKind,
+  autoTeamKind,
   type ThreadAgentTeam,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -65,6 +67,13 @@ import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { useComposerProviderModel } from "./useComposerProviderModel";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
+import {
+  agentTeamLeadPatch,
+  leadSelectionToApply,
+  modelPickTeamExit,
+  teamDisplayName,
+  teamLeadSelection,
+} from "./agentTeamPick.logic";
 
 /**
  * The composer footer controls: the model picker (which also holds effort, speed and
@@ -195,6 +204,8 @@ export function ComposerControlsBar(props: {
     measuredHiddenBlockCount,
   });
   const navigate = useNavigate();
+  const gt = useGT();
+  const m = useMessages();
   const stickyOptionsByModelByProvider = useComposerDraftStore(
     (store) => store.stickyOptionsByModelByProvider,
   );
@@ -228,6 +239,7 @@ export function ComposerControlsBar(props: {
   );
   const setEffortManual = useComposerDraftStore((store) => store.setEffortManual);
   const setRoutingGroup = useComposerDraftStore((store) => store.setRoutingGroup);
+  const setDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const draftRoutingGroupId = useComposerDraftStore((store) =>
     routeKind === "draft" && draftId
       ? (store.getComposerDraft(draftId)?.routingGroupId ?? null)
@@ -256,20 +268,6 @@ export function ComposerControlsBar(props: {
   const clearPickedGroup = () => {
     if (draftId && draftRoutingGroupId !== null) setRoutingGroup(draftId, null);
   };
-  // Groups launch one model, so a second model leaves the group for a manual pick.
-  const handleMultipleModelSelectionsChange = useStableCallback(
-    (selections: ReadonlyArray<ModelSelection> | null) => {
-      if (selections !== null) clearPickedGroup();
-      onMultipleModelSelectionsChange(selections);
-    },
-  );
-  // Re-picking the group's first member is still a manual pick of that model.
-  const handleProviderModelSelect = useStableCallback(
-    (...args: Parameters<typeof onProviderModelSelect>) => {
-      clearPickedGroup();
-      onProviderModelSelect(...args);
-    },
-  );
   const handleRoutingGroupSelect = useStableCallback((groupId: string) => {
     const group = routingGroups.find((candidate) => candidate.id === groupId);
     if (draftId && group)
@@ -333,28 +331,6 @@ export function ComposerControlsBar(props: {
     controlSize,
     effortRouting,
   );
-  const effort = pickedGroup
-    ? {
-        suffix: null,
-        detail: pickedGroup.summary
-          ? pickedGroup.team
-            ? `Agent team: ${pickedGroup.summary}`
-            : `Routing group: a usable member of ${pickedGroup.summary}`
-          : "This routing group no longer exists",
-      }
-    : routedGroup
-      ? {
-          suffix: traitsEffort.suffix,
-          detail: [routedGroup.label, routedGroup.skipped, traitsEffort.detail]
-            .filter(Boolean)
-            .join(" · "),
-        }
-      : routedModel
-        ? {
-            suffix: traitsEffort.suffix,
-            detail: [routedModel, traitsEffort.detail].filter(Boolean).join(" · "),
-          }
-        : traitsEffort;
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
     "agent team change",
@@ -394,12 +370,103 @@ export function ComposerControlsBar(props: {
       input: { threadId: serverThreadId, agentTeam },
     });
   };
+  // client-runtime's agentTeamSummary, in the UI language.
+  const teamSummary = (team: RoutingGroup) => {
+    const [lead, ...others] = team.members.map(
+      (member, index) =>
+        (index > 0 && agentTeamRole(team, index)?.name) ||
+        routingMemberLabel(member, providerModels),
+    );
+    if (lead === undefined) return "";
+    return others.length === 0
+      ? gt("{lead} leads", { lead })
+      : gt("{lead} leads {members}", { lead, members: others.join(", ") });
+  };
   const teamChoices = savedTeams.map((team) => ({
     id: team.id,
     name: team.name,
-    summary: agentTeamSummary(team, team.members[0], providerModels),
+    summary: teamSummary(team),
   }));
-  // An automatic kind is remembered for new threads; No team forgets it.
+  const pickedTeamSummary = pickedGroup?.team
+    ? (teamChoices.find((team) => team.id === pickedGroup.id)?.summary ?? pickedGroup.summary)
+    : null;
+  const effort = pickedGroup
+    ? {
+        suffix: null,
+        detail: pickedGroup.summary
+          ? pickedGroup.team
+            ? gt("Agent team: {summary}", { summary: pickedTeamSummary ?? pickedGroup.summary })
+            : `Routing group: a usable member of ${pickedGroup.summary}`
+          : "This routing group no longer exists",
+      }
+    : routedGroup
+      ? {
+          suffix: traitsEffort.suffix,
+          detail: [routedGroup.label, routedGroup.skipped, traitsEffort.detail]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : routedModel
+        ? {
+            suffix: traitsEffort.suffix,
+            detail: [routedModel, traitsEffort.detail].filter(Boolean).join(" · "),
+          }
+        : traitsEffort;
+  const agentTeamLeads = serverConfig?.settings.agentTeamLeads;
+  // A model picked in the list is the one way out of a team; new threads stop starting as one.
+  const leaveTeam = () => {
+    const exit = modelPickTeamExit({
+      activeTeamId: activeTeam?.id ?? null,
+      defaultAutoTeam: serverConfig?.settings.agentTeamDefault,
+    });
+    if (!exit.leaveTeam) return;
+    if (exit.forgetDefault) updateSettings({ agentTeamDefault: null });
+    if (routeKind !== "server") setDraftTeam(null);
+    else setThreadTeam(null);
+  };
+  // Groups and teams run one model, so a second model leaves them for a manual pick.
+  const handleMultipleModelSelectionsChange = useStableCallback(
+    (selections: ReadonlyArray<ModelSelection> | null) => {
+      if (selections !== null) {
+        clearPickedGroup();
+        leaveTeam();
+      }
+      onMultipleModelSelectionsChange(selections);
+    },
+  );
+  // Re-picking the group's first member or the team's lead is still a manual pick of that model.
+  const handleProviderModelSelect = useStableCallback(
+    (...args: Parameters<typeof onProviderModelSelect>) => {
+      clearPickedGroup();
+      leaveTeam();
+      onProviderModelSelect(...args);
+    },
+  );
+  // The thread runs on its team's lead. Not a pick in the model list, so it leaves no team.
+  const runOnLead = (lead: ModelSelection | null) => {
+    if (lead === null) return;
+    if (routeKind !== "server") {
+      if (draftId) setDraftModelSelection(draftId, lead, { explicit: true, replaceOptions: true });
+      return;
+    }
+    if (
+      lead.instanceId !== selectedModelSelection.instanceId ||
+      lead.model !== selectedModelSelection.model
+    ) {
+      onProviderModelSelect(lead.instanceId, lead.model, { focusComposer: false });
+    }
+    // The pick carries the model's remembered options; the lead's own replace them once it landed.
+    const draft = useComposerDraftStore.getState().getComposerDraft(routeThreadRef);
+    const shown =
+      (draft?.modelSelectionExplicit && draft.activeProvider
+        ? draft.modelSelectionByProvider[draft.activeProvider]
+        : undefined) ?? selectedModelSelection;
+    const exact = leadSelectionToApply(shown, lead);
+    if (exact === null) return;
+    setDraftModelSelection(routeThreadRef, exact, { explicit: true, replaceOptions: true });
+    applyRouteThreadModelPick();
+  };
+  // An automatic kind is remembered for new threads until a model is picked in the list.
   const selectAutoTeam = useStableCallback((kind: AutoTeamKind) => {
     const team = AUTO_TEAMS.find((candidate) => candidate.kind === kind);
     if (!team) return;
@@ -408,67 +475,55 @@ export function ComposerControlsBar(props: {
     if (routeKind !== "server") {
       if (pickedGroup?.team) clearPickedGroup();
       setDraftTeam(ref);
-      return;
+    } else {
+      setThreadTeam(ref);
     }
-    setThreadTeam(ref);
+    runOnLead(teamLeadSelection({ kind: "auto", auto: kind }, agentTeamLeads));
   });
-  const selectNoTeam = useStableCallback(() => {
-    updateSettings({ agentTeamDefault: null });
+  const setAutoTeamLead = useStableCallback((kind: AutoTeamKind, lead: ModelSelection) => {
+    updateSettings(agentTeamLeadPatch(agentTeamLeads, kind, lead));
+    runOnLead(lead);
+  });
+  // The lead runs the thread: it switches to it, then leads the team from its next message.
+  const joinSavedTeam = (team: RoutingGroup, lead: ModelSelection | null) => {
+    if (lead === null) return;
+    const ref = { id: team.id, name: team.name };
     if (routeKind !== "server") {
-      if (pickedGroup?.team) clearPickedGroup();
-      setDraftTeam(null);
+      if (draftId) setRoutingGroup(draftId, { id: team.id, placeholder: lead });
+      setDraftTeam(ref);
       return;
     }
-    setThreadTeam(null);
-  });
-  // A saved team picked here keeps the thread's model as its lead; the setup can change it.
+    runOnLead(lead);
+    setThreadTeam(ref);
+  };
   const selectSavedTeam = useStableCallback((teamId: string) => {
     const team = savedTeams.find((candidate) => candidate.id === teamId);
     if (!team) return;
-    if (routeKind !== "server") {
-      handleRoutingGroupSelect(team.id);
-      setDraftTeam({ id: team.id, name: team.name });
-      return;
-    }
-    setThreadTeam({ id: team.id, name: team.name });
+    // A new thread shows the member the server would start it on: the first that can run.
+    const startsOn =
+      routeKind !== "server"
+        ? routingGroups.find((group) => group.id === teamId)?.placeholder
+        : undefined;
+    joinSavedTeam(team, startsOn ?? teamLeadSelection({ kind: "saved", team }, agentTeamLeads));
   });
   const teamDisabledReason =
-    multipleModelSelections !== null ? "Pick one model to work as a team." : null;
+    multipleModelSelections !== null ? gt("Pick one model to work as a team.") : null;
   // The setup saves teams in place, keeping every plain routing group as it was.
   const saveTeams = useStableCallback((teams: ReadonlyArray<RoutingGroup>) => {
     updateSettings({
       routingGroups: [...savedGroups.filter((group) => group.team !== true), ...teams],
     });
   });
-  const applyTeam = useStableCallback((team: RoutingGroup) => {
-    const architect = team.members[0];
-    if (!architect) return;
-    if (routeKind !== "server") {
-      if (draftId) setRoutingGroup(draftId, { id: team.id, placeholder: architect });
-      setDraftTeam({ id: team.id, name: team.name });
-      return;
-    }
-    if (serverThreadId === undefined) return;
-    // The architect leads: the thread switches to it, then leads the team from its next message.
-    if (
-      architect.instanceId !== selectedModelSelection.instanceId ||
-      architect.model !== selectedModelSelection.model
-    ) {
-      onProviderModelSelect(architect.instanceId, architect.model);
-    }
-    void updateThreadMetadata({
-      environmentId,
-      input: { threadId: serverThreadId, agentTeam: { id: team.id, name: team.name } },
-    });
-  });
-  const disableTeam = selectNoTeam;
+  const applyTeam = useStableCallback((team: RoutingGroup) =>
+    joinSavedTeam(team, teamLeadSelection({ kind: "saved", team }, agentTeamLeads)),
+  );
   const showTeamControl =
     teamsCapability && (routeKind === "server" ? serverThreadId !== undefined : Boolean(draftId));
   // Teams are picked in the model picker's Team tab, with their setup beside the list.
   const selectPickerTeam = useStableCallback((row: ModelPickerTeamRow) => {
     switch (row.kind) {
       case "none":
-        selectNoTeam();
+        leaveTeam();
         return;
       case "auto":
         selectAutoTeam(row.auto);
@@ -523,15 +578,27 @@ export function ComposerControlsBar(props: {
             onDone={closeModelPicker}
             onSaveTeams={saveTeams}
             onApply={applyTeam}
-            onDisable={disableTeam}
+            autoLeads={agentTeamLeads}
+            onAutoLeadChange={setAutoTeamLead}
           />
         ),
       }
     : undefined;
   // A thread working as a team shows the team's name on the model trigger.
-  const teamTriggerDetail = activeTeam
-    ? `Agent team ${activeTeam.name}, led by ${triggerModelName(selectedModelSelection, providerInstanceEntries)}`
-    : null;
+  const activeTeamName = activeTeam ? teamDisplayName(activeTeam, m) : null;
+  const activeAutoKind = activeTeam ? autoTeamKind(activeTeam.id) : null;
+  // A new thread on an automatic team launches on the lead set for it, whatever the draft shows.
+  const teamLead =
+    (routeKind !== "server" && activeAutoKind !== null
+      ? agentTeamLeads?.[activeAutoKind]
+      : undefined) ?? selectedModelSelection;
+  const teamTriggerDetail =
+    activeTeamName === null
+      ? null
+      : gt("Agent team {team}, led by {model}", {
+          team: activeTeamName,
+          model: triggerModelName(teamLead, providerInstanceEntries),
+        });
   const restingBlockDefs = showModeBlock
     ? [
         {
@@ -592,9 +659,9 @@ export function ComposerControlsBar(props: {
           ? [teamTriggerDetail, effort.detail].filter(Boolean).join(" · ")
           : effort.detail
       }
-      {...(activeTeam
+      {...(activeTeamName !== null
         ? {
-            triggerLabel: activeTeam.name,
+            triggerLabel: activeTeamName,
             triggerIcon: (
               <UsersIcon
                 data-composer-agent-team="on"
@@ -619,7 +686,7 @@ export function ComposerControlsBar(props: {
         pickedGroup ? (
           <ComposerRoutingGroupColumn
             name={pickedGroup.name}
-            summary={pickedGroup.summary}
+            summary={pickedTeamSummary ?? pickedGroup.summary}
             team={pickedGroup.team}
           />
         ) : (

@@ -1158,7 +1158,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "routing-groups",
-    title: "Routing groups",
+    title: msg("Routing groups"),
     to: "/settings/providers",
     searchTerms: [
       "routing group model group fallback failover order first available usage limit quota auto rules preset",
@@ -1167,7 +1167,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "agent-teams",
-    title: "Agent teams",
+    title: msg("Agent teams"),
     to: "/settings/providers",
     searchTerms: [
       "agent team lead leader workers delegate subagents orchestrate architect multi agent crew lead guidance",

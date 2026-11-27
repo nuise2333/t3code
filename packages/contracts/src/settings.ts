@@ -1495,6 +1495,14 @@ export const CloudSpeechCredentials = Schema.Struct({
 const decodeRoutingGroupOption = Schema.decodeUnknownOption(RoutingGroup);
 
 /** Bad entries drop alone and a repeated id keeps its first group, so a hand edit cannot reset settings. */
+/** One lead per automatic team kind. */
+export const AgentTeamLeads = Schema.Struct({
+  cheap: Schema.optionalKey(ModelSelection),
+  balanced: Schema.optionalKey(ModelSelection),
+  best: Schema.optionalKey(ModelSelection),
+});
+export type AgentTeamLeads = typeof AgentTeamLeads.Type;
+
 const LenientRoutingGroups = Schema.Array(Schema.Unknown).pipe(
   Schema.decodeTo(
     Schema.Array(RoutingGroup),
@@ -1656,6 +1664,11 @@ export const ServerSettings = Schema.Struct({
   agentTeamDefault: Schema.NullOr(AutoTeamKind).pipe(
     Schema.catchDecoding(() => Effect.succeedSome(null)),
     Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** The model each automatic team's thread leads on; absent keeps the thread's own model. */
+  agentTeamLeads: AgentTeamLeads.pipe(
+    Schema.catchDecoding(() => Effect.succeedSome({})),
+    Schema.withDecodingDefault(Effect.succeed({})),
   ),
   /** The token saver new threads start with; null starts them without one. */
   tokenSaverDefault: Schema.NullOr(TokenSaverSettings).pipe(
@@ -2120,6 +2133,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.String.check(Schema.isMaxLength(AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH)),
   ),
   agentTeamDefault: Schema.optionalKey(Schema.NullOr(AutoTeamKind)),
+  agentTeamLeads: Schema.optionalKey(AgentTeamLeads),
   tokenSaverDefault: Schema.optionalKey(Schema.NullOr(TokenSaverSettings)),
   councilDefaults: Schema.optionalKey(CouncilDefaults),
   backgroundActivity: Schema.optionalKey(

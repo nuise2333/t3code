@@ -7,13 +7,12 @@ import {
   MAX_ROUTING_GROUPS,
   type ModelSelection,
   type RoutingGroup,
+  type RoutingTaskClass,
   type ServerProvider,
 } from "@t3tools/contracts";
 import {
-  agentTeamSummary,
   moveListItem,
   newRoutingGroupId,
-  ROUTING_TASK_CLASS_LABELS,
   ROUTING_TASK_CLASSES,
   routingGroupProblems,
   routingMemberLabel,
@@ -24,9 +23,10 @@ import {
   resolveRoutingGroupPreset,
   ROUTING_GROUP_PRESETS,
 } from "@t3tools/client-runtime/routing-presets";
-import { agentTeamMembersProblem } from "@t3tools/shared/agentTeam";
+import { agentTeamMembersProblem, agentTeamRole } from "@t3tools/shared/agentTeam";
 import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
+import { msg, useGT, useMessages } from "gt-react";
 import { ArrowDownIcon, ArrowUpIcon, MoreVertical, PlusIcon, XIcon } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
@@ -43,6 +43,7 @@ import {
   namedTeamFlows,
   type TeamRowFlow,
   teamRowFlows,
+  useTeamMembersProblemText,
 } from "../chat/AgentTeamRoleFields";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
@@ -77,8 +78,16 @@ const NO_GROUP = "__none__";
 
 type RoutingGroupRank = NonNullable<RoutingGroup["rank"]>;
 const RANK_LABELS: Record<RoutingGroupRank, string> = {
-  order: "In order",
-  quota: "Most quota left",
+  order: msg("In order"),
+  quota: msg("Most quota left"),
+};
+
+// client-runtime's ROUTING_TASK_CLASS_LABELS, repeated so the catalog can pick them up.
+const TASK_CLASS_LABELS: Record<RoutingTaskClass, string> = {
+  readonly: msg("Questions"),
+  quick_edit: msg("Small edits"),
+  implement: msg("Implementation"),
+  hard: msg("Large changes and plans"),
 };
 
 type Editing = {
@@ -106,6 +115,8 @@ export function RoutingGroupsSettings({
   readonly readOnly: boolean;
   readonly kind?: "group" | "team";
 }) {
+  const gt = useGT();
+  const m = useMessages();
   const teams = kind === "team";
   const settings = useEnvironmentSettings(environmentId);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
@@ -154,6 +165,17 @@ export function RoutingGroupsSettings({
   const saveGroups = (next: ReadonlyArray<RoutingGroup>) =>
     updateSettings({ routingGroups: teams ? [...otherKind, ...next] : [...next, ...otherKind] });
   const deletingRules = deleting ? rulesUsingRoutingGroup(rules, deleting.id) : [];
+  // client-runtime's agentTeamSummary, in the UI language.
+  const teamSummary = (group: RoutingGroup) => {
+    const [lead, ...others] = group.members.map(
+      (member, index) =>
+        (index > 0 && agentTeamRole(group, index)?.name) || routingMemberLabel(member, providers),
+    );
+    if (lead === undefined) return "";
+    return others.length === 0
+      ? gt("{lead} leads", { lead })
+      : gt("{lead} leads {members}", { lead, members: others.join(", ") });
+  };
 
   return (
     <>
@@ -165,7 +187,7 @@ export function RoutingGroupsSettings({
               {teams ? null : (
                 <Menu>
                   <MenuTrigger render={<Button size="xs" variant="outline" />}>
-                    Add from preset
+                    {gt("Add from preset")}
                   </MenuTrigger>
                   <MenuPopup align="end">
                     {presets.map(({ preset, group, skipped, disabledReason }) => (
@@ -180,13 +202,18 @@ export function RoutingGroupsSettings({
                             group,
                             note:
                               skipped.length > 0
-                                ? `${preset.description} Left out, as none of your ready providers offer it right now: ${skipped.join(", ")}.`
+                                ? gt(
+                                    "{description} Left out, as none of your ready providers offer it right now: {models}.",
+                                    { description: preset.description, models: skipped.join(", ") },
+                                  )
                                 : preset.description,
                           });
                         }}
                       >
                         {preset.name}
-                        {disabledReason ? <MenuItemDetail>No models set up</MenuItemDetail> : null}
+                        {disabledReason ? (
+                          <MenuItemDetail>{gt("No models set up")}</MenuItemDetail>
+                        ) : null}
                       </MenuItem>
                     ))}
                   </MenuPopup>
@@ -209,7 +236,7 @@ export function RoutingGroupsSettings({
                 }
               >
                 <PlusIcon className="size-3" aria-hidden />
-                {teams ? "Add team" : "Add group"}
+                {teams ? gt("Add team") : gt("Add group")}
               </Button>
             </div>
           ) : null
@@ -218,13 +245,17 @@ export function RoutingGroupsSettings({
         {groups.length === 0 ? (
           teams ? (
             <SettingsRow
-              title="No agent teams yet"
-              description="A lead model and the models it may hand tasks to. Pick the team in a new thread's model picker: the lead plans the work and delegates each task to a team member."
+              title={gt("No agent teams yet")}
+              description={gt(
+                "A lead model and the models it may hand tasks to. Pick the team in a new thread's model picker: the lead plans the work and delegates each task to a team member.",
+              )}
             />
           ) : (
             <SettingsRow
-              title="No routing groups yet"
-              description="An ordered list of models. Pick it in a new thread's model picker and the thread starts on the first one that is set up, has usage left, and supports its permissions and plan mode."
+              title={gt("No routing groups yet")}
+              description={gt(
+                "An ordered list of models. Pick it in a new thread's model picker and the thread starts on the first one that is set up, has usage left, and supports its permissions and plan mode.",
+              )}
             />
           )
         ) : null}
@@ -237,11 +268,11 @@ export function RoutingGroupsSettings({
               description={
                 <span className="block truncate">
                   {teams && !missing
-                    ? agentTeamSummary(group, undefined, providers)
+                    ? teamSummary(group)
                     : group.members
                         .map((member, memberIndex) =>
                           missing?.includes(memberIndex)
-                            ? `${member.model} (provider removed)`
+                            ? gt("{model} (provider removed)", { model: member.model })
                             : routingMemberLabel(member, providers),
                         )
                         .join(" → ")}
@@ -253,7 +284,7 @@ export function RoutingGroupsSettings({
                     <Button
                       size="icon-sm"
                       variant="ghost-muted"
-                      aria-label={`Move ${group.name} up`}
+                      aria-label={gt("Move {name} up", { name: group.name })}
                       disabled={index === 0}
                       onClick={() => saveGroups(moveListItem(groups, index, -1))}
                     >
@@ -262,7 +293,7 @@ export function RoutingGroupsSettings({
                     <Button
                       size="icon-sm"
                       variant="ghost-muted"
-                      aria-label={`Move ${group.name} down`}
+                      aria-label={gt("Move {name} down", { name: group.name })}
                       disabled={index === groups.length - 1}
                       onClick={() => saveGroups(moveListItem(groups, index, 1))}
                     >
@@ -274,16 +305,18 @@ export function RoutingGroupsSettings({
                           <Button
                             size="icon-sm"
                             variant="ghost-muted"
-                            aria-label={`More actions for ${group.name}`}
+                            aria-label={gt("More actions for {name}", { name: group.name })}
                           />
                         }
                       >
                         <MoreVertical />
                       </MenuTrigger>
                       <MenuPopup align="end">
-                        <MenuItem onClick={() => setEditing({ index, group })}>Edit</MenuItem>
+                        <MenuItem onClick={() => setEditing({ index, group })}>
+                          {gt("Edit")}
+                        </MenuItem>
                         <MenuItem variant="destructive" onClick={() => setDeleting(group)}>
-                          Delete
+                          {gt("Delete")}
                         </MenuItem>
                       </MenuPopup>
                     </Menu>
@@ -295,18 +328,22 @@ export function RoutingGroupsSettings({
         })}
         {teams ? (
           <SettingsRow
-            title="Default lead guidance"
-            description="Added to the built-in team rules for the lead of every team without its own, from its next turn."
+            title={gt("Default lead guidance")}
+            description={gt(
+              "Added to the built-in team rules for the lead of every team without its own, from its next turn.",
+            )}
           >
             <div className="mt-3 max-w-2xl pb-3.5">
               <Textarea
                 key={settings.agentTeamLeadGuidance}
-                aria-label="Lead guidance"
+                aria-label={gt("Lead guidance")}
                 rows={3}
                 maxLength={AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH}
                 disabled={readOnly}
                 defaultValue={settings.agentTeamLeadGuidance}
-                placeholder="Leave empty for the built-in rules. For example: you only lead; never edit files yourself."
+                placeholder={gt(
+                  "Leave empty for the built-in rules. For example: you only lead; never edit files yourself.",
+                )}
                 onChange={() => {
                   guidanceEdited.current = true;
                 }}
@@ -327,13 +364,19 @@ export function RoutingGroupsSettings({
               return (
                 <SettingsRow
                   key={taskClass}
-                  title={`Auto: ${ROUTING_TASK_CLASS_LABELS[taskClass]}`}
+                  title={gt("Auto: {taskClass}", { taskClass: m(TASK_CLASS_LABELS[taskClass]) })}
                   description={
                     isMissing
-                      ? "This group no longer exists, so a matching launch fails until you clear or change it."
+                      ? gt(
+                          "This group no longer exists, so a matching launch fails until you clear or change it.",
+                        )
                       : taskClass === "hard" && problems.planlessHardRule
-                        ? "Plan threads count as large changes, and no model in this group has plan mode, so a plan thread sent here fails to start. Add a member that has it."
-                        : "When a new thread asks for Auto effort and its first message is this kind of task, it starts through this group."
+                        ? gt(
+                            "Plan threads count as large changes, and no model in this group has plan mode, so a plan thread sent here fails to start. Add a member that has it.",
+                          )
+                        : gt(
+                            "When a new thread asks for Auto effort and its first message is this kind of task, it starts through this group.",
+                          )
                   }
                   control={
                     <div className="flex items-center gap-2">
@@ -353,19 +396,21 @@ export function RoutingGroupsSettings({
                       >
                         <SelectTrigger
                           size="sm"
-                          aria-label={`Group for ${ROUTING_TASK_CLASS_LABELS[taskClass]}`}
+                          aria-label={gt("Group for {taskClass}", {
+                            taskClass: m(TASK_CLASS_LABELS[taskClass]),
+                          })}
                         >
                           <SelectValue>
                             {(value: string) =>
                               value === NO_GROUP
-                                ? "Auto effort only"
+                                ? gt("Auto effort only")
                                 : (groups.find((group) => group.id === value)?.name ??
-                                  "Missing group")
+                                  gt("Missing group"))
                             }
                           </SelectValue>
                         </SelectTrigger>
                         <SelectPopup>
-                          <SelectItem value={NO_GROUP}>Auto effort only</SelectItem>
+                          <SelectItem value={NO_GROUP}>{gt("Auto effort only")}</SelectItem>
                           {groups.map((group) => (
                             <SelectItem key={group.id} value={group.id}>
                               {group.name}
@@ -383,7 +428,7 @@ export function RoutingGroupsSettings({
                             })
                           }
                         >
-                          Clear
+                          {gt("Clear")}
                         </Button>
                       ) : null}
                     </div>
@@ -425,21 +470,33 @@ export function RoutingGroupsSettings({
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {gt("Delete {name}?", { name: deleting?.name ?? "" })}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {teams
-                ? "Threads that already started with it keep their model and stop leading a team."
-                : "Threads that already started through it keep their model."}
+                ? gt(
+                    "Threads that already started with it keep their model and stop leading a team.",
+                  )
+                : gt("Threads that already started through it keep their model.")}
               {deletingRules.length > 0
-                ? ` ${deletingRules.length === 1 ? "One Auto rule uses" : `${deletingRules.length} Auto rules use`} it; those launches fail until you change the rule.`
+                ? gt(
+                    "{count, plural, =1 { One Auto rule uses it; those launches fail until you change the rule.} other { # Auto rules use it; those launches fail until you change the rule.}}",
+                    { count: deletingRules.length },
+                  )
                 : ""}
               {deletingTasks
-                ? ` ${deletingTasks === 1 ? "One scheduled task runs through it; its" : `${deletingTasks} scheduled tasks run through it; their`} runs fail until you pick another model or group.`
+                ? gt(
+                    "{count, plural, =1 { One scheduled task runs through it; its runs fail until you pick another model or group.} other { # scheduled tasks run through it; their runs fail until you pick another model or group.}}",
+                    { count: deletingTasks },
+                  )
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>
+              {gt("Cancel")}
+            </AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -447,7 +504,7 @@ export function RoutingGroupsSettings({
                 setDeleting(null);
               }}
             >
-              Delete
+              {gt("Delete")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
@@ -481,6 +538,9 @@ function RoutingGroupDialog({
   readonly onClose: () => void;
   readonly onSave: (group: RoutingGroup) => void;
 }) {
+  const gt = useGT();
+  const m = useMessages();
+  const problemText = useTeamMembersProblemText();
   const settings = useEnvironmentSettings(environmentId);
   const formId = useId();
   const [name, setName] = useState(editing.group.name);
@@ -509,7 +569,7 @@ function RoutingGroupDialog({
   const [rank, setRank] = useState<RoutingGroupRank>(editing.group.rank ?? "order");
   const team = editing.group.team === true;
   const membersProblem = team
-    ? agentTeamMembersProblem({ members, ...(rolesSupported ? { memberRoles } : {}) })
+    ? problemText(agentTeamMembersProblem({ members, ...(rolesSupported ? { memberRoles } : {}) }))
     : null;
   const entries = providerInstanceEntriesFor(providers, settings, null);
   const trimmedName = name.trim();
@@ -535,18 +595,24 @@ function RoutingGroupDialog({
           <DialogTitle>
             {team
               ? editing.index === null
-                ? "Add agent team"
-                : "Edit agent team"
+                ? gt("Add agent team")
+                : gt("Edit agent team")
               : editing.index === null
-                ? "Add routing group"
-                : "Edit routing group"}
+                ? gt("Add routing group")
+                : gt("Edit routing group")}
           </DialogTitle>
           <DialogDescription>
             {team
-              ? "A new thread picked with this team starts on the first model that can run it. That model leads: it plans the work and delegates tasks to the team's models, each with the options set here."
+              ? gt(
+                  "A new thread picked with this team starts on the first model that can run it. That model leads: it plans the work and delegates tasks to the team's models, each with the options set here.",
+                )
               : rank === "quota"
-                ? "A new thread picked with this group starts on the model whose subscription has the most usage left to spend per hour before it resets. It decides once, when the thread starts."
-                : "A new thread picked with this group starts on the first model that can run it, top to bottom. It decides once, when the thread starts."}
+                ? gt(
+                    "A new thread picked with this group starts on the model whose subscription has the most usage left to spend per hour before it resets. It decides once, when the thread starts.",
+                  )
+                : gt(
+                    "A new thread picked with this group starts on the first model that can run it, top to bottom. It decides once, when the thread starts.",
+                  )}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -575,10 +641,14 @@ function RoutingGroupDialog({
             }}
           >
             <div className="grid gap-1.5">
-              <Label htmlFor={`${formId}-name`}>Name</Label>
+              <Label htmlFor={`${formId}-name`}>{gt("Name")}</Label>
               <Input
                 id={`${formId}-name`}
-                placeholder={team ? "Reviewers" : "Fast"}
+                placeholder={
+                  team
+                    ? gt("Reviewers", { $context: "Example name for an agent team" })
+                    : gt("Fast", { $context: "Example name for a routing group" })
+                }
                 maxLength={64}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
@@ -587,7 +657,7 @@ function RoutingGroupDialog({
             </div>
             {quotaSupported ? (
               <div className="grid gap-1.5">
-                <Label htmlFor={`${formId}-rank`}>Start on</Label>
+                <Label htmlFor={`${formId}-rank`}>{gt("Start on")}</Label>
                 <Select
                   value={rank}
                   onValueChange={(value) => {
@@ -595,11 +665,11 @@ function RoutingGroupDialog({
                   }}
                 >
                   <SelectTrigger id={`${formId}-rank`} size="sm">
-                    <SelectValue>{RANK_LABELS[rank]}</SelectValue>
+                    <SelectValue>{m(RANK_LABELS[rank])}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
-                    <SelectItem value="order">{RANK_LABELS.order}</SelectItem>
-                    <SelectItem value="quota">{RANK_LABELS.quota}</SelectItem>
+                    <SelectItem value="order">{m(RANK_LABELS.order)}</SelectItem>
+                    <SelectItem value="quota">{m(RANK_LABELS.quota)}</SelectItem>
                   </SelectPopup>
                 </Select>
               </div>
@@ -607,10 +677,10 @@ function RoutingGroupDialog({
             <div className="grid gap-2">
               <Label>
                 {team
-                  ? "Models; the first leads, the next leads if it can't run"
+                  ? gt("Models; the first leads, the next leads if it can't run")
                   : rank === "quota"
-                    ? "Models, ties in order"
-                    : "Models, in order"}
+                    ? gt("Models, ties in order")
+                    : gt("Models, in order")}
               </Label>
               {entriesDraft.map(({ key, selection: member, role }, index) => {
                 const entry = entries.find(
@@ -621,7 +691,7 @@ function RoutingGroupDialog({
                     <span
                       className={`${team ? "w-9" : "w-5"} text-muted-foreground text-xs tabular-nums`}
                     >
-                      {team && index === 0 ? "Lead" : `${index + 1}.`}
+                      {team && index === 0 ? gt("Lead") : `${index + 1}.`}
                     </span>
                     <ProviderModelPicker
                       environmentId={environmentId}
@@ -636,7 +706,7 @@ function RoutingGroupDialog({
                         member.model,
                       )}
                       triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                      triggerAriaLabel={`Model ${index + 1}`}
+                      triggerAriaLabel={gt("Model {number}", { number: index + 1 })}
                       onInstanceModelChange={(instanceId, model) =>
                         updateMember(index, pickModelSelection(member, instanceId, model))
                       }
@@ -658,13 +728,13 @@ function RoutingGroupDialog({
                         }
                       />
                     ) : (
-                      <span className="text-destructive text-xs">Provider removed</span>
+                      <span className="text-destructive text-xs">{gt("Provider removed")}</span>
                     )}
                     <div className="ms-auto flex items-center gap-1">
                       <Button
                         size="icon-sm"
                         variant="ghost-muted"
-                        aria-label={`Move model ${index + 1} up`}
+                        aria-label={gt("Move model {number} up", { number: index + 1 })}
                         disabled={index === 0}
                         onClick={() => setMembers((current) => moveListItem(current, index, -1))}
                       >
@@ -673,7 +743,7 @@ function RoutingGroupDialog({
                       <Button
                         size="icon-sm"
                         variant="ghost-muted"
-                        aria-label={`Move model ${index + 1} down`}
+                        aria-label={gt("Move model {number} down", { number: index + 1 })}
                         disabled={index === members.length - 1}
                         onClick={() => setMembers((current) => moveListItem(current, index, 1))}
                       >
@@ -682,7 +752,7 @@ function RoutingGroupDialog({
                       <Button
                         size="icon-sm"
                         variant="ghost-destructive"
-                        aria-label={`Remove model ${index + 1}`}
+                        aria-label={gt("Remove model {number}", { number: index + 1 })}
                         disabled={members.length === 1}
                         onClick={() =>
                           setMembers((current) => current.filter((_, at) => at !== index))
@@ -694,21 +764,23 @@ function RoutingGroupDialog({
                     {rolesSupported ? (
                       <div className="grid w-full gap-1 ps-11">
                         <AgentTeamRoleName
-                          label={`Member ${index + 1}`}
+                          label={gt("Member {number}", { number: index + 1 })}
                           placeholder={
-                            index === 0 ? "Name as a worker, when another model leads" : undefined
+                            index === 0
+                              ? gt("Name as a worker, when another model leads")
+                              : undefined
                           }
                           role={role}
                           onChange={(next) => updateRole(index, next)}
                         />
                         <AgentTeamRoleDetails
-                          label={`Member ${index + 1}`}
+                          label={gt("Member {number}", { number: index + 1 })}
                           role={role}
                           onChange={(next) => updateRole(index, next)}
                         >
                           {flowsSupported ? (
                             <AgentTeamHandsTo
-                              label={`Member ${index + 1}`}
+                              label={gt("Member {number}", { number: index + 1 })}
                               row={{ key, role }}
                               rows={entriesDraft}
                               flows={flows}
@@ -738,7 +810,7 @@ function RoutingGroupDialog({
                     }
                   >
                     <PlusIcon className="size-3" aria-hidden />
-                    Add model
+                    {gt("Add model")}
                   </Button>
                 </div>
               ) : null}
@@ -750,12 +822,12 @@ function RoutingGroupDialog({
             </div>
             {rolesSupported ? (
               <div className="grid gap-1.5">
-                <Label htmlFor={`${formId}-shared`}>Team guidance, for everyone</Label>
+                <Label htmlFor={`${formId}-shared`}>{gt("Team guidance, for everyone")}</Label>
                 <Textarea
                   id={`${formId}-shared`}
                   rows={2}
                   maxLength={AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH}
-                  placeholder="Never push to main. Run the tests before you finish."
+                  placeholder={gt("Never push to main. Run the tests before you finish.")}
                   value={sharedGuidance}
                   onChange={(event) => setSharedGuidance(event.target.value)}
                 />
@@ -764,25 +836,27 @@ function RoutingGroupDialog({
             {team ? (
               <>
                 <div className="grid gap-1.5">
-                  <Label htmlFor={`${formId}-lead`}>Lead guidance, for the lead only</Label>
+                  <Label htmlFor={`${formId}-lead`}>{gt("Lead guidance, for the lead only")}</Label>
                   <Textarea
                     id={`${formId}-lead`}
                     rows={3}
                     maxLength={AGENT_TEAM_LEAD_GUIDANCE_MAX_LENGTH}
-                    placeholder="Replaces the default lead guidance for this team. Leave empty to use that."
+                    placeholder={gt(
+                      "Replaces the default lead guidance for this team. Leave empty to use that.",
+                    )}
                     value={leadGuidance}
                     onChange={(event) => setLeadGuidance(event.target.value)}
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor={`${formId}-parallel`}>Tasks at once</Label>
+                  <Label htmlFor={`${formId}-parallel`}>{gt("Tasks at once")}</Label>
                   <div className="w-28">
                     <Input
                       id={`${formId}-parallel`}
                       type="number"
                       min={1}
                       max={32}
-                      placeholder="Unlimited"
+                      placeholder={gt("Unlimited")}
                       value={maxParallel === 0 ? "" : String(maxParallel)}
                       onChange={(event) =>
                         setMaxParallel(
@@ -798,10 +872,10 @@ function RoutingGroupDialog({
         </DialogPanel>
         <DialogFooter variant="bare">
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {gt("Cancel")}
           </Button>
           <Button type="submit" form={formId} disabled={!canSave}>
-            Save
+            {gt("Save")}
           </Button>
         </DialogFooter>
       </DialogPopup>

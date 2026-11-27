@@ -7,6 +7,7 @@ import {
   type RoutingGroup,
 } from "@t3tools/contracts";
 import { agentTeamHandsTo } from "@t3tools/shared/agentTeam";
+import { useGT } from "gt-react";
 import { ChevronRightIcon } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 
@@ -55,6 +56,21 @@ export function namedTeamFlows(
   });
 }
 
+const DUPLICATE_NAME_PROBLEM = /^Two members are named "(.*)"\.$/;
+
+/** `agentTeamMembersProblem` answers in English; this gives the same text in the UI language. */
+export function useTeamMembersProblemText() {
+  const gt = useGT();
+  return (problem: string | null) => {
+    if (problem === null) return null;
+    const name = DUPLICATE_NAME_PROBLEM.exec(problem)?.[1];
+    if (name !== undefined) return gt('Two members are named "{name}".', { name });
+    return problem.startsWith("Two members use the same model.")
+      ? gt("Two members use the same model. Name one, so the lead can tell them apart.")
+      : problem;
+  };
+}
+
 /** The teammates a member may hand part of its task to. Flows go by name, so both need one. */
 export function AgentTeamHandsTo(props: {
   readonly label: string;
@@ -63,16 +79,20 @@ export function AgentTeamHandsTo(props: {
   readonly flows: ReadonlyArray<TeamRowFlow>;
   readonly onChange: (flows: ReadonlyArray<TeamRowFlow>) => void;
 }) {
+  const gt = useGT();
   const { row, flows } = props;
   const teammates = props.rows.filter(
     (candidate) => candidate.key !== row.key && candidate.role.name.trim() !== "",
   );
   return (
-    <fieldset className="grid gap-1" aria-label={`${props.label} may hand parts to`}>
-      <span className="text-muted-foreground text-xs">May hand parts of its tasks to</span>
+    <fieldset
+      className="grid gap-1"
+      aria-label={gt("{label} may hand parts to", { label: props.label })}
+    >
+      <span className="text-muted-foreground text-xs">{gt("May hand parts of its tasks to")}</span>
       {row.role.name.trim() === "" || teammates.length === 0 ? (
         <span className="text-muted-foreground text-xs">
-          Name this member and another one to choose.
+          {gt("Name this member and another one to choose.")}
         </span>
       ) : (
         <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -109,11 +129,12 @@ export function AgentTeamRoleName(props: {
   readonly role: AgentTeamRole;
   readonly onChange: (role: AgentTeamRole) => void;
 }) {
+  const gt = useGT();
   return (
     <Input
       size="sm"
-      aria-label={`${props.label} name`}
-      placeholder={props.placeholder ?? "Name (optional), such as Reviewer"}
+      aria-label={gt("{label} name", { label: props.label })}
+      placeholder={props.placeholder ?? gt("Name (optional), such as Reviewer")}
       maxLength={AGENT_TEAM_ROLE_NAME_MAX_LENGTH}
       value={props.role.name}
       onChange={(event) => props.onChange({ ...props.role, name: event.target.value })}
@@ -129,6 +150,7 @@ export function AgentTeamRoleDetails(props: {
   /** Whom it may hand work to, below the instructions. */
   readonly children?: ReactNode;
 }) {
+  const gt = useGT();
   const [open, setOpen] = useState(false);
   const id = useId();
   const { role } = props;
@@ -142,7 +164,7 @@ export function AgentTeamRoleDetails(props: {
         className="min-w-0 max-w-full justify-self-start"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        aria-label={`${props.label} role`}
+        aria-label={gt("{label} role", { label: props.label })}
         onClick={() => setOpen((current) => !current)}
       >
         <ChevronRightIcon
@@ -153,33 +175,37 @@ export function AgentTeamRoleDetails(props: {
           )}
         />
         <span className="min-w-0 truncate">
-          {open ? "Role & instructions" : summary ? `Role: ${summary}` : "Add role & instructions"}
+          {open
+            ? gt("Role & instructions")
+            : summary
+              ? gt("Role: {summary}", { summary })
+              : gt("Add role & instructions")}
         </span>
       </Button>
       {open ? (
         <div id={id} className="grid gap-2 ps-2">
           <div className="grid gap-1">
             <label htmlFor={`${id}-for`} className="text-muted-foreground text-xs">
-              Give it tasks about (the lead reads this)
+              {gt("Give it tasks about (the lead reads this)")}
             </label>
             <Textarea
               id={`${id}-for`}
               rows={2}
               maxLength={AGENT_TEAM_ROLE_DESCRIPTION_MAX_LENGTH}
-              placeholder="Reviews diffs before they merge"
+              placeholder={gt("Reviews diffs before they merge")}
               value={role.description}
               onChange={(event) => props.onChange({ ...role, description: event.target.value })}
             />
           </div>
           <div className="grid gap-1">
             <label htmlFor={`${id}-how`} className="text-muted-foreground text-xs">
-              Instructions (sent with each of its tasks)
+              {gt("Instructions (sent with each of its tasks)")}
             </label>
             <Textarea
               id={`${id}-how`}
               rows={3}
               maxLength={AGENT_TEAM_INSTRUCTIONS_MAX_LENGTH}
-              placeholder="Only report problems you can reproduce."
+              placeholder={gt("Only report problems you can reproduce.")}
               value={role.instructions}
               onChange={(event) => props.onChange({ ...role, instructions: event.target.value })}
             />

@@ -13,6 +13,7 @@ import { resolveSelectableModel } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { formatProviderUpdateRequiredNotice } from "@t3tools/client-runtime/providerUpdateRequiredModels";
 import { useNavigate } from "@tanstack/react-router";
+import { useGT, useMessages } from "gt-react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import {
   memo,
@@ -26,7 +27,6 @@ import {
   type RefObject,
 } from "react";
 import {
-  BotIcon,
   CheckIcon,
   CrownIcon,
   ListOrderedIcon,
@@ -57,6 +57,7 @@ import {
 } from "./modelPickerKeys";
 import type { PickerRoutingGroup } from "@t3tools/client-runtime/routing";
 import type { ModelPickerTab } from "./ProviderModelPicker.logic";
+import { AUTO_TEAM_TEXT } from "./agentTeamPick.logic";
 import { rankModelPickerSearch } from "@t3tools/client-runtime/model-search";
 import {
   Combobox,
@@ -356,7 +357,7 @@ function WindowKeyDownListener({ onKeyDown }: { onKeyDown: (event: KeyboardEvent
 
 /** The Team tab: the thread's agent team, chosen like a model. */
 export interface PickerTeams {
-  /** The active team's id, or null for no team. */
+  /** The active team's id, or null for a single agent. A model picked in the list leaves it. */
   readonly activeId: string | null;
   readonly saved: ReadonlyArray<{
     readonly id: string;
@@ -386,22 +387,17 @@ interface TeamTabRow {
   readonly disabled: boolean;
 }
 
-function teamTabRows(teams: PickerTeams): ReadonlyArray<TeamTabRow> {
+function teamTabRows(
+  teams: PickerTeams,
+  translate: (text: string) => string,
+): ReadonlyArray<TeamTabRow> {
   const blocked = teams.disabledReason !== null;
   const rows: Array<Omit<TeamTabRow, "key">> = [
-    {
-      row: { kind: "none" },
-      icon: BotIcon,
-      label: "No team",
-      detail: "A single agent",
-      checked: teams.activeId === null,
-      disabled: false,
-    },
     ...AUTO_TEAMS.map((team) => ({
       row: { kind: "auto", auto: team.kind } as const,
       icon: AUTO_TEAM_ICONS[team.kind],
-      label: team.name,
-      detail: team.description,
+      label: translate(AUTO_TEAM_TEXT[team.kind].name),
+      detail: translate(AUTO_TEAM_TEXT[team.kind].description),
       checked: teams.activeId === team.id,
       disabled: blocked,
     })),
@@ -465,6 +461,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     onRequestClose,
     onOpenProviderSetup,
   } = props;
+  const gt = useGT();
+  const m = useMessages();
   const [searchQuery, setSearchQuery] = useState("");
   const modelListRef = useRef<LegendListRef | null>(null);
   const pickerContentRef = useRef<HTMLDivElement>(null);
@@ -495,7 +493,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return modelPickerModelKey(selection.instanceId, model?.slug ?? selection.model);
   });
   const routingGroups = props.onRoutingGroupSelect ? (props.routingGroups ?? []) : [];
-  const teamRows = props.teams ? teamTabRows(props.teams) : [];
+  const teamRows = props.teams ? teamTabRows(props.teams, m) : [];
   const showTeams = teamRows.length > 0;
   const showRoutingGroups = routingGroups.length > 0;
   const routingGroupsLabel = !routingGroups.some((group) => group.team)
@@ -1064,7 +1062,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         next === "favorites"
           ? "Favorites"
           : next === "team"
-            ? "Agent team"
+            ? gt("Agent team")
             : next === "groups"
               ? routingGroupsLabel
               : (entryByInstanceId.get(next)?.displayName ?? next),
