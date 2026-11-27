@@ -91,6 +91,11 @@ export function updatePlanReviewDraft(
   key: string,
   change: (draft: PlanReviewDraft) => PlanReviewDraft,
 ): void {
+  // An edit made before the saved notes were read would replace them on the next write.
+  if (!appAtomRegistry.get(loadedAtom)) {
+    ensureLoaded().catch(() => undefined);
+    return;
+  }
   const drafts = appAtomRegistry.get(draftsAtom);
   const current = drafts[key] ?? EMPTY_PLAN_REVIEW_DRAFT;
   const next = change(current);

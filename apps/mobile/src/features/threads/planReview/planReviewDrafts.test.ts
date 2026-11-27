@@ -33,20 +33,22 @@ vi.mock("../../../lib/atomic-file", () => ({
 
 import { clearPlanReviewDraft, updatePlanReviewDraft } from "./planReviewDrafts";
 
-it("retries a failed read instead of overwriting the saved drafts", async () => {
+it("retries a failed read and keeps saved notes from edits made before it", async () => {
   vi.useFakeTimers();
-  updatePlanReviewDraft("other", (draft) => ({ ...draft, general: "first edit" }));
+  updatePlanReviewDraft("saved", (draft) => ({ ...draft, general: "typed while unread" }));
   await vi.advanceTimersByTimeAsync(400);
   expect(fs.writes).toEqual([]);
 
-  updatePlanReviewDraft("other", (draft) => ({ ...draft, general: "second edit" }));
+  updatePlanReviewDraft("saved", (draft) => ({ ...draft, general: "typed while unread" }));
+  await vi.advanceTimersByTimeAsync(400);
+  updatePlanReviewDraft("other", (draft) => ({ ...draft, general: "after the read" }));
   await vi.advanceTimersByTimeAsync(400);
   vi.useRealTimers();
 
   expect(fs.writes).toHaveLength(1);
   const written = JSON.parse(fs.writes[0]!) as { drafts: Record<string, { general: string }> };
   expect(written.drafts.saved?.general).toBe("kept");
-  expect(written.drafts.other?.general).toBe("second edit");
+  expect(written.drafts.other?.general).toBe("after the read");
 });
 
 it("keeps notes written while the sent version was going out", () => {
