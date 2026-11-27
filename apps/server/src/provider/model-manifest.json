@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-25T10:00:00Z",
+  "updatedAt": "2026-11-25T22:00:00Z",
   "routing": {
     "version": 1,
-    "updatedAt": "2026-11-25T10:00:00Z",
+    "updatedAt": "2026-11-25T22:00:00Z",
     "sources": {
       "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
       "aa-coding": {
@@ -89,6 +89,7 @@
         {
           "models": ["claude-fable-5-2"],
           "effort": "max",
+          "minutes": 591.5,
           "scores": {
             "backend": 56.4,
             "frontend": 84.6,
@@ -113,9 +114,11 @@
         {
           "models": ["claude-fable-5-1"],
           "effort": "xhigh",
+          "minutes": 271.6,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 258.9,
               "scores": {
                 "backend": 39.5,
                 "frontend": 68,
@@ -128,6 +131,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 271.6,
               "scores": {
                 "backend": 45.2,
                 "frontend": 73,
@@ -140,6 +144,7 @@
             },
             {
               "effort": "max",
+              "minutes": 319.1,
               "scores": {
                 "backend": 47,
                 "frontend": 73,
@@ -164,9 +169,11 @@
         {
           "models": ["claude-opus-5-5"],
           "effort": "xhigh",
+          "minutes": 184.7,
           "efforts": [
             {
               "effort": "xhigh",
+              "minutes": 184.7,
               "scores": {
                 "backend": 48.1,
                 "frontend": 85.9,
@@ -179,6 +186,7 @@
             },
             {
               "effort": "max",
+              "minutes": 203.2,
               "scores": {
                 "backend": 49.5,
                 "frontend": 86.8,
@@ -215,9 +223,11 @@
         {
           "models": ["claude-opus-5"],
           "effort": "high",
+          "minutes": 157.0,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 157.0,
               "scores": {
                 "backend": 36.8,
                 "frontend": 54.3,
@@ -230,6 +240,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 182.1,
               "scores": {
                 "backend": 38.8,
                 "frontend": 56.3,
@@ -242,6 +253,7 @@
             },
             {
               "effort": "max",
+              "minutes": 205.1,
               "scores": {
                 "backend": 36,
                 "frontend": 65.7,
@@ -266,6 +278,7 @@
         {
           "models": ["claude-sonnet-5-5"],
           "effort": "xhigh",
+          "minutes": 128.4,
           "writingEffort": "max",
           "scores": {
             "backend": 52.0,
@@ -291,6 +304,7 @@
         {
           "models": ["claude-haiku-5-5"],
           "effort": "xhigh",
+          "minutes": 129.3,
           "scores": {
             "backend": 35.2,
             "frontend": 57.0,
@@ -305,9 +319,11 @@
         {
           "models": ["gpt-6.2-astra"],
           "effort": "xhigh",
+          "minutes": 148.3,
           "efforts": [
             {
               "effort": "low",
+              "minutes": 72.5,
               "scores": {
                 "backend": 58.0,
                 "frontend": 75.4,
@@ -320,6 +336,7 @@
             },
             {
               "effort": "medium",
+              "minutes": 96.3,
               "scores": {
                 "backend": 60.6,
                 "frontend": 79.2,
@@ -332,6 +349,7 @@
             },
             {
               "effort": "high",
+              "minutes": 121.6,
               "scores": {
                 "backend": 64.9,
                 "frontend": 82.1,
@@ -344,6 +362,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 148.3,
               "scores": {
                 "backend": 65.6,
                 "frontend": 83.8,
@@ -356,6 +375,7 @@
             },
             {
               "effort": "max",
+              "minutes": 199.4,
               "scores": {
                 "backend": 68.4,
                 "frontend": 85.9,
@@ -391,6 +411,74 @@
         {
           "models": ["gpt-6.2-sol"],
           "effort": "high",
+          "minutes": 129.3,
+          "efforts": [
+            {
+              "effort": "low",
+              "minutes": 72.9,
+              "scores": {
+                "backend": 59.9,
+                "frontend": 68.1,
+                "visual": 19,
+                "reasoning": 85,
+                "maintainability": 48,
+                "coding": 59.5
+              },
+              "costUsd": 6.43
+            },
+            {
+              "effort": "medium",
+              "minutes": 101.3,
+              "scores": {
+                "backend": 63.0,
+                "frontend": 86.4,
+                "visual": 25,
+                "reasoning": 80,
+                "maintainability": 50,
+                "coding": 63.1
+              },
+              "costUsd": 8.26
+            },
+            {
+              "effort": "high",
+              "minutes": 129.3,
+              "scores": {
+                "backend": 64.3,
+                "frontend": 88.6,
+                "visual": 27,
+                "reasoning": 90,
+                "maintainability": 52,
+                "coding": 66.9
+              },
+              "costUsd": 10.12
+            },
+            {
+              "effort": "xhigh",
+              "minutes": 151.8,
+              "scores": {
+                "backend": 61.4,
+                "frontend": 79.3,
+                "visual": 29,
+                "reasoning": 90,
+                "maintainability": 50,
+                "coding": 64.7
+              },
+              "costUsd": 11.51
+            },
+            {
+              "effort": "max",
+              "minutes": 188.2,
+              "scores": {
+                "backend": 65.8,
+                "frontend": 87.3,
+                "visual": 39,
+                "reasoning": 85,
+                "maintainability": 50,
+                "coding": 67.4
+              },
+              "costUsd": 13.82
+            }
+          ],
           "scores": {
             "backend": 64.3,
             "frontend": 88.6,
@@ -405,7 +493,75 @@
         {
           "models": ["gpt-6.1-sol"],
           "effort": "high",
+          "minutes": 130.6,
           "writingEffort": "max",
+          "efforts": [
+            {
+              "effort": "low",
+              "minutes": 74.6,
+              "scores": {
+                "backend": 37.4,
+                "frontend": 59.2,
+                "visual": 20,
+                "reasoning": 90,
+                "maintainability": 37,
+                "coding": 51.1
+              },
+              "costUsd": 5.81
+            },
+            {
+              "effort": "medium",
+              "minutes": 100.9,
+              "scores": {
+                "backend": 39.9,
+                "frontend": 60.8,
+                "visual": 19,
+                "reasoning": 85,
+                "maintainability": 44,
+                "coding": 51.8
+              },
+              "costUsd": 8.17
+            },
+            {
+              "effort": "high",
+              "minutes": 130.6,
+              "scores": {
+                "backend": 57.5,
+                "frontend": 77.5,
+                "visual": 27,
+                "reasoning": 80,
+                "maintainability": 45,
+                "coding": 59.7
+              },
+              "costUsd": 9.87
+            },
+            {
+              "effort": "xhigh",
+              "minutes": 147.3,
+              "scores": {
+                "backend": 56.8,
+                "frontend": 62.6,
+                "visual": 26,
+                "reasoning": 85,
+                "maintainability": 47,
+                "coding": 58.6
+              },
+              "costUsd": 11.15
+            },
+            {
+              "effort": "max",
+              "minutes": 184.4,
+              "scores": {
+                "backend": 59.4,
+                "frontend": 83.5,
+                "visual": 34,
+                "reasoning": 85,
+                "maintainability": 47,
+                "coding": 63.8
+              },
+              "costUsd": 12.68
+            }
+          ],
           "scores": {
             "backend": 57.5,
             "frontend": 77.5,
@@ -430,7 +586,75 @@
         {
           "models": ["gpt-6.1-terra"],
           "effort": "xhigh",
+          "minutes": 106.3,
           "writingEffort": "max",
+          "efforts": [
+            {
+              "effort": "low",
+              "minutes": 56.4,
+              "scores": {
+                "backend": 31.3,
+                "frontend": 51.5,
+                "visual": 23,
+                "reasoning": 85,
+                "maintainability": 57,
+                "coding": 50.4
+              },
+              "costUsd": 3.12
+            },
+            {
+              "effort": "medium",
+              "minutes": 78.3,
+              "scores": {
+                "backend": 32.2,
+                "frontend": 54.1,
+                "visual": 22,
+                "reasoning": 75,
+                "maintainability": 61,
+                "coding": 49.0
+              },
+              "costUsd": 4.09
+            },
+            {
+              "effort": "high",
+              "minutes": 94.4,
+              "scores": {
+                "backend": 32.4,
+                "frontend": 57.4,
+                "visual": 23,
+                "reasoning": 70,
+                "maintainability": 66,
+                "coding": 49.2
+              },
+              "costUsd": 5.04
+            },
+            {
+              "effort": "xhigh",
+              "minutes": 106.3,
+              "scores": {
+                "backend": 46.0,
+                "frontend": 54.3,
+                "visual": 21,
+                "reasoning": 75,
+                "maintainability": 64,
+                "coding": 53.4
+              },
+              "costUsd": 5.84
+            },
+            {
+              "effort": "max",
+              "minutes": 128.0,
+              "scores": {
+                "backend": 56.6,
+                "frontend": 57.4,
+                "visual": 21,
+                "reasoning": 85,
+                "maintainability": 53,
+                "coding": 58.0
+              },
+              "costUsd": 6.93
+            }
+          ],
           "scores": {
             "backend": 46.0,
             "frontend": 54.3,
@@ -456,9 +680,11 @@
         {
           "models": ["gpt-6-astra"],
           "effort": "xhigh",
+          "minutes": 182.7,
           "efforts": [
             {
               "effort": "low",
+              "minutes": 110.8,
               "scores": {
                 "backend": 56.3,
                 "frontend": 78.9,
@@ -471,6 +697,7 @@
             },
             {
               "effort": "medium",
+              "minutes": 144.0,
               "scores": {
                 "backend": 58.8,
                 "frontend": 62.6,
@@ -483,6 +710,7 @@
             },
             {
               "effort": "high",
+              "minutes": 167.6,
               "scores": {
                 "backend": 59.4,
                 "frontend": 80.1,
@@ -495,6 +723,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 182.7,
               "scores": {
                 "backend": 60.4,
                 "frontend": 80.1,
@@ -507,6 +736,7 @@
             },
             {
               "effort": "max",
+              "minutes": 203.1,
               "scores": {
                 "backend": 60.2,
                 "frontend": 83.4,
@@ -544,9 +774,11 @@
         {
           "models": ["gpt-6-sol"],
           "effort": "xhigh",
+          "minutes": 142.0,
           "efforts": [
             {
               "effort": "low",
+              "minutes": 84.3,
               "scores": {
                 "backend": 31.1,
                 "frontend": 54.4,
@@ -559,6 +791,7 @@
             },
             {
               "effort": "medium",
+              "minutes": 109.7,
               "scores": {
                 "backend": 37.4,
                 "frontend": 55.5,
@@ -571,6 +804,7 @@
             },
             {
               "effort": "high",
+              "minutes": 123.0,
               "scores": {
                 "backend": 42.6,
                 "frontend": 55.7,
@@ -583,6 +817,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 142.0,
               "scores": {
                 "backend": 45.3,
                 "frontend": 71.2,
@@ -595,6 +830,7 @@
             },
             {
               "effort": "max",
+              "minutes": 149.7,
               "scores": {
                 "backend": 46.7,
                 "frontend": 76.6,
@@ -630,9 +866,11 @@
         {
           "models": ["gpt-6-luna"],
           "effort": "xhigh",
+          "minutes": 140.5,
           "efforts": [
             {
               "effort": "low",
+              "minutes": 77.8,
               "scores": {
                 "backend": 15.4,
                 "frontend": 9.4,
@@ -645,6 +883,7 @@
             },
             {
               "effort": "medium",
+              "minutes": 95.1,
               "scores": {
                 "backend": 14.5,
                 "frontend": 35.3,
@@ -657,6 +896,7 @@
             },
             {
               "effort": "high",
+              "minutes": 116.1,
               "scores": {
                 "backend": 25.2,
                 "frontend": 14.1,
@@ -669,6 +909,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 140.5,
               "scores": {
                 "backend": 35.7,
                 "frontend": 56.8,
@@ -681,6 +922,7 @@
             },
             {
               "effort": "max",
+              "minutes": 158.0,
               "scores": {
                 "backend": 37.1,
                 "frontend": 51.2,
@@ -717,6 +959,7 @@
         {
           "models": ["gemini-4-neon"],
           "effort": "xhigh",
+          "minutes": 213.6,
           "scores": {
             "backend": 58.5,
             "frontend": 70.2,
@@ -741,6 +984,7 @@
         {
           "models": ["gemini-4-carbon"],
           "effort": "high",
+          "minutes": 148.9,
           "scores": {
             "backend": 55.5,
             "frontend": 71.9,
@@ -765,6 +1009,7 @@
         {
           "models": ["gemini-4-hydrogen"],
           "effort": "default",
+          "minutes": 126.8,
           "scores": {
             "backend": 50.5,
             "frontend": 71.1,
@@ -789,6 +1034,7 @@
         {
           "models": ["gemini-4-argon"],
           "effort": "unknown",
+          "minutes": 140.1,
           "writingEffort": "high",
           "scores": {
             "backend": 45.4,
@@ -815,6 +1061,7 @@
         {
           "models": ["gemini-3.8-flash"],
           "effort": "default",
+          "minutes": 141.9,
           "writingEffort": "high",
           "scores": {
             "backend": 32.9,
@@ -841,9 +1088,11 @@
         {
           "models": ["grok-4.7"],
           "effort": "high",
+          "minutes": 226.5,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 226.5,
               "scores": {
                 "backend": 48.4,
                 "frontend": 58.6,
@@ -856,6 +1105,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 268.7,
               "scores": {
                 "backend": 47.1,
                 "frontend": 42.5,
@@ -892,9 +1142,11 @@
         {
           "models": ["grok-4.6"],
           "effort": "xhigh",
+          "minutes": 359.0,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 292.0,
               "scores": {
                 "backend": 38.4,
                 "frontend": 50.7,
@@ -907,6 +1159,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 359.0,
               "scores": {
                 "backend": 43.2,
                 "frontend": 59.0,
@@ -941,9 +1194,11 @@
         {
           "models": ["k3.1-pro", "kimi-k3.1-pro"],
           "effort": "xhigh",
+          "minutes": 231.9,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 129.7,
               "scores": {
                 "backend": 40.8,
                 "frontend": 60.8,
@@ -956,6 +1211,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 231.9,
               "scores": {
                 "backend": 49.3,
                 "frontend": 80.6,
@@ -994,6 +1250,7 @@
         {
           "models": ["kimi-k3", "k3"],
           "effort": "high",
+          "minutes": 297.5,
           "writingEffort": "max",
           "scores": {
             "backend": 35.1,
@@ -1020,6 +1277,7 @@
         {
           "models": ["qwen4-max"],
           "effort": "default",
+          "minutes": 114.1,
           "scores": {
             "backend": 40.5,
             "frontend": 77.8,
@@ -1045,6 +1303,7 @@
         {
           "models": ["qwen3.8-flash"],
           "effort": "default",
+          "minutes": 316.8,
           "writingEffort": "xhigh",
           "scores": {
             "backend": 33.6,
@@ -1070,10 +1329,17 @@
         },
         {
           "models": ["deepseek-v4.1-flash-1017", "deepseek-flash"],
+          "balancedRun": {
+            "agentId": "dsh-acp.mjs",
+            "effort": "max",
+            "options": [{ "id": "t3_agent_preset", "value": "deepseek-stack" }]
+          },
           "effort": "high",
+          "minutes": 115.0,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 115.0,
               "scores": {
                 "backend": 38.1,
                 "frontend": 54.5,
@@ -1086,6 +1352,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 135.6,
               "scores": {
                 "backend": 37.2,
                 "frontend": 58.9,
@@ -1098,6 +1365,7 @@
             },
             {
               "effort": "max",
+              "minutes": 173.9,
               "scores": {
                 "backend": 45.1,
                 "frontend": 58.7,
@@ -1136,9 +1404,11 @@
         {
           "models": ["deepseek-v4-pro"],
           "effort": "high",
+          "minutes": 151.1,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 151.1,
               "scores": {
                 "backend": 33.3,
                 "frontend": 18.5,
@@ -1151,6 +1421,7 @@
             },
             {
               "effort": "max",
+              "minutes": 205.8,
               "scores": {
                 "backend": 37.6,
                 "frontend": 41.2,
@@ -1177,9 +1448,11 @@
         {
           "models": ["minimax-m3.1-flash"],
           "effort": "xhigh",
+          "minutes": 173.0,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 155.6,
               "scores": {
                 "backend": 32.4,
                 "frontend": 57.4,
@@ -1192,6 +1465,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 173.0,
               "scores": {
                 "backend": 37.5,
                 "frontend": 65.4,
@@ -1204,6 +1478,7 @@
             },
             {
               "effort": "max",
+              "minutes": 193.6,
               "scores": {
                 "backend": 40.8,
                 "frontend": 54.4,
@@ -1241,6 +1516,7 @@
         {
           "models": ["mimo-v2.6-pro"],
           "effort": "default",
+          "minutes": 431.1,
           "scores": {
             "backend": 37.2,
             "frontend": 70.0,
@@ -1267,6 +1543,7 @@
         {
           "models": ["glm-5.4", "t3-bigmodel-api::GLM-5.4"],
           "effort": "max",
+          "minutes": 125.8,
           "scores": {
             "backend": 45.9,
             "frontend": 56.7,
@@ -1293,9 +1570,11 @@
         {
           "models": ["glm-5.3", "t3-bigmodel-api::GLM-5.3"],
           "effort": "high",
+          "minutes": 166.7,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 166.7,
               "scores": {
                 "backend": 37.5,
                 "frontend": 71.0,
@@ -1308,6 +1587,7 @@
             },
             {
               "effort": "max",
+              "minutes": 279.6,
               "scores": {
                 "backend": 36.8,
                 "frontend": 54.6,
@@ -1345,9 +1625,11 @@
         {
           "models": ["glm-5.3-flash", "t3-bigmodel-api::GLM-5.3-Flash"],
           "effort": "high",
+          "minutes": 192.8,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 192.8,
               "scores": {
                 "backend": 27.1,
                 "frontend": 43.8,
@@ -1360,6 +1642,7 @@
             },
             {
               "effort": "max",
+              "minutes": 229.3,
               "scores": {
                 "backend": 30,
                 "frontend": 32.7,
@@ -1398,9 +1681,11 @@
         {
           "models": ["muse-wonder"],
           "effort": "high",
+          "minutes": 113.0,
           "efforts": [
             {
               "effort": "high",
+              "minutes": 113.0,
               "scores": {
                 "backend": 41.1,
                 "frontend": 57.7,
@@ -1413,6 +1698,7 @@
             },
             {
               "effort": "xhigh",
+              "minutes": 135.7,
               "scores": {
                 "backend": 40.3,
                 "frontend": 54.5,
@@ -1425,6 +1711,7 @@
             },
             {
               "effort": "max",
+              "minutes": 156.7,
               "scores": {
                 "backend": 44.3,
                 "frontend": 57.4,
@@ -1460,6 +1747,7 @@
         {
           "models": ["muse-spark-1.3"],
           "effort": "default",
+          "minutes": 145.8,
           "scores": {
             "backend": 37.5,
             "frontend": 67.8,
@@ -1468,13 +1756,13 @@
             "maintainability": 36,
             "coding": 49.2
           },
-          "costUsd": 0.32,
           "marketShare": 1.27,
           "fading": true
         },
         {
           "models": ["hy4", "hy4std"],
           "effort": "default",
+          "minutes": 331.6,
           "writingEffort": "high",
           "scores": {
             "backend": 52.1,
@@ -1502,6 +1790,7 @@
         {
           "models": ["hy4-flash", "hy4flash"],
           "effort": "default",
+          "minutes": 139.6,
           "scores": {
             "backend": 38.8,
             "frontend": 40.3,
@@ -1517,6 +1806,7 @@
         {
           "models": ["mimo-v2.6-flash"],
           "effort": "default",
+          "minutes": 597.5,
           "writingEffort": "max",
           "scores": {
             "backend": 33.5,
@@ -1544,6 +1834,7 @@
         {
           "models": ["step-5-preview"],
           "effort": "default",
+          "minutes": 279.9,
           "scores": {
             "backend": 31.8,
             "frontend": 37.5,
@@ -1560,6 +1851,7 @@
         {
           "models": ["qwen3.8-max"],
           "effort": "default",
+          "minutes": 465.4,
           "writingEffort": "xhigh",
           "scores": {
             "backend": 36.2,
@@ -1585,6 +1877,7 @@
         {
           "models": ["minimax-m3"],
           "effort": "high",
+          "minutes": 99.1,
           "scores": {
             "backend": 25.8,
             "frontend": 39.8,
@@ -1598,6 +1891,19 @@
           "marketShare": 0.24
         }
       ],
+      "balancedFirst": {
+        "default": ["claude-opus-5-5", "gemini-4-neon"],
+        "bySubtask": {
+          "backend": [
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-astra",
+            "gpt-6-sol"
+          ]
+        }
+      },
       "harnessScenarios": {
         "claudeAgent": {
           "software": 59.97,

@@ -357,6 +357,34 @@ describe("acpRegistrySnapshotReadiness", () => {
     ]);
   });
 
+  it("reads a model's own options from its choice in the model select", () => {
+    const effort = {
+      id: "reasoning_effort",
+      name: "Reasoning effort",
+      category: "thought_level",
+      type: "select" as const,
+      currentValue: "max",
+      options: [{ value: "max", name: "Max" }],
+    };
+    const { models } = normalizeAcpRegistryLiveConfiguration([
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "flash",
+        options: [
+          { value: "flash", name: "Flash" },
+          { value: "other", name: "Other", _meta: { configOptions: [effort] } },
+        ],
+      },
+    ]);
+    expect(models.map((model) => model.optionDescriptors?.map((option) => option.id))).toEqual([
+      undefined,
+      ["reasoning_effort"],
+    ]);
+  });
+
   it("gives each model the options and vendor it lists in _meta", () => {
     const contextWindow = {
       id: "context_window",

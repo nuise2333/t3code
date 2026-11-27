@@ -5,6 +5,7 @@ import {
   presetAgents,
   presetOption,
   presetStream,
+  withModelEfforts,
 } from "./lib/dsh-acp-presets.mjs";
 
 const presetRows = [
@@ -190,5 +191,48 @@ describe("DSH ACP presets", () => {
       (name) => !["ds-mode", "ds-principles"].includes(name),
     );
     expect([...routed].toSorted()).toEqual(vendored.toSorted());
+  });
+
+  it("lists each model's own reasoning levels, and leaves one it cannot read alone", async () => {
+    const ctx = {
+      llm: {
+        resolveModelInfo: async (_provider, model) => {
+          if (model === "gone") throw new Error("unknown model");
+          return model === "plain"
+            ? {}
+            : {
+                reasoning: {
+                  efforts: [
+                    { id: "high", name: "High" },
+                    { id: "max", name: "Max" },
+                  ],
+                },
+              };
+        },
+      },
+    };
+    const choice = (model) => ({ value: JSON.stringify(["magpie", model]), name: model });
+    const [model, other] = await withModelEfforts(ctx, [
+      {
+        id: "model",
+        type: "select",
+        options: [{ group: "magpie", options: ["flash", "plain", "gone"].map(choice) }],
+      },
+      { id: "other", type: "select", options: [choice("flash")] },
+    ]);
+    const [flash, plain, gone] = model.options[0].options;
+    expect(flash._meta.configOptions[0]).toMatchObject({
+      id: "reasoning_effort",
+      category: "thought_level",
+      currentValue: "",
+    });
+    expect(flash._meta.configOptions[0].options.map((option) => option.value)).toEqual([
+      "",
+      "high",
+      "max",
+    ]);
+    expect(plain._meta.configOptions).toEqual([]);
+    expect(gone._meta).toBeUndefined();
+    expect(other.options[0]._meta).toBeUndefined();
   });
 });

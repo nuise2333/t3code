@@ -2270,7 +2270,7 @@ describe("chooseAutoModel", () => {
           models: ["model-sol"],
           effort: "high",
           scores: { ...scores(79, 100), frontend: 90 },
-          costUsd: 10,
+          costUsd: 11,
           marketShare: 1,
         },
         // Never measured on writing, and on no tier row: only the board makes it a candidate.
@@ -2333,6 +2333,190 @@ describe("chooseAutoModel", () => {
     );
     expect(worker("balanced", null, { models: closeValue })).toStrictEqual(opus);
     expect(worker("cheap", "backend")).toStrictEqual(cn);
+    // Another lab's model stays out however low its price.
+    const cheapSol = board.models.map((entry) =>
+      entry.models[0] === "model-sol" ? { ...entry, costUsd: 0.05 } : entry,
+    );
+    expect(worker("cheap", "backend", { models: cheapSol })).toStrictEqual(cn);
+    // Balanced takes its preferred models first, by subtask, while they are capable enough.
+    const firstPick = (subtask: TeamSubtask, models = board.models) =>
+      chooseTeamWorkerModel({
+        kind: "balanced",
+        subtask,
+        table: {
+          ...tableOf(ROWS),
+          teamBoard: {
+            ...board,
+            models,
+            balancedFirst: { default: ["model-opus"], bySubtask: { frontend: ["model-sol"] } },
+          },
+        },
+        taskClass: "implement",
+        providers: all,
+        settings: settingsFor(all),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    expect(firstPick("backend")).toStrictEqual(opus);
+    expect(firstPick("frontend")).toStrictEqual(sol);
+    // Close in score, the faster preferred model wins, though it costs more.
+    const closeFirst = (opusMinutes: number) =>
+      board.models.map((entry) =>
+        entry.models[0] === "model-opus"
+          ? { ...entry, minutes: opusMinutes }
+          : entry.models[0] === "model-sol"
+            ? { ...entry, minutes: 150 }
+            : entry,
+      );
+    const bothFirst = (models: typeof board.models) =>
+      chooseTeamWorkerModel({
+        kind: "balanced",
+        subtask: "backend",
+        table: {
+          ...tableOf(ROWS),
+          teamBoard: {
+            ...board,
+            models,
+            balancedFirst: { default: ["model-opus", "model-sol"], bySubtask: {} },
+          },
+        },
+        taskClass: "implement",
+        providers: all,
+        settings: settingsFor(all),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    expect(bothFirst(closeFirst(100))).toStrictEqual(opus);
+    expect(bothFirst(closeFirst(200))).toStrictEqual(sol);
+    const weakOpus = board.models.map((entry) =>
+      entry.models[0] === "model-opus" ? { ...entry, scores: scores(50) } : entry,
+    );
+    expect(firstPick("backend", weakOpus)).toStrictEqual(sol);
+    // A subscription with usage left costs Balanced a share of the list price.
+    const subscribed = {
+      ...claude(),
+      usageLimits: {
+        checkedAt: "2026-07-01T00:00:00.000Z",
+        windows: [
+          {
+            id: "weekly",
+            label: "Weekly",
+            kind: "weekly" as const,
+            usedPercent: 10,
+            windowDurationMins: 10_080,
+          },
+        ],
+      },
+    };
+    const nearPrice = board.models.map((entry) =>
+      entry.models[0] === "model-opus" ? { ...entry, costUsd: 25, marketShare: 0.5 } : entry,
+    );
+    const byPrice = (provider: ServerProvider) =>
+      worker("balanced", null, { providers: [provider, codex()], models: nearPrice });
+    expect(byPrice(claude())).toStrictEqual(sol);
+    expect(byPrice(subscribed as ServerProvider)).toStrictEqual(opus);
+    // A spend budget or add-on credits are no subscription.
+    for (const id of ["monthly_spend", "add-on"]) {
+      const budget = {
+        ...subscribed,
+        usageLimits: {
+          ...subscribed.usageLimits,
+          windows: [{ id, label: "Spend", kind: "monthly" as const, usedPercent: 9 }],
+        },
+      };
+      expect(byPrice(budget as ServerProvider)).toStrictEqual(sol);
+    }
+    // A model Balanced runs a fixed way goes to that agent at that level, or elsewhere at that level.
+    const presetOption = {
+      id: "preset",
+      label: "Preset",
+      type: "select" as const,
+      options: [{ id: "stack", label: "Stack" }],
+    };
+    const harnessId = ProviderInstanceId.make("harness");
+    const harness = provider(harnessId, "acpRegistry", ["model-sol"], {}, [effort, presetOption]);
+    const fixed = board.models.map((entry) =>
+      entry.models[0] === "model-sol"
+        ? {
+            ...entry,
+            efforts: [
+              { effort: "high", scores: scores(79), costUsd: 11 },
+              { effort: "max", scores: scores(80), costUsd: 12 },
+            ],
+            balancedRun: {
+              agentId: "harness-agent",
+              effort: "max",
+              options: [{ id: "preset", value: "stack" }],
+            },
+          }
+        : entry,
+    );
+    const fixedRun = (kind: "balanced" | "best", providers: ReadonlyArray<ServerProvider>) =>
+      chooseTeamWorkerModel({
+        kind,
+        subtask: "backend",
+        table: { ...tableOf(ROWS), teamBoard: { ...board, models: fixed } },
+        taskClass: "implement",
+        providers,
+        settings: {
+          ...settingsFor(providers),
+          providerInstances: {
+            ...settingsFor(providers).providerInstances,
+            [harnessId]: {
+              driver: harness.driver,
+              enabled: true,
+              config: { agentId: "harness-agent" },
+            },
+          },
+        },
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    expect(fixedRun("balanced", [codex(), harness])).toStrictEqual({
+      instanceId: harnessId,
+      model: "model-sol",
+      options: [
+        { id: "preset", value: "stack" },
+        { id: "effort", value: "max" },
+      ],
+    });
+    expect(fixedRun("balanced", [codex()])).toStrictEqual(at(codexId, "model-sol", "max"));
+    // The agent is passed over while it can't run that level.
+    const highOnly = provider(harnessId, "acpRegistry", ["model-sol"], {}, [
+      { id: "effort", label: "Effort", type: "select", options: [{ id: "high", label: "High" }] },
+      presetOption,
+    ]);
+    expect(fixedRun("balanced", [codex(), highOnly])).toStrictEqual(
+      at(codexId, "model-sol", "max"),
+    );
+    expect(fixedRun("best", [codex(), harness])).toStrictEqual(sol);
+    // Best takes the faster of two about as strong, not one well behind.
+    const timedBest = (solMinutes: number, solScore: number) =>
+      board.models.map((entry) =>
+        entry.models[0] === "model-opus"
+          ? { ...entry, minutes: 200 }
+          : entry.models[0] === "model-sol"
+            ? { ...entry, scores: scores(solScore), minutes: solMinutes }
+            : entry,
+      );
+    expect(worker("best", "backend", { models: timedBest(100, 78) })).toStrictEqual(sol);
+    expect(worker("best", "backend", { models: timedBest(300, 78) })).toStrictEqual(opus);
+    expect(worker("best", "backend", { models: timedBest(100, 70) })).toStrictEqual(opus);
+    // Balanced pays for time too: at one price, twice as slow needs more points.
+    const timedBalanced = (opusScore: number) =>
+      timedBest(100, 70).map((entry) =>
+        entry.models[0] === "model-opus"
+          ? { ...entry, scores: scores(opusScore), costUsd: 11, marketShare: 0.5 }
+          : entry,
+      );
+    expect(worker("balanced", "backend", { models: timedBalanced(72) })).toStrictEqual(sol);
+    expect(worker("balanced", "backend", { models: timedBalanced(80) })).toStrictEqual(opus);
     expect(worker("cheap", "backend", { taskClass: "hard" })).toStrictEqual(cnPro);
     expect(worker("cheap", "synthesis")).toStrictEqual(cnPro);
     const cnSpike = board.models.map((entry) =>
@@ -2371,7 +2555,9 @@ describe("chooseAutoModel", () => {
     const solPick = (kind: "balanced" | "best", models: typeof board.models) =>
       worker(kind, "backend", { providers: codexOnly, models })?.options;
     expect(solPick("best", solAt(50, 60, 70))).toStrictEqual([{ id: "effort", value: "high" }]);
-    expect(solPick("balanced", solAt(55, 60, 90))).toStrictEqual([{ id: "effort", value: "low" }]);
+    expect(solPick("balanced", solAt(58, 60, 61))).toStrictEqual([{ id: "effort", value: "low" }]);
+    // Low's sub-score is no bargain when the level loses that much overall.
+    expect(solPick("balanced", solAt(55, 70, 90))).toStrictEqual([{ id: "effort", value: "high" }]);
     expect(
       worker("best", "backend", {
         providers: codexOnly,
@@ -2430,6 +2616,18 @@ describe("chooseAutoModel", () => {
         ),
       })?.model,
     ).toBe("fake-cn");
+    // A capable model twice as slow must cost a quarter; one of unknown speed counts as the slowest.
+    const timed = (cnMinutes: number, proMinutes: number | undefined, cnCost: number) =>
+      board.models.map((entry) =>
+        entry.models[0] === "fake-cn"
+          ? { ...entry, costUsd: cnCost, minutes: cnMinutes }
+          : entry.models[0] === "fake-cn-pro" && proMinutes !== undefined
+            ? { ...entry, minutes: proMinutes }
+            : entry,
+      );
+    expect(worker("cheap", "backend", { models: timed(200, 100, 2) })).toStrictEqual(cnPro);
+    expect(worker("cheap", "backend", { models: timed(200, 100, 1) })).toStrictEqual(cn);
+    expect(worker("cheap", "backend", { models: timed(200, undefined, 2) })).toStrictEqual(cn);
     // Writing was measured at one level of its own.
     expect(
       worker("best", "synthesis", {

@@ -108,7 +108,7 @@ const decodeModelMeta = Schema.decodeUnknownOption(
   }),
 );
 
-/** Options and vendor a model lists in `_meta`, in the shape scripts/qoder-acp.mjs uses. */
+/** Options and vendor a model lists in `_meta`, in the shape scripts/qoder-acp.mjs and dsh-acp.mjs use. */
 function advertisedModelMeta(
   meta: Readonly<Record<string, unknown>> | null | undefined,
 ): Pick<AcpRegistryProbeModel, "optionDescriptors" | "subProvider"> {
@@ -259,6 +259,7 @@ export function normalizeAcpRegistryLiveConfiguration(
   const modelOption = findModelConfigOption(configOptions);
   const currentModelId =
     modelOption?.type === "select" ? modelOption.currentValue : modelState?.currentModelId;
+  const choices = modelOption?.type === "select" ? flattenSelectChoices(modelOption.options) : [];
   const candidates =
     modelOption === undefined
       ? (modelState?.availableModels ?? []).map((model) => ({
@@ -266,7 +267,7 @@ export function normalizeAcpRegistryLiveConfiguration(
           name: model.name,
           description: model.description ?? null,
         }))
-      : flattenSelectChoices(modelOption.options).map((model) => ({
+      : choices.map((model) => ({
           id: model.value,
           name: model.name,
           description: model.description ?? null,
@@ -277,7 +278,9 @@ export function normalizeAcpRegistryLiveConfiguration(
       : (boundedOpaqueValue(currentModelId, MAX_ID_LENGTH) ?? null);
   const effortOption = configOptions.find((option) => option.category === "thought_level");
   const models = normalizeModels(candidates, boundedCurrentModelId).map((model) => {
-    const meta = modelState?.availableModels.find((info) => info.modelId === model.id)?._meta;
+    const meta =
+      modelState?.availableModels.find((info) => info.modelId === model.id)?._meta ??
+      choices.find((choice) => choice.value === model.id)?._meta;
     const reasoningEffort = advertisedReasoningEffort(effortOption, meta);
     return {
       ...model,

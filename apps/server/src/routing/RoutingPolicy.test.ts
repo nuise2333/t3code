@@ -146,11 +146,10 @@ describe("RoutingPolicy.routeTeamWorker", () => {
     readonly prompt: string;
     readonly effort: string;
   }>([
-    { kind: "cheap", prompt: "Where is the sync job scheduled?", effort: "high" },
-    { kind: "cheap", prompt: "Add a CSV export button to the reports page.", effort: "high" },
+    { kind: "cheap", prompt: "Where is the sync job scheduled?", effort: "low" },
+    { kind: "cheap", prompt: "Add a CSV export button to the reports page.", effort: "low" },
     { kind: "cheap", prompt: DEBUG, effort: "high" },
-    // Measured higher at high than at xhigh.
-    { kind: "best", prompt: DEBUG, effort: "high" },
+    { kind: "best", prompt: DEBUG, effort: "max" },
   ])(
     "a $kind worker runs at the effort the board picked it on, not the model's low default: $effort",
     ({ kind, prompt, effort }) =>

@@ -677,6 +677,13 @@ function quotaFunding(
   if (provider.driver === "codex" && windows.every((window) => window.id === "individual")) {
     return "credits";
   }
+  // An Enterprise account's only window can be its spend budget, which bills at list price.
+  if (
+    provider.driver === "claudeAgent" &&
+    windows.every((window) => window.id === "monthly_spend")
+  ) {
+    return "credits";
+  }
   return "subscription";
 }
 
@@ -986,17 +993,30 @@ export function inferTeamSubtask(input: {
 
 /** The share of the best Chinese model's score a Cheap worker needs. */
 const CHEAP_PASS_SHARE: Readonly<Record<RoutingTaskClass, number>> = {
-  quick_edit: 0.75,
-  readonly: 0.85,
-  implement: 0.85,
-  hard: 0.95,
+  quick_edit: 0.7,
+  readonly: 0.75,
+  implement: 0.8,
+  hard: 0.87,
 };
+/** Cheap weighs price by time to this power: a worker twice as slow must cost a quarter. */
+const CHEAP_TIME_POWER = 2;
 /** Cheap stops here except for `newest` models, so a coarse score can't buy an old flagship. */
 const CHEAP_MAX_COST_USD = 10;
 /** The adoption board's own line between high and low scores: the median coding total. */
 const BALANCED_MIN_CODING = 47.97;
 /** The share of the best listed model's score a Balanced worker needs. */
 const BALANCED_PASS_SHARE = 0.75;
+/** A level this far below its model's best total won its sub-score by luck, so Balanced skips it. */
+const BALANCED_LEVEL_SLACK = 5;
+/** Best takes the fastest within this many points, when its broader score is about as good too. */
+const BEST_NEAR_SCORE = 3;
+const BEST_NEAR_BROADER = 4;
+/** What a subscription with usage left makes of a model's list price; only Balanced counts it. */
+const SUBSCRIPTION_PRICE_SHARE = 0.3;
+/** Among Balanced's preferred models, this close in score the faster wins. */
+const PREFERRED_NEAR_SCORE = 3;
+/** Balanced waits twice as long only for this many more points. */
+const POINTS_PER_TIME_DOUBLING = 4;
 /** Balanced pays twice the price only for this many more points. */
 const POINTS_PER_COST_DOUBLING = 5;
 /** Balanced treats value this close as a tie and takes the more used model. */
@@ -1019,6 +1039,7 @@ interface TeamBoardPick {
   readonly score: number;
   readonly coding: number;
   readonly costUsd: number | undefined;
+  readonly minutes: number | undefined;
 }
 
 /**
@@ -1026,6 +1047,7 @@ interface TeamBoardPick {
  * for this user; with none left the model keeps its own row, and runs at the nearest level offered.
  */
 function teamBoardPicks(
+  kind: AutoTeamKind,
   board: TeamBoardModel,
   subtask: TeamSubtask | null,
   offered: (effort: string) => boolean,
@@ -1034,14 +1056,18 @@ function teamBoardPicks(
   cap: string,
 ): ReadonlyArray<TeamBoardPick> {
   const measured = board.efforts ?? [];
+  const fixed = kind === "balanced" ? board.balancedRun?.effort : undefined;
   // A level of unknown price counts as the dearest one, so it can't slip under a price limit.
   const prices = [board, ...measured].flatMap(({ costUsd }) => costUsd ?? []);
   const unknownPrice = prices.length === 0 ? undefined : Math.max(...prices);
+  const times = [board, ...measured].flatMap(({ minutes }) => minutes ?? []);
+  const unknownTime = times.length === 0 ? undefined : Math.max(...times);
   if (subtask !== null && subtask in WRITING_AXIS) {
     const score = board.scores[subtask];
-    const effort = board.writingEffort ?? board.effort;
+    const effort = fixed ?? board.writingEffort ?? board.effort;
     const level = runsAt(effort);
     const at = measured.find((row) => row.effort === level);
+    const atBase = level === board.effort || effortLevel(effort) < 0;
     return score === undefined
       ? []
       : [
@@ -1049,23 +1075,33 @@ function teamBoardPicks(
             board,
             effort,
             score,
-            coding: board.scores.coding,
-            costUsd: at?.costUsd ?? (level === board.effort ? board.costUsd : unknownPrice),
+            coding: at?.scores.coding ?? board.scores.coding,
+            costUsd: at?.costUsd ?? (atBase ? board.costUsd : unknownPrice),
+            minutes: at?.minutes ?? (atBase ? board.minutes : undefined),
           },
         ];
   }
   const axis = (subtask ?? "coding") as keyof (typeof measured)[number]["scores"];
   const rows = measured.filter(
-    (row) => offered(row.effort) && effortLevel(row.effort) <= effortLevel(cap),
+    (row) =>
+      (fixed === undefined || row.effort === fixed) &&
+      offered(row.effort) &&
+      effortLevel(row.effort) <= effortLevel(fixed ?? cap),
   );
-  return (rows.length > 0 ? rows : [{ ...board, costUsd: unknownPrice }]).map((row) => ({
-    board,
-    effort: row.effort,
-    score: row.scores[axis],
-    coding: row.scores.coding,
-    costUsd: row.costUsd,
-  }));
+  return (rows.length > 0 ? rows : [{ ...board, costUsd: unknownPrice, minutes: unknownTime }]).map(
+    (row) => ({
+      board,
+      effort: row.effort,
+      score: row.scores[axis],
+      coding: row.scores.coding,
+      costUsd: row.costUsd,
+      minutes: row.minutes,
+    }),
+  );
 }
+
+const bestCoding = (board: TeamBoardModel) =>
+  Math.max(board.scores.coding, ...(board.efforts ?? []).map((row) => row.scores.coding));
 
 /** The board model and level an automatic team wants, before choosing which agent runs it. */
 function chooseBoardModel(
@@ -1073,16 +1109,35 @@ function chooseBoardModel(
   subtask: TeamSubtask | null,
   taskClass: RoutingTaskClass,
   picks: ReadonlyArray<TeamBoardPick>,
+  /** Balanced's preferred models for the subtask. */
+  first: ReadonlyArray<string> = [],
 ): TeamBoardPick | undefined {
   const cost = (pick: TeamBoardPick) => pick.costUsd ?? Number.POSITIVE_INFINITY;
   const axis = subtask === null ? undefined : WRITING_AXIS[subtask];
+  const times = picks.flatMap(({ minutes }) => minutes ?? []);
+  const unknownTime = times.length === 0 ? 1 : Math.max(...times);
+  const time = (pick: TeamBoardPick) => pick.minutes ?? unknownTime;
   // Many sub-scores tie at 100: the broader score decides, then the coding total, then the price.
   const strongest = (a: TeamBoardPick, b: TeamBoardPick) =>
     b.score - a.score ||
     (axis === undefined ? 0 : (b.board.scores[axis] ?? 0) - (a.board.scores[axis] ?? 0)) ||
     b.coding - a.coding ||
     (cost(a) === cost(b) ? 0 : cost(a) - cost(b));
-  if (kind === "best") return [...picks].sort(strongest)[0];
+  if (kind === "best") {
+    const top = [...picks].sort(strongest)[0];
+    const broader = (pick: TeamBoardPick) =>
+      axis === undefined ? pick.coding : (pick.board.scores[axis] ?? 0);
+    return picks
+      .filter(
+        (pick) =>
+          top !== undefined &&
+          pick.score >= top.score - BEST_NEAR_SCORE &&
+          broader(pick) >= broader(top) - BEST_NEAR_BROADER,
+      )
+      .sort((a, b) => (time(a) === time(b) ? strongest(a, b) : time(a) - time(b)))[0];
+  }
+  const nearOwnBest = (pick: TeamBoardPick) =>
+    axis !== undefined || pick.coding >= bestCoding(pick.board) - BALANCED_LEVEL_SLACK;
   const affordable = (pick: TeamBoardPick) => cost(pick) <= CHEAP_MAX_COST_USD;
   const eligible = picks.filter((pick) =>
     kind === "cheap"
@@ -1090,31 +1145,47 @@ function chooseBoardModel(
       : pick.costUsd !== undefined &&
         pick.board.marketShare !== undefined &&
         pick.board.fading !== true &&
-        pick.coding >= BALANCED_MIN_CODING,
+        pick.coding >= BALANCED_MIN_CODING &&
+        nearOwnBest(pick),
   );
   // With none eligible, Cheap keeps its price limit, then takes the lowest price on offer; Balanced
   // still needs a price to judge value by.
   const priced = picks.filter((pick) => pick.costUsd !== undefined);
+  const steady = priced.filter(nearOwnBest);
   const cheapest = Math.min(...picks.map(cost));
   const fallbacks =
     kind === "cheap"
       ? [picks.filter(affordable), picks.filter((pick) => cost(pick) === cheapest)]
-      : [priced];
+      : [steady, priced];
   const chosen = [eligible, ...fallbacks].find((list) => list.length > 0) ?? picks;
-  // A writing sub-score rests on a few items, so one lucky item can't carry a cheap model.
-  const pool = chosen.map((pick) => ({
-    ...pick,
-    score:
-      axis === undefined ? pick.score : (pick.score + (pick.board.scores[axis] ?? pick.score)) / 2,
-  }));
+  // A sub-score rests on a few items, so one lucky item can't carry a cheap model.
+  const broad = (pick: TeamBoardPick) =>
+    axis !== undefined
+      ? (pick.board.scores[axis] ?? pick.score)
+      : kind === "cheap"
+        ? pick.coding
+        : pick.score;
+  const pool = chosen.map((pick) => ({ ...pick, score: (pick.score + broad(pick)) / 2 }));
   const top = Math.max(...pool.map((pick) => pick.score));
   const share = kind === "cheap" ? CHEAP_PASS_SHARE[taskClass] : BALANCED_PASS_SHARE;
   const passing = pool.filter((pick) => pick.score >= top * share);
   if (kind === "cheap") {
-    return passing.sort((a, b) => (cost(a) === cost(b) ? strongest(a, b) : cost(a) - cost(b)))[0];
+    const spend = (pick: TeamBoardPick) => cost(pick) * time(pick) ** CHEAP_TIME_POWER;
+    return passing.sort((a, b) =>
+      spend(a) === spend(b) ? strongest(a, b) : spend(a) - spend(b),
+    )[0];
   }
   const value = (pick: TeamBoardPick) =>
-    pick.score - POINTS_PER_COST_DOUBLING * Math.log2(cost(pick));
+    pick.score -
+    POINTS_PER_COST_DOUBLING * Math.log2(cost(pick)) -
+    POINTS_PER_TIME_DOUBLING * Math.log2(time(pick));
+  const preferred = passing.filter((pick) => pick.board.models.some((id) => first.includes(id)));
+  if (preferred.length > 0) {
+    const top = Math.max(...preferred.map((pick) => pick.score));
+    return preferred
+      .filter((pick) => pick.score >= top - PREFERRED_NEAR_SCORE)
+      .sort((a, b) => time(a) - time(b) || value(b) - value(a) || strongest(a, b))[0];
+  }
   const best = Math.max(...passing.map(value));
   return passing
     .filter((pick) => value(pick) >= best - VALUE_TIE_POINTS)
@@ -1196,6 +1267,16 @@ const HARNESS_SCENARIO = {
   structure: "office",
 } as const satisfies Record<TeamSubtask, string>;
 
+function agentIdOf(
+  provider: ServerProvider,
+  settings: Pick<ServerSettings, "providerInstances">,
+): string | null {
+  const config = settings.providerInstances[provider.instanceId]?.config;
+  const agentId =
+    typeof config === "object" && config !== null && "agentId" in config ? config.agentId : null;
+  return typeof agentId === "string" ? agentId : null;
+}
+
 /** How well the agent itself does this kind of work; ACP Registry agents go by agent id. */
 function harnessScore(
   table: RoutingTable,
@@ -1203,10 +1284,7 @@ function harnessScore(
   provider: ServerProvider,
   settings: Pick<ServerSettings, "providerInstances">,
 ): number {
-  const config = settings.providerInstances[provider.instanceId]?.config;
-  const agentId =
-    typeof config === "object" && config !== null && "agentId" in config ? config.agentId : null;
-  const key = typeof agentId === "string" ? agentId : provider.driver;
+  const key = agentIdOf(provider, settings) ?? provider.driver;
   const scenario =
     subtask === null
       ? undefined
@@ -1216,8 +1294,8 @@ function harnessScore(
 
 /**
  * A worker's model for an automatic team, or null. Models on the team board rank by the subtask's
- * score at each measured effort: Cheap takes the cheapest capable Chinese model, Balanced the best
- * value among models in use, Best the top score. The worker runs at the effort it was picked on.
+ * score at each measured effort: Cheap takes a capable Chinese model that is fast and cheap, Balanced the best
+ * value for price and time among models in use, Best the top score, the fastest when close. The worker runs at the effort it was picked on.
  * With none on the board, coarse tiers decide, and the caller routes the effort.
  */
 export function chooseTeamWorkerModel(input: {
@@ -1250,6 +1328,7 @@ export function chooseTeamWorkerModel(input: {
     readonly route: number;
     readonly options: ReadonlyArray<OptionValue>;
     readonly reasoning: ReasoningLevels | undefined;
+    readonly descriptors: ReadonlyArray<ProviderOptionDescriptor>;
   }> = [];
   for (const provider of input.providers) {
     for (const model of provider.models) {
@@ -1282,6 +1361,7 @@ export function chooseTeamWorkerModel(input: {
         route: routeRank(model.slug),
         options,
         reasoning: reasoningLevels(model),
+        descriptors: model.capabilities?.optionDescriptors ?? [],
       });
     }
   }
@@ -1310,48 +1390,91 @@ export function chooseTeamWorkerModel(input: {
         };
 
   const cap = topEffort(input.kind, input.taskClass);
+  const runOf = (board: TeamBoardModel) =>
+    input.kind === "balanced" ? board.balancedRun : undefined;
+  const capFor = (board: TeamBoardModel) => runOf(board)?.effort ?? cap;
   const boards = new Map<TeamBoardModel, Array<Ranked["candidate"]>>();
   for (const candidate of candidates) {
     if (candidate.board === undefined || candidate.score === null) continue;
     boards.set(candidate.board, [...(boards.get(candidate.board) ?? []), candidate]);
   }
+  const onAgent = ({ candidate }: Ranked, run: NonNullable<TeamBoardModel["balancedRun"]>) =>
+    agentIdOf(candidate.provider, input.settings) === run.agentId &&
+    candidate.reasoning?.levels.includes(run.effort) === true &&
+    run.options.every((option) => optionSelectionProblem(option, candidate.descriptors) === null);
+  const agentFor = (board: TeamBoardModel, effort: string) => {
+    const run = runOf(board);
+    return ranked
+      .filter(({ candidate }) => candidate.board === board)
+      .sort(
+        (a, b) =>
+          (run === undefined ? 0 : Number(onAgent(b, run)) - Number(onAgent(a, run))) ||
+          levelGap(a.candidate.reasoning, effort, capFor(board)) -
+            levelGap(b.candidate.reasoning, effort, capFor(board)) ||
+          byAgent(a, b),
+      )[0];
+  };
+  const onSubscription = (board: TeamBoardModel, effort: string) => {
+    const agent = agentFor(board, effort)?.candidate;
+    if (agent === undefined) return false;
+    const standing = quotaStanding(agent.provider, agent.slug, input.now);
+    // Spend budgets and add-on credits report monthly windows too, and bill at list price.
+    const rolling = applicableUsageWindows(agent.provider, input.now, agent.slug).some(
+      (window) => window.kind === "session" || window.kind === "weekly",
+    );
+    return rolling && standing.funding === "subscription" && !standing.inReserve;
+  };
+  const balancedFirst = input.table.teamBoard?.balancedFirst;
   const pick = chooseBoardModel(
     input.kind,
     subtask,
     input.taskClass,
     [...boards].flatMap(([board, own]) =>
       teamBoardPicks(
+        input.kind,
         board,
         subtask,
         (effort) => own.some((candidate) => candidate.reasoning?.levels.includes(effort)),
         (effort) => {
           const best = [...own].sort(
-            (a, b) => levelGap(a.reasoning, effort, cap) - levelGap(b.reasoning, effort, cap),
+            (a, b) =>
+              levelGap(a.reasoning, effort, capFor(board)) -
+              levelGap(b.reasoning, effort, capFor(board)),
           )[0]?.reasoning;
-          return best && nearestLevel(best.levels, effort, cap);
+          return best && nearestLevel(best.levels, effort, capFor(board));
         },
         cap,
+      ).map((entry) =>
+        input.kind === "balanced" &&
+        entry.costUsd !== undefined &&
+        onSubscription(entry.board, entry.effort)
+          ? { ...entry, costUsd: entry.costUsd * SUBSCRIPTION_PRICE_SHARE }
+          : entry,
       ),
     ),
+    subtask === null
+      ? balancedFirst?.default
+      : (balancedFirst?.bySubtask[subtask] ?? balancedFirst?.default),
   );
   if (pick !== undefined) {
-    const chosen = ranked
-      .filter(({ candidate }) => candidate.board === pick.board)
-      .sort(
-        (a, b) =>
-          levelGap(a.candidate.reasoning, pick.effort, cap) -
-            levelGap(b.candidate.reasoning, pick.effort, cap) || byAgent(a, b),
-      )[0]?.candidate;
-    const picked = result(chosen);
-    const level = chosen?.reasoning && nearestLevel(chosen.reasoning.levels, pick.effort, cap);
-    if (picked === null || !chosen?.reasoning || level === undefined) return picked;
+    const run = runOf(pick.board);
+    const pickCap = capFor(pick.board);
+    const chosen = agentFor(pick.board, pick.effort);
+    const picked = result(chosen?.candidate);
+    if (picked === null || chosen === undefined) return null;
+    const { reasoning } = chosen.candidate;
+    const level = reasoning && nearestLevel(reasoning.levels, pick.effort, pickCap);
+    const options = [
+      ...(picked.selection.options ?? []),
+      ...(run !== undefined && onAgent(chosen, run) ? run.options : []),
+      ...(reasoning !== undefined && level !== undefined
+        ? [{ id: reasoning.id, value: level }]
+        : []),
+    ];
     return {
       ...picked,
-      selection: {
-        ...picked.selection,
-        options: [...(picked.selection.options ?? []), { id: chosen.reasoning.id, value: level }],
-      },
-      effort: level,
+      selection: { ...picked.selection, ...(options.length === 0 ? {} : { options }) },
+      ...(level === undefined ? {} : { effort: level }),
     };
   }
 

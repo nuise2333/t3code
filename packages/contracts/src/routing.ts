@@ -116,6 +116,8 @@ const TeamScores = Schema.Struct({
 
 const TeamEffortScores = Schema.Struct({
   effort: TrimmedNonEmptyString,
+  /** How long the coding suite took at this level. */
+  minutes: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
   scores: Schema.Struct({
     backend: Schema.Finite,
     frontend: Schema.Finite,
@@ -132,6 +134,8 @@ const TeamBoardModel = Schema.Struct({
   models: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
   /** The level the coding scores and cost come from: the best one below max when there is one. */
   effort: TrimmedNonEmptyString,
+  /** How long the coding suite took at `effort`. */
+  minutes: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
   /** Every level measured on coding, when there is more than one; a worker runs at the one picked. */
   efforts: Schema.optionalKey(Schema.Array(TeamEffortScores)),
   /** The level the writing scores come from, when it is not `effort`. */
@@ -143,6 +147,16 @@ const TeamBoardModel = Schema.Struct({
   chinese: Schema.optionalKey(Schema.Boolean),
   /** Priced from its published token counts at its predecessor's rates. */
   costEstimated: Schema.optionalKey(Schema.Boolean),
+  /** How Balanced runs this model: on this agent when it offers it, at this level either way. */
+  balancedRun: Schema.optionalKey(
+    Schema.Struct({
+      agentId: TrimmedNonEmptyString,
+      effort: TrimmedNonEmptyString,
+      options: Schema.Array(
+        Schema.Struct({ id: TrimmedNonEmptyString, value: TrimmedNonEmptyString }),
+      ),
+    }),
+  ),
   /** A Chinese lab's latest model that stays in Cheap above its price limit. */
   newest: Schema.optionalKey(Schema.Boolean),
   /** Percent of OpenRouter tokens over 14 days; absent when the adoption board doesn't list it. */
@@ -157,6 +171,13 @@ const TeamBoard = Schema.Struct({
   models: Schema.Array(TeamBoardModel),
   /** Keyed by driver, or by agent id for ACP Registry agents. */
   harnesses: Schema.Record(Schema.String, Schema.Finite),
+  /** Models Balanced takes first when they are capable enough, by subtask; the rest use `default`. */
+  balancedFirst: Schema.optionalKey(
+    Schema.Struct({
+      default: Schema.Array(TrimmedNonEmptyString),
+      bySubtask: Schema.Record(Schema.String, Schema.Array(TrimmedNonEmptyString)),
+    }),
+  ),
   /** The harness board's scores by kind of work, with the same keys. */
   harnessScenarios: Schema.optionalKey(
     Schema.Record(
@@ -298,7 +319,7 @@ export type RoutingGroup = typeof RoutingGroup.Type;
 
 /**
  * Automatic teams: the thread's model leads, and T3 picks each worker's model for its
- * subtask: a cheap Chinese model, the best value on the market, or the strongest. They need no saved team.
+ * subtask: a fast cheap Chinese model, the best value on the market, or the strongest. They need no saved team.
  */
 export const AutoTeamKind = Schema.Literals(["cheap", "balanced", "best"]);
 export type AutoTeamKind = typeof AutoTeamKind.Type;
@@ -314,7 +335,7 @@ export const AUTO_TEAMS: ReadonlyArray<{
     kind: "cheap",
     id: "auto-cheap",
     name: "Cheap team",
-    description: "Cheap, capable Chinese models",
+    description: "Fast, cheap, capable Chinese models",
   },
   {
     kind: "balanced",
