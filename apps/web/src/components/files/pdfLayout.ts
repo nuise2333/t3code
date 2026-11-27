@@ -3,12 +3,33 @@ export const PDF_MIN_ZOOM = 0.25;
 export const PDF_MAX_ZOOM = 3;
 const PDF_ZOOM_STEP = 0.25;
 
-export function pdfPageWidth(viewportWidth: number, pageWidth: number, zoom: number | null) {
-  const fitWidth = Math.max(1, viewportWidth - 2 * PDF_PAGE_GAP);
-  return {
-    scale: zoom ?? fitWidth / pageWidth,
-    width: zoom === null ? fitWidth : pageWidth * zoom,
-  };
+/** `none` stacks one page per row; `odd` pairs pages 1-2, 3-4; `even` sets page 1 alone, as a book's cover. */
+export type PdfSpread = "none" | "odd" | "even";
+/** A scale, `null` to fit the width, or `page` to fit a whole page in view. */
+export type PdfZoom = number | null | "page";
+
+export function pdfSpreadColumns(spread: PdfSpread) {
+  return spread === "none" ? 1 : 2;
+}
+
+/**
+ * Each page's display width. `ratio` is the tallest page's height / width, which `page` fits
+ * inside the viewport; `pageWidth` is the widest page's width at 100%.
+ */
+export function pdfPageWidth(
+  viewport: { width: number; height: number },
+  pageWidth: number,
+  zoom: PdfZoom,
+  columns = 1,
+  ratio = 1,
+) {
+  const fitWidth = Math.max(1, (viewport.width - (columns + 1) * PDF_PAGE_GAP) / columns);
+  if (typeof zoom === "number") return { scale: zoom, width: pageWidth * zoom };
+  const width =
+    zoom === "page"
+      ? Math.max(1, Math.min(fitWidth, (viewport.height - 2 * PDF_PAGE_GAP) / ratio))
+      : fitWidth;
+  return { scale: width / pageWidth, width };
 }
 
 export function stepPdfZoom(scale: number, direction: 1 | -1) {
@@ -17,37 +38,82 @@ export function stepPdfZoom(scale: number, direction: 1 | -1) {
     : Math.max(PDF_MIN_ZOOM, scale - PDF_ZOOM_STEP);
 }
 
-/** Top offset of each page plus the end of the last one; ratios are height / width. */
-export function pdfPageOffsets(ratios: readonly number[], width: number) {
-  const result = [PDF_PAGE_GAP];
-  for (const ratio of ratios)
-    result.push(result[result.length - 1]! + width * ratio + PDF_PAGE_GAP);
-  return result;
+/** Page ratios as shown after turning every page by `rotation` degrees. */
+export function rotatedPdfRatios(ratios: readonly number[], rotation: number) {
+  return rotation % 180 === 0 ? ratios : ratios.map((ratio) => 1 / ratio);
 }
 
-export function currentPdfPage(offsets: readonly number[], pageCount: number, scrollTop: number) {
-  for (let index = 0; index < pageCount; index++)
-    if (offsets[index + 1]! > scrollTop + PDF_PAGE_GAP + 1) return index;
-  return 0;
+function pdfRows(count: number, spread: PdfSpread) {
+  const rows: number[][] = [];
+  let index = 0;
+  if (spread === "even" && count > 0) rows.push([index++]);
+  while (index < count) {
+    rows.push(spread === "none" || index + 1 >= count ? [index] : [index, index + 1]);
+    index += rows.at(-1)!.length;
+  }
+  return rows;
+}
+
+export type PdfLayout = {
+  /** Top of each page's row. */
+  readonly tops: readonly number[];
+  /** Top of the row after each page's row, so `ends[i] - tops[i]` is the row and its gap. */
+  readonly ends: readonly number[];
+  readonly lefts: readonly number[];
+  readonly height: number;
+  readonly width: number;
+};
+
+/** Pages in rows of one or two, each row as tall as its tallest page and centred in the viewport. */
+export function pdfLayout(
+  ratios: readonly number[],
+  width: number,
+  spread: PdfSpread = "none",
+  viewportWidth = 0,
+): PdfLayout {
+  const tops: number[] = [];
+  const ends: number[] = [];
+  const lefts: number[] = [];
+  const columns = pdfSpreadColumns(spread);
+  const rowWidth = columns * width + (columns - 1) * PDF_PAGE_GAP;
+  const start = Math.max(PDF_PAGE_GAP, (viewportWidth - rowWidth) / 2);
+  let top = PDF_PAGE_GAP;
+  for (const row of pdfRows(ratios.length, spread)) {
+    const end = top + width * Math.max(...row.map((index) => ratios[index]!)) + PDF_PAGE_GAP;
+    // A book's cover and a lone last page sit on the side they would in a printed spread.
+    const column = spread === "even" && row.length === 1 && row[0] === 0 ? 1 : 0;
+    row.forEach((index, slot) => {
+      tops[index] = top;
+      ends[index] = end;
+      lefts[index] = start + (column + slot) * (width + PDF_PAGE_GAP);
+    });
+    top = end;
+  }
+  return { tops, ends, lefts, height: top, width: rowWidth + 2 * PDF_PAGE_GAP };
+}
+
+export function currentPdfPage(layout: PdfLayout, scrollTop: number) {
+  const index = layout.ends.findIndex((end) => end > scrollTop + PDF_PAGE_GAP + 1);
+  return Math.max(0, index);
 }
 
 /** Pages within one viewport above and two below the visible area stay mounted. */
 export function visiblePdfPages(
   ratios: readonly number[],
-  offsets: readonly number[],
+  layout: PdfLayout,
   scrollTop: number,
   viewportHeight: number,
 ) {
   return ratios.flatMap((ratio, index) =>
-    offsets[index + 1]! >= scrollTop - viewportHeight &&
-    offsets[index]! <= scrollTop + viewportHeight * 3
+    layout.ends[index]! >= scrollTop - viewportHeight &&
+    layout.tops[index]! <= scrollTop + viewportHeight * 3
       ? [{ index, ratio }]
       : [],
   );
 }
 
-export function pdfPageScrollTop(offsets: readonly number[], index: number) {
-  return Math.max(0, (offsets[index] ?? PDF_PAGE_GAP) - PDF_PAGE_GAP);
+export function pdfPageScrollTop(layout: PdfLayout, index: number) {
+  return Math.max(0, (layout.tops[index] ?? PDF_PAGE_GAP) - PDF_PAGE_GAP);
 }
 
 /** A saved offset was taken at `savedWidth`; a reloaded document can have fewer or shorter pages. */
@@ -56,13 +122,17 @@ export function pdfRestoredScrollTop(
   width: number,
   view: { page: number; offset: number },
   savedWidth = width,
+  spread: PdfSpread = "none",
 ) {
   const page = Math.min(view.page, ratios.length - 1);
-  const offsets = pdfPageOffsets(ratios, width);
+  const layout = pdfLayout(ratios, width, spread);
   return (
-    offsets[page]! -
+    layout.tops[page]! -
     PDF_PAGE_GAP +
-    Math.min((view.offset * width) / savedWidth, Math.max(0, width * ratios[page]! - 1))
+    Math.min(
+      (view.offset * width) / savedWidth,
+      Math.max(0, layout.ends[page]! - layout.tops[page]! - PDF_PAGE_GAP - 1),
+    )
   );
 }
 

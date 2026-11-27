@@ -6,9 +6,26 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { TextLayer, type PDFDocumentProxy } from "pdfjs-dist";
-import { ChevronDownIcon, ChevronUpIcon, MinusIcon, PlusIcon, ScanIcon } from "lucide-react";
+import { PasswordResponses, TextLayer, type PDFDocumentProxy } from "pdfjs-dist";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  Maximize2Icon,
+  MinusIcon,
+  PanelLeftIcon,
+  PlusIcon,
+  RotateCwIcon,
+  ScanIcon,
+} from "lucide-react";
+import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 import { observeResize } from "~/lib/observeResize";
 import { FileSurfaceAction, FileSurfaceFailure, FileSurfaceLoading } from "./fileSurfaceChrome";
 import { readBoundedDocument } from "./readBoundedDocument";
@@ -17,20 +34,31 @@ import {
   currentPdfPage,
   pdfFindIncludes,
   pdfFindMatchRuns,
-  pdfPageOffsets,
+  pdfLayout,
   pdfPageScrollTop,
+  pdfSpreadColumns,
   pdfPageText,
   pdfPageWidth,
   pdfRestoredScrollTop,
   PDF_MAX_ZOOM,
   PDF_MIN_ZOOM,
+  rotatedPdfRatios,
   stepPdfZoom,
   visiblePdfPages,
+  type PdfSpread,
+  type PdfZoom,
 } from "./pdfLayout";
+import PdfSidebar, { type PdfSidebarTab } from "./PdfSidebar";
 import "./pdfViewer.css";
 
 const MAX_PAGES = 2000;
 const MAX_FIND_TEXT = 4 * 1024 * 1024;
+
+const SPREADS: readonly { value: PdfSpread; label: string }[] = [
+  { value: "none", label: "Single pages" },
+  { value: "odd", label: "Two pages" },
+  { value: "even", label: "Book" },
+];
 
 const MAX_POSITIONS = 50;
 type PdfPosition = PdfViewState & { width: number; ratios: readonly number[] };
@@ -40,7 +68,7 @@ const positions = new Map<string, PdfPosition>();
 export type PdfViewState = {
   page: number;
   offset: number;
-  zoom: number | null;
+  zoom: PdfZoom;
   left: number;
 };
 
@@ -48,13 +76,14 @@ function PdfPage(props: {
   document: PDFDocumentProxy;
   index: number;
   width: number;
+  rotation: number;
   query: string;
   onSize: (index: number, ratio: number) => void;
   onError: (error: string) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const text = useRef<HTMLDivElement>(null);
-  const { document: pdf, index, width, onSize, onError } = props;
+  const { document: pdf, index, width, rotation, onSize, onError } = props;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Render the PDF page canvas and text layer, cancelling tasks and releasing pdf.js page resources on cleanup.
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +99,9 @@ function PdfPage(props: {
       }
       const natural = page.getViewport({ scale: 1 });
       onSize(index, natural.height / natural.width);
-      const viewport = page.getViewport({ scale: width / natural.width });
+      const turn = (page.rotate + rotation) % 360;
+      const turned = page.getViewport({ scale: 1, rotation: turn });
+      const viewport = page.getViewport({ scale: width / turned.width, rotation: turn });
       const ratio = Math.min(
         2,
         window.devicePixelRatio || 1,
@@ -103,7 +134,7 @@ function PdfPage(props: {
       // Release operator lists when virtual pages leave the viewport.
       void Promise.allSettled([paint?.promise]).then(() => loadedPage?.cleanup());
     };
-  }, [pdf, index, width, onSize, onError]);
+  }, [pdf, index, width, rotation, onSize, onError]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Highlight pdf.js-owned text nodes and observe asynchronous text layer mutations for the current search query.
   useEffect(() => {
     const node = text.current;
@@ -147,7 +178,16 @@ export default function PdfViewer(props: {
   const [revision, setRevision] = useState(0);
   const [ratios, setRatios] = useState<readonly number[]>([]);
   const [zoom, setZoom] = useState(initialView.zoom);
-  const [pageWidth, setPageWidth] = useState(612);
+  const [firstPage, setFirstPage] = useState({ width: 612, height: 792 });
+  const [rotation, setRotation] = useState(0);
+  const [spread, setSpread] = useState<PdfSpread>("none");
+  const [sidebar, setSidebar] = useState<PdfSidebarTab | null>(null);
+  const [lastSidebar, setLastSidebar] = useState<PdfSidebarTab>("pages");
+  const [password, setPassword] = useState<{
+    update: (password: string) => void;
+    wrong: boolean;
+  } | null>(null);
+  const [passwordText, setPasswordText] = useState("");
   const [viewport, setViewport] = useState({ width: 600, height: 800 });
   const [scrollTop, setScrollTop] = useState(0);
   const [query, setQuery] = useState("");
@@ -178,6 +218,10 @@ export default function PdfViewer(props: {
       .then(async (bytes) => {
         controller.signal.throwIfAborted();
         task = openPdf(bytes);
+        task.onPassword = (update: (password: string) => void, reason: number) => {
+          clearTimeout(timeout);
+          setPassword({ update, wrong: reason === PasswordResponses.INCORRECT_PASSWORD });
+        };
         const document = await task.promise;
         if (document.numPages > MAX_PAGES)
           throw new Error("Preview limited to 2,000 pages. Save this PDF to read it in full.");
@@ -189,7 +233,7 @@ export default function PdfViewer(props: {
           }),
         );
         if (controller.signal.aborted) return;
-        setPageWidth(first.width);
+        setFirstPage({ width: first.width, height: first.height });
         setRatios(
           savedPosition?.ratios.length === document.numPages
             ? savedPosition.ratios
@@ -220,10 +264,17 @@ export default function PdfViewer(props: {
     update();
     return observeResize(node, update);
   }, []);
-  const { scale, width } = pdfPageWidth(viewport.width, pageWidth, zoom);
-  const offsets = pdfPageOffsets(ratios, width);
-  const current = currentPdfPage(offsets, ratios.length, scrollTop);
-  const visible = visiblePdfPages(ratios, offsets, scrollTop, viewport.height);
+  const shown = rotatedPdfRatios(ratios, rotation);
+  const { scale, width } = pdfPageWidth(
+    viewport,
+    rotation % 180 === 0 ? firstPage.width : firstPage.height,
+    zoom,
+    pdfSpreadColumns(spread),
+    shown.length ? Math.max(...shown) : 1,
+  );
+  const layout = pdfLayout(shown, width, spread, viewport.width);
+  const current = currentPdfPage(layout, scrollTop);
+  const visible = visiblePdfPages(shown, layout, scrollTop, viewport.height);
   // Stable callbacks let page canvases survive scroll and find updates.
   const [onSize] = useState(
     () => (index: number, ratio: number) =>
@@ -232,14 +283,14 @@ export default function PdfViewer(props: {
       ),
   );
   const jumpToPage = useEffectEvent((index: number) => {
-    scroll.current?.scrollTo({ top: pdfPageScrollTop(offsets, index) });
+    scroll.current?.scrollTo({ top: pdfPageScrollTop(layout, index) });
   });
   const saveView = (node: HTMLDivElement, notify = true) => {
-    const page = currentPdfPage(offsets, ratios.length, node.scrollTop);
+    const page = currentPdfPage(layout, node.scrollTop);
     if (!pdf) return;
     const view = {
       page,
-      offset: Math.max(0, node.scrollTop - (offsets[page]! - 16)),
+      offset: Math.max(0, node.scrollTop - (layout.tops[page]! - 16)),
       zoom,
       left: node.scrollLeft,
     };
@@ -255,7 +306,7 @@ export default function PdfViewer(props: {
     const node = scroll.current;
     if (!pdf || !node) return;
     node.scrollTo({
-      top: pdfRestoredScrollTop(ratios, width, initialView, savedPosition?.width),
+      top: pdfRestoredScrollTop(shown, width, initialView, savedPosition?.width, spread),
       left: initialView.left,
     });
     setScrollTop(node.scrollTop);
@@ -266,15 +317,23 @@ export default function PdfViewer(props: {
     if (pdf) restoreView();
   }, [pdf]);
   const showPage = (index: number) => {
-    scroll.current?.scrollTo({ top: pdfPageScrollTop(offsets, index) });
+    scroll.current?.scrollTo({ top: pdfPageScrollTop(layout, index) });
   };
-  const changeZoom = (value: number | null) => {
+  // Keeps the current page in view while the page size, turn, or arrangement changes.
+  const anchorCurrentPage = (keepOffset: boolean) => {
     zoomAnchor.current = {
       page: current,
-      offset: (scroll.current?.scrollTop ?? 0) - (offsets[current]! - 16),
-      width,
+      offset: keepOffset ? (scroll.current?.scrollTop ?? 0) - (layout.tops[current]! - 16) : 0,
+      width: keepOffset ? width : 0,
     };
+  };
+  const changeZoom = (value: PdfZoom) => {
+    anchorCurrentPage(true);
     setZoom(value);
+  };
+  const toggleSidebar = () => {
+    if (sidebar) setLastSidebar(sidebar);
+    setSidebar(sidebar ? null : lastSidebar);
   };
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Restore the DOM scroll anchor after the new zoom width has committed to page layout.
   useLayoutEffect(() => {
@@ -282,9 +341,12 @@ export default function PdfViewer(props: {
     zoomAnchor.current = null;
     const node = scroll.current;
     if (!node || !pdf) return;
-    if (anchor && anchor.width !== width) {
+    if (anchor && (anchor.width === 0 || anchor.width !== width)) {
       node.scrollTo({
-        top: offsets[anchor.page]! - 16 + (anchor.offset * width) / anchor.width,
+        top:
+          layout.tops[anchor.page]! -
+          16 +
+          (anchor.width ? (anchor.offset * width) / anchor.width : 0),
       });
     }
     saveView(node, anchor !== null);
@@ -350,6 +412,14 @@ export default function PdfViewer(props: {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b border-border/60 px-2 py-1 text-xs">
+        <FileSurfaceAction
+          label="Pages and bookmarks"
+          pressed={sidebar !== null}
+          disabled={!pdf}
+          onPress={toggleSidebar}
+        >
+          <PanelLeftIcon className="size-3.5" />
+        </FileSurfaceAction>
         <span className="mr-auto px-1 tabular-nums" aria-live="polite">
           {pdf ? `${current + 1} / ${pdf.numPages} page${pdf.numPages === 1 ? "" : "s"}` : "PDF"}
         </span>
@@ -375,7 +445,11 @@ export default function PdfViewer(props: {
           <MinusIcon className="size-3.5" />
         </FileSurfaceAction>
         <span className="min-w-14 text-center tabular-nums">
-          {zoom === null ? "Fit width" : `${Math.round(scale * 100)}%`}
+          {zoom === null
+            ? "Fit width"
+            : zoom === "page"
+              ? "Fit page"
+              : `${Math.round(scale * 100)}%`}
         </span>
         <FileSurfaceAction
           label="Zoom in"
@@ -393,6 +467,46 @@ export default function PdfViewer(props: {
         >
           <ScanIcon className="size-3.5" />
         </FileSurfaceAction>
+        <FileSurfaceAction
+          label="Fit page"
+          onPress={() => {
+            changeZoom("page");
+            scroll.current?.scrollTo({ left: 0 });
+          }}
+        >
+          <Maximize2Icon className="size-3.5" />
+        </FileSurfaceAction>
+        <FileSurfaceAction
+          label="Rotate clockwise"
+          disabled={!pdf}
+          onPress={() => {
+            anchorCurrentPage(false);
+            setRotation((value) => (value + 90) % 360);
+          }}
+        >
+          <RotateCwIcon className="size-3.5" />
+        </FileSurfaceAction>
+        <div className="w-28">
+          <Select
+            value={spread}
+            onValueChange={(value) => {
+              if (value === null) return;
+              anchorCurrentPage(false);
+              setSpread(value);
+            }}
+          >
+            <SelectTrigger aria-label="Page layout" size="xs">
+              <SelectValue>{SPREADS.find((item) => item.value === spread)?.label}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {SPREADS.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </div>
         <div className="w-28">
           <Input
             ref={find}
@@ -429,70 +543,110 @@ export default function PdfViewer(props: {
           </>
         ) : null}
       </div>
-      <div
-        ref={scroll}
-        role="region"
-        aria-label={props.title}
-        tabIndex={0}
-        className="relative min-h-0 min-w-0 w-full flex-1 overflow-auto scrollbar-gutter-stable bg-muted/40"
-        onScroll={(event) => {
-          const top = event.currentTarget.scrollTop;
-          setScrollTop(top);
-          saveView(event.currentTarget);
-        }}
-        onKeyDown={(event) => {
-          if ((event.ctrlKey || event.metaKey) && event.key === "f") {
-            event.preventDefault();
-            event.stopPropagation();
-            find.current?.focus();
-          }
-        }}
-      >
-        {error ? (
-          <FileSurfaceFailure
-            message={error}
-            onRetry={() => {
-              setError(null);
-              setPdf(null);
-              setRevision((value) => value + 1);
-            }}
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {pdf && sidebar ? (
+          <PdfSidebar
+            pdf={pdf}
+            ratios={shown}
+            rotation={rotation}
+            current={current}
+            tab={sidebar}
+            onTab={setSidebar}
+            onPage={showPage}
           />
-        ) : !pdf ? (
-          <FileSurfaceLoading />
-        ) : (
-          <div
-            className="relative"
-            style={{
-              height: `max(${offsets.at(-1) ?? 0}px, calc(100% + ${(offsets.at(-2) ?? 16) - 16}px))`,
-              minWidth: width + 32,
-            }}
-          >
-            {visible.map(({ index, ratio }) => (
-              <div
-                key={index}
-                className="absolute bg-white shadow-sm"
-                style={
-                  {
-                    top: offsets[index],
-                    left: Math.max(16, (viewport.width - width) / 2),
-                    width,
-                    height: width * ratio,
-                    "--total-scale-factor": 1,
-                  } as CSSProperties
-                }
-              >
-                <PdfPage
-                  document={pdf}
-                  index={index}
-                  width={width}
-                  query={query}
-                  onSize={onSize}
-                  onError={setError}
-                />
-              </div>
-            ))}
-          </div>
-        )}
+        ) : null}
+        <div
+          ref={scroll}
+          role="region"
+          aria-label={props.title}
+          tabIndex={0}
+          className="relative min-h-0 min-w-0 w-full flex-1 overflow-auto scrollbar-gutter-stable bg-muted/40"
+          onScroll={(event) => {
+            const top = event.currentTarget.scrollTop;
+            setScrollTop(top);
+            saveView(event.currentTarget);
+          }}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === "f") {
+              event.preventDefault();
+              event.stopPropagation();
+              find.current?.focus();
+            }
+          }}
+        >
+          {error ? (
+            <FileSurfaceFailure
+              message={error}
+              onRetry={() => {
+                setError(null);
+                setPdf(null);
+                setRevision((value) => value + 1);
+              }}
+            />
+          ) : !pdf && password ? (
+            <form
+              className="mx-auto flex max-w-xs flex-col gap-2 px-4 py-10 text-sm"
+              onSubmit={(event) => {
+                event.preventDefault();
+                password.update(passwordText);
+                setPassword(null);
+                setPasswordText("");
+              }}
+            >
+              <label htmlFor="pdf-password">
+                {password.wrong
+                  ? "That password is incorrect. Try again."
+                  : "This PDF is protected. Enter its password to open it."}
+              </label>
+              <Input
+                id="pdf-password"
+                type="password"
+                autoFocus
+                value={passwordText}
+                onChange={(event) => setPasswordText(event.target.value)}
+              />
+              <Button type="submit" size="sm" disabled={!passwordText}>
+                Open
+              </Button>
+            </form>
+          ) : !pdf ? (
+            <FileSurfaceLoading />
+          ) : (
+            <div
+              className="relative"
+              style={{
+                height: `max(${layout.height}px, calc(100% + ${(layout.tops.at(-1) ?? 16) - 16}px))`,
+                minWidth: layout.width,
+              }}
+            >
+              {visible.map(({ index, ratio }) => (
+                <div
+                  key={index}
+                  className="absolute bg-white shadow-sm"
+                  style={
+                    {
+                      top: layout.tops[index],
+                      left: layout.lefts[index],
+                      width,
+                      height: width * ratio,
+                      "--total-scale-factor": 1,
+                    } as CSSProperties
+                  }
+                >
+                  <PdfPage
+                    document={pdf}
+                    index={index}
+                    width={width}
+                    rotation={rotation}
+                    query={query}
+                    onSize={onSize}
+                    onError={setError}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

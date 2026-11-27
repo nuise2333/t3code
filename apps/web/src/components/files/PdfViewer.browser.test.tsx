@@ -224,3 +224,43 @@ it("restores page, within-page offset and zoom after a remount", async () => {
     URL.revokeObjectURL(url);
   }
 });
+
+it("jumps from a page thumbnail, turns pages, and sets two pages side by side", async () => {
+  const page = (text: string) => ({
+    box: "0 0 612 792",
+    rotate: 0,
+    text: `BT /F1 24 Tf 30 700 Td (${text}) Tj ET`,
+  });
+  const url = URL.createObjectURL(testPdf([page("One"), page("Two"), page("Three")]));
+  try {
+    await using screen = await render(
+      <div className="flex h-[400px] w-[640px]">
+        <PdfViewer src={url} title="Arranged PDF" />
+      </div>,
+    );
+    await expect.element(screen.getByText("1 / 3 pages")).toBeVisible();
+    const region = screen.getByRole("region", { name: "Arranged PDF" }).element();
+    const box = (index: number) =>
+      region.querySelector(`canvas[aria-label="Page ${index}"]`)!.getBoundingClientRect();
+
+    await screen.getByRole("button", { name: "Pages and bookmarks" }).click();
+    await screen.getByRole("button", { name: "Page 3", exact: true }).click();
+    await expect.element(screen.getByText("3 / 3 pages")).toBeVisible();
+
+    await vi.waitFor(() => expect(box(3).height).toBeGreaterThan(box(3).width));
+    await screen.getByRole("button", { name: "Rotate clockwise" }).click();
+    await vi.waitFor(() => expect(box(3).width).toBeGreaterThan(box(3).height));
+    await expect.element(screen.getByText("3 / 3 pages")).toBeVisible();
+    await screen.getByRole("button", { name: "Rotate clockwise" }).click();
+
+    await screen.getByRole("combobox", { name: "Page layout" }).click();
+    await screen.getByRole("option", { name: "Two pages" }).click();
+    await screen.getByRole("button", { name: "Page 1", exact: true }).click();
+    await vi.waitFor(() => {
+      expect(box(2).top).toBe(box(1).top);
+      expect(box(2).left).toBeGreaterThan(box(1).right);
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+});

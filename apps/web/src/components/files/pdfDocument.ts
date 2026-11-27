@@ -1,4 +1,4 @@
-import { getDocument, GlobalWorkerOptions, PDFWorker } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions, PDFWorker, type PDFDocumentProxy } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import fallbackUrl from "pdfjs-dist/wasm/openjpeg_nowasm_fallback.js?url";
 
@@ -47,4 +47,18 @@ export function openPdf(bytes: ArrayBuffer) {
     canvasMaxAreaInBytes: 32 * 1024 * 1024,
     useWasm: true,
   });
+}
+
+/** The zero-based page a bookmark or link destination points at, or null when it names none. */
+export async function pdfDestinationPage(
+  pdf: PDFDocumentProxy,
+  destination: string | readonly unknown[] | null,
+) {
+  const explicit =
+    typeof destination === "string" ? await pdf.getDestination(destination) : destination;
+  const target = explicit?.[0];
+  if (typeof target === "number") return target;
+  if (target && typeof target === "object" && "num" in target && "gen" in target)
+    return pdf.getPageIndex(target as { num: number; gen: number });
+  return null;
 }
