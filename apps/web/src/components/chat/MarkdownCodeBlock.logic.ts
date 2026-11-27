@@ -31,6 +31,16 @@ export function highlighterLanguageOf(language: string): string {
   return language === "gitignore" ? "ini" : language;
 }
 
+export function isSingleShellCommand(body: string, allowLineContinuation: boolean): boolean {
+  const lines = body.split("\n");
+  if (lines.length > 1 && !allowLineContinuation) return false;
+  for (const line of lines.slice(0, -1)) {
+    const trailingBackslashes = /\\*$/.exec(line)?.[0].length ?? 0;
+    if (trailingBackslashes % 2 === 0) return false;
+  }
+  return !/[\p{Cc}\p{Cf}]/u.test(body.replaceAll("\n", ""));
+}
+
 const FENCE_TITLE_ATTR_REGEX = /(?:^|\s)(?:title|file(?:name)?)=(?:"([^"]+)"|'([^']+)'|(\S+))/i;
 const FENCE_FILENAME_TOKEN_REGEX = /^[\w@][\w@./-]*\.[A-Za-z0-9]+$/;
 

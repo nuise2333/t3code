@@ -24,6 +24,7 @@ import {
   createHighlightCacheKey,
   estimateHighlightedSize,
   extractFenceLanguage,
+  isSingleShellCommand,
 } from "./MarkdownCodeBlock.logic";
 import { reportMarkdownActionFailure } from "./markdownActionFailure";
 import { PierreEntryIcon } from "./PierreEntryIcon";
@@ -203,9 +204,7 @@ export function MarkdownCodeBlock({
     code.endsWith("\n") &&
     command.length > 0 &&
     !command.endsWith("\\") &&
-    // Control and invisible format characters (bidi overrides, zero-width) can
-    // make the rendered command differ from what the terminal would receive.
-    !/[\p{Cc}\p{Cf}]/u.test(code.slice(0, -1));
+    isSingleShellCommand(code.slice(0, -1), !/^(?:powershell|pwsh)$/.test(language));
 
   const handleCopy = () => copyToClipboard(code);
   const lineCount = countCodeLines(code);

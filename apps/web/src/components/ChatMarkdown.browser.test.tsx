@@ -389,9 +389,11 @@ describe("ChatMarkdown external link labels", () => {
 });
 
 describe("ChatMarkdown streaming", () => {
-  it("runs only a complete single-line shell block after a click", async () => {
+  it("runs only a complete single-command shell block after a click", async () => {
     setup();
     const onRunShellCommand = vi.fn();
+    const continued =
+      'PATH="$PATH:$HOME/bin" \\\nT3CODE_PROJECT_ROOT="$HOME/project" \\\nnode scripts/setup-worktree.ts';
     const message = (text: string, isStreaming = false) => (
       <ChatMarkdown
         cwd="/tmp/project"
@@ -420,8 +422,17 @@ describe("ChatMarkdown streaming", () => {
       expect(runButtons()).toHaveLength(1);
     }
 
+    await rerender(message(`\`\`\`bash\n${continued}\n\`\`\``));
+    expect(runButtons()).toHaveLength(1);
+    await act(async () => runButtons()[0]!.click());
+    expect(onRunShellCommand).toHaveBeenLastCalledWith(continued);
+
     for (const text of [
       "```bash\necho one\necho two\n```",
+      "```bash\necho one\\\\\necho two\n```",
+      "```bash\necho one \\ \necho two\n```",
+      "```powershell\necho one \\\necho two\n```",
+      "```bash\necho one \\\necho two\\\n```",
       "```typescript\necho hello\n```",
       "```bash\n\n```",
       "```bash\necho hello\n\n```",
