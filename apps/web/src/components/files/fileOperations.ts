@@ -92,7 +92,9 @@ async function runFileOperation(
   const sources = operationSources(operation).map((path) => absoluteFilePath(path, root));
   // Autosave must land before the file moves; the server refuses to recreate it afterwards.
   await flushDrafts(environmentId, sources);
-  if (operation._tag === "rename" || operation._tag === "move") {
+  // A draft that couldn't be saved (e.g. held in a save conflict) blocks the trash too, or it
+  // would be dropped while only the disk's version can be restored.
+  if (operation._tag === "rename" || operation._tag === "move" || operation._tag === "trash") {
     const unsaved = unsavedFileSaveSessionsUnder(environmentId, sources);
     if (unsaved.length > 0) {
       toastManager.add({

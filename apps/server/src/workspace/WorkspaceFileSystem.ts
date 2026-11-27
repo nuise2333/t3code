@@ -660,6 +660,8 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
+    // Uninterruptible: a dropped connection must not release the path's lock while the check and
+    // write are still running, or another save could slip in between them.
     const written = yield* Effect.tryPromise({
       // A symlink swapped in after the check is not followed. Windows lacks O_NOFOLLOW.
       try: async () => {
@@ -724,7 +726,7 @@ export const make = Effect.gen(function* () {
           cause,
         });
       },
-    });
+    }).pipe(Effect.uninterruptible);
     // Editor autosave overwrites existing files, which leaves the indexed paths unchanged, and
     // fff's watcher applies the new contents on its own. A forced rescan re-walks the whole
     // workspace, and the save would wait for it.

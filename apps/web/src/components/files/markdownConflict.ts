@@ -42,7 +42,25 @@ function terminate(value: string) {
   return value && !value.endsWith("\n") ? value + "\n" : value;
 }
 
+/** The line ends a text uses, e.g. "\r\n" or "\n|\r\n" when mixed; "" without any. */
+function lineEnds(value: string) {
+  return [...new Set(value.match(/\r\n|\n|\r/g) ?? [])].sort().join("|");
+}
+
+/**
+ * Merges by line, ignoring line-end bytes. Line ends that differ between the three, or are mixed
+ * within one, cannot be merged without rewriting someone's bytes, so they always count as a
+ * conflict the user settles.
+ */
 export function mergeThreeWay(base: string, local: string, disk: string) {
+  const styles = new Set([base, local, disk].map(lineEnds).filter(Boolean));
+  const endsConflict = styles.size > 1 || [...styles].some((style) => style.includes("|"));
+  const counted = (result: { merged: string; conflicts: number }) =>
+    endsConflict ? { merged: result.merged, conflicts: Math.max(1, result.conflicts) } : result;
+  return counted(mergeLines(base, local, disk));
+}
+
+function mergeLines(base: string, local: string, disk: string) {
   const eol = local.match(/\r\n|\n|\r/)?.[0] ?? base.match(/\r\n|\n|\r/)?.[0] ?? "\n";
   const normalize = (s: string) => s.replace(/\r\n?/g, "\n");
   const original = normalize(base);
