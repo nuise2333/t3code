@@ -1,5 +1,6 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { type CouncilSeat, type CouncilStatus, formatCouncilScore } from "@t3tools/shared/council";
+import { useGT } from "gt-react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -23,25 +24,28 @@ function councilNeedsUser(status: CouncilStatus, threadIdle: boolean): boolean {
   );
 }
 
-function stateLine(status: CouncilStatus, needsUser: boolean): string {
+type Translate = ReturnType<typeof useGT>;
+
+function stateLine(gt: Translate, status: CouncilStatus, needsUser: boolean): string {
   const round = status.rounds.length;
+  const max = status.maxRounds;
   const lowest = status.lowest === null ? null : formatCouncilScore(status.lowest);
-  if (needsUser && status.state !== "limit") return "Council needs you";
+  if (needsUser && status.state !== "limit") return gt("Council needs you");
   switch (status.state) {
     case "accepted":
-      return lowest === null ? "Accepted" : `Accepted at ${lowest}`;
+      return lowest === null ? gt("Accepted") : gt("Accepted at {score}", { score: lowest });
     case "waiting":
-      return "Council is on";
+      return gt("Council is on");
     case "reviewing":
-      return `Round ${round} of ${status.maxRounds} · reviewing`;
+      return gt("Round {round} of {max} · reviewing", { round, max });
     case "dispatch":
-      return `Round ${round} of ${status.maxRounds} · seating reviewers`;
+      return gt("Round {round} of {max} · seating reviewers", { round, max });
     case "fixing":
-      return `Round ${round} of ${status.maxRounds} · fixing`;
+      return gt("Round {round} of {max} · fixing", { round, max });
     case "passed":
-      return `Passed at ${lowest ?? formatCouncilScore(status.target)}`;
+      return gt("Passed at {score}", { score: lowest ?? formatCouncilScore(status.target) });
     case "limit":
-      return `Stopped at round limit (${round} of ${status.maxRounds})`;
+      return gt("Stopped at round limit ({round} of {max})", { round, max });
   }
 }
 
@@ -50,6 +54,7 @@ function stateLine(status: CouncilStatus, needsUser: boolean): string {
  * lowest score against the target, and, expanded, one row per reviewer of the latest round.
  */
 export function councilBannerItem(input: {
+  readonly gt: Translate;
   readonly status: CouncilStatus;
   readonly threadIdle: boolean;
   readonly expanded: boolean;
@@ -58,28 +63,38 @@ export function councilBannerItem(input: {
   readonly onDismiss?: () => void;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }): ComposerBannerStackItem {
-  const { status } = input;
+  const { gt, status } = input;
   const needsUser = councilNeedsUser(status, input.threadIdle);
   const target = formatCouncilScore(status.target);
   const seats = status.rounds.at(-1)?.seats ?? [];
   const lowest =
     status.lowest === null
-      ? `target ${target}`
-      : `lowest ${formatCouncilScore(status.lowest)}${status.state === "reviewing" ? " so far" : ""} / target ${target}`;
+      ? gt("target {target}", { target })
+      : status.state === "reviewing"
+        ? gt("lowest {lowest} so far / target {target}", {
+            lowest: formatCouncilScore(status.lowest),
+            target,
+          })
+        : gt("lowest {lowest} / target {target}", {
+            lowest: formatCouncilScore(status.lowest),
+            target,
+          });
   const ToggleIcon = input.expanded ? ChevronUpIcon : ChevronDownIcon;
   return {
     id: "council",
     variant: needsUser ? "warning" : "default",
     icon: needsUser ? <TriangleAlertIcon /> : <ScaleIcon />,
-    title: stateLine(status, needsUser),
+    title: stateLine(gt, status, needsUser),
     description: needsUser
-      ? `${lowest}. Reply to keep fixing, lower the target in the Council panel, or accept.`
+      ? gt("{lowest}. Reply to keep fixing, lower the target in the Council panel, or accept.", {
+          lowest,
+        })
       : lowest,
     actions: (
       <>
         {needsUser ? (
           <Button size="xs" variant="ghost" onClick={input.onAccept}>
-            Accept and finish
+            {gt("Accept and finish")}
           </Button>
         ) : null}
         {seats.length > 0 ? (
@@ -87,7 +102,7 @@ export function councilBannerItem(input: {
             size="xs"
             variant="ghost"
             aria-expanded={input.expanded}
-            aria-label={input.expanded ? "Hide reviewers" : "Show reviewers"}
+            aria-label={input.expanded ? gt("Hide reviewers") : gt("Show reviewers")}
             onClick={input.onToggle}
           >
             <ToggleIcon />
@@ -96,12 +111,12 @@ export function councilBannerItem(input: {
         ) : null}
       </>
     ),
-    ...(input.onDismiss ? { onDismiss: input.onDismiss, dismissLabel: "Hide Council" } : {}),
+    ...(input.onDismiss ? { onDismiss: input.onDismiss, dismissLabel: gt("Hide Council") } : {}),
     ...(input.expanded && seats.length > 0
       ? {
           children: (
             <ComposerBanner.Scroll className="max-h-[min(14rem,30dvh)]">
-              <ul aria-label="Council reviewers" className="grid gap-px">
+              <ul aria-label={gt("Council reviewers")} className="grid gap-px">
                 {seats.map((seat) => (
                   <CouncilSeatRow
                     key={seat.taskId}
@@ -127,19 +142,20 @@ function CouncilSeatRow(props: {
   readonly settled: boolean;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
+  const gt = useGT();
   const { seat } = props;
   const reached = seat.score !== null && seat.score >= props.target;
   const icon =
     seat.status === "reviewing" ? (
       <LoaderCircleIcon
-        aria-label="Reviewing"
+        aria-label={gt("Reviewing")}
         className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none"
       />
     ) : reached ? (
-      <CheckIcon aria-label="At target" className="size-3.5 shrink-0 text-success" />
+      <CheckIcon aria-label={gt("At target")} className="size-3.5 shrink-0 text-success" />
     ) : (
       <CircleIcon
-        aria-label={seat.score === null ? "No score" : "Below target"}
+        aria-label={seat.score === null ? gt("No score") : gt("Below target")}
         className={cn(
           "size-3.5 shrink-0",
           seat.score === null ? "text-muted-foreground" : "text-warning",
@@ -150,7 +166,7 @@ function CouncilSeatRow(props: {
     seat.score === null
       ? seat.status === "reviewing"
         ? "…"
-        : "no score"
+        : gt("no score")
       : props.settled && props.first !== null && props.first !== seat.score
         ? `${formatCouncilScore(props.first)} → ${formatCouncilScore(seat.score)}`
         : formatCouncilScore(seat.score);
@@ -172,7 +188,7 @@ function CouncilSeatRow(props: {
         <button
           type="button"
           className={cn(rowClassName, "cursor-pointer hover:bg-accent focus-visible:bg-accent")}
-          aria-label={`${seat.lens}: ${score}. Open the reviewer's thread`}
+          aria-label={gt("{lens}: {score}. Open the reviewer's thread", { lens: seat.lens, score })}
           onClick={() => props.onOpenThread(childThreadId)}
         >
           {content}

@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
@@ -474,6 +475,7 @@ const ignoreComposerFocus = () => {};
 const autoOpenedAgentTeamThreads = new Set<string>();
 
 export default function ChatView(props: ChatViewProps) {
+  const gt = useGT();
   const {
     environmentId,
     threadId,
@@ -2921,6 +2923,7 @@ export default function ChatView(props: ChatViewProps) {
     if (settled && dismissedCouncilKey === dismissKey) return [];
     return [
       councilBannerItem({
+        gt,
         status,
         threadIdle,
         expanded: councilSeatsExpanded,
