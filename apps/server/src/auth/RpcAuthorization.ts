@@ -268,7 +268,9 @@ const requiredScopesForRpcCall = (
     return [AuthEnvironmentMaintainScope, AuthDiagnosticsReadScope];
   }
   if (method === WS_METHODS.assetsCreateUrl) {
-    const { resource } = decodeAssetCreateUrlInput(payload);
+    const input = decodeAssetCreateUrlInput(payload);
+    const resource =
+      input.resource._tag === "office-render" ? input.resource.source : input.resource;
     return [
       resource._tag === "workspace-file" ||
       resource._tag === "media-file" ||

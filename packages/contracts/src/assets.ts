@@ -25,29 +25,38 @@ export const NativeAppIconReference = Schema.Union([
 ]);
 export type NativeAppIconReference = typeof NativeAppIconReference.Type;
 
+const MediaFile = Schema.TaggedStruct("media-file", {
+  threadId: ThreadId,
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+  disposition: Schema.optionalKey(Schema.Literal("attachment")),
+  // Written relative to the thread's workspace, so only that host's file is meant.
+  hostOnly: Schema.optionalKey(Schema.Literal(true)),
+});
+
+const DraftWorkspaceFile = Schema.TaggedStruct("draft-workspace-file", {
+  cwd: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+});
+
+const Attachment = Schema.TaggedStruct("attachment", {
+  attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  fileName: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(255))),
+  mimeType: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
+  /** Defaults to download; viewers may request inline after checking the type is safe. */
+  disposition: Schema.optionalKey(Schema.Literals(["inline", "attachment"])),
+  renderIntent: Schema.optionalKey(Schema.Literal("mcp-app")),
+});
+
 export const AssetResource = Schema.Union([
   Schema.TaggedStruct("workspace-file", {
     threadId: ThreadId,
     path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
   }),
-  Schema.TaggedStruct("media-file", {
-    threadId: ThreadId,
-    path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
-    disposition: Schema.optionalKey(Schema.Literal("attachment")),
-    // Written relative to the thread's workspace, so only that host's file is meant.
-    hostOnly: Schema.optionalKey(Schema.Literal(true)),
-  }),
-  Schema.TaggedStruct("draft-workspace-file", {
-    cwd: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
-    path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
-  }),
-  Schema.TaggedStruct("attachment", {
-    attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
-    fileName: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(255))),
-    mimeType: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
-    /** Defaults to download; viewers may request inline after checking the type is safe. */
-    disposition: Schema.optionalKey(Schema.Literals(["inline", "attachment"])),
-    renderIntent: Schema.optionalKey(Schema.Literal("mcp-app")),
+  MediaFile,
+  DraftWorkspaceFile,
+  Attachment,
+  Schema.TaggedStruct("office-render", {
+    source: Schema.Union([MediaFile, DraftWorkspaceFile, Attachment]),
   }),
   Schema.TaggedStruct("tool-output-image", {
     threadId: ThreadId,
@@ -319,6 +328,24 @@ export class AssetSourceControlMediaUrlValidationError extends Schema.TaggedErro
   }
 }
 
+export class AssetOfficeRendererUnavailableError extends Schema.TaggedError<AssetOfficeRendererUnavailableError>()(
+  "AssetOfficeRendererUnavailableError",
+  { resource: AssetResource },
+) {
+  override get message(): string {
+    return "LibreOffice is not installed on this computer.";
+  }
+}
+
+export class AssetOfficeRenderError extends Schema.TaggedError<AssetOfficeRenderError>()(
+  "AssetOfficeRenderError",
+  { resource: AssetResource, detail: Schema.String },
+) {
+  override get message(): string {
+    return "LibreOffice could not open this file.";
+  }
+}
+
 export const AssetAccessError = Schema.Union([
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
@@ -333,6 +360,8 @@ export const AssetAccessError = Schema.Union([
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
   AssetSourceControlMediaUrlValidationError,
+  AssetOfficeRendererUnavailableError,
+  AssetOfficeRenderError,
   AssetSigningKeyLoadError,
 ]);
 export type AssetAccessError = typeof AssetAccessError.Type;

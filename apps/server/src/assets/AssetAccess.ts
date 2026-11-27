@@ -1,6 +1,8 @@
 import type { AssetResource } from "@t3tools/contracts";
 import {
   AssetAttachmentNotFoundError,
+  AssetOfficeRendererUnavailableError,
+  AssetOfficeRenderError,
   AssetSourceControlMediaUrlValidationError,
   AssetPreviewTypeValidationError,
   AssetProjectFaviconInspectionError,
@@ -48,6 +50,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { base64UrlDecodeUtf8, base64UrlEncode } from "../auth/utils.ts";
+import * as OfficeRender from "../officeRender/OfficeRender.ts";
 import * as AssetSigner from "./AssetSigner.ts";
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
@@ -115,6 +118,14 @@ const PREVIEW_ASSET_EXTENSIONS = new Set([
   ".woff2",
 ]);
 
+const mediaIdentity = {
+  version: Schema.Literal(1),
+  filePath: Schema.String,
+  device: Schema.String,
+  inode: Schema.String,
+  expiresAt: Schema.Number,
+};
+
 const AssetClaimsSchema = Schema.Union([
   Schema.Struct({
     version: Schema.Literal(1),
@@ -131,13 +142,14 @@ const AssetClaimsSchema = Schema.Union([
     expiresAt: Schema.Number,
   }),
   Schema.Struct({
-    version: Schema.Literal(1),
+    ...mediaIdentity,
     kind: Schema.Literal("media-file-exact"),
-    filePath: Schema.String,
     download: Schema.optionalKey(Schema.Boolean),
-    device: Schema.String,
-    inode: Schema.String,
-    expiresAt: Schema.Number,
+  }),
+  Schema.Struct({
+    ...mediaIdentity,
+    kind: Schema.Literal("office-render-exact"),
+    fileName: Schema.String,
   }),
   Schema.Struct({
     version: Schema.Literal(1),
@@ -366,6 +378,7 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     readonly expectedCanonicalPath?: string;
     readonly workspaceRoot: string | undefined;
     readonly resource: AssetResource;
+    readonly office?: Extract<AssetResource, { _tag: "office-render" }> | undefined;
     readonly expiresAt: number;
   }) {
     const path = yield* Path.Path;
@@ -402,7 +415,20 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     }
     const download =
       input.resource._tag === "media-file" && input.resource.disposition === "attachment";
-    if (!download && hostPreviewMimeTypeFromExtension(path.extname(canonicalFile)) === null) {
+    if (
+      input.office &&
+      !/\.(?:docx?|xlsx?|pptx?|odt|ods|odp|rtf|fodt|fods|fodp)$/i.test(canonicalFile)
+    ) {
+      return yield* new AssetOfficeRenderError({
+        resource: input.office,
+        detail: "Unsupported Office document format.",
+      });
+    }
+    if (
+      !input.office &&
+      !download &&
+      hostPreviewMimeTypeFromExtension(path.extname(canonicalFile)) === null
+    ) {
       return yield* new AssetPreviewTypeValidationError({ resource: input.resource });
     }
     const wantsDimensions = HEADER_IMAGE_EXTENSIONS.has(path.extname(canonicalFile).toLowerCase());
@@ -453,6 +479,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
     readonly workspaceRoot: string;
     readonly requestedPath: string;
     readonly resource: AssetResource;
+    readonly office?: Extract<AssetResource, { _tag: "office-render" }> | undefined;
     readonly expiresAt: number;
   }) {
     const path = yield* Path.Path;
@@ -476,7 +503,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
       input.resource._tag === "draft-workspace-file" &&
       (isWorkspaceAudioPreviewPath(resolved.relativePath) ||
         isWorkspaceVideoPreviewPath(resolved.relativePath));
-    if (!isDraftMedia && !isWorkspacePreviewEntryPath(resolved.relativePath)) {
+    if (!input.office && !isDraftMedia && !isWorkspacePreviewEntryPath(resolved.relativePath)) {
       return yield* new AssetPreviewTypeValidationError({
         resource: input.resource,
       });
@@ -498,7 +525,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
         resource: input.resource,
       });
     }
-    if (isDraftMedia) {
+    if (input.office || isDraftMedia) {
       return yield* finalizeAbsoluteMediaFileAsset({
         ...input,
         requestedPath: canonicalFile,
@@ -542,13 +569,22 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
   },
 );
 
-export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (input: {
+export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (request: {
   readonly resource: AssetResource;
   readonly workspaceRoot?: string;
   readonly projectFaviconPath?: string;
   /** Where a cloned project's checkout stands, while the clone tracker still knows it. */
   readonly projectCheckout?: "pending" | "cloned";
 }) {
+  const office = request.resource._tag === "office-render" ? request.resource : undefined;
+  const input = {
+    ...request,
+    resource:
+      request.resource._tag === "office-render" ? request.resource.source : request.resource,
+  };
+  if (office && !(yield* (yield* OfficeRender.OfficeRender).available)) {
+    return yield* new AssetOfficeRendererUnavailableError({ resource: request.resource });
+  }
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
@@ -580,6 +616,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         requestedPath = path.resolve(workspaceRoot, requestedPath);
       }
       const finalized = yield* finalizeAbsoluteMediaFileAsset({
+        office,
         requestedPath,
         workspaceRoot: input.workspaceRoot,
         resource: input.resource,
@@ -625,6 +662,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
           : yield* toWslDrivePath(input.resource.path);
       if (path.isAbsolute(hostPath)) {
         const finalized = yield* finalizeAbsoluteMediaFileAsset({
+          office,
           requestedPath: hostPath,
           workspaceRoot: draftWorkspaceRoot,
           resource: input.resource,
@@ -646,6 +684,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         ),
       );
       const finalized = yield* finalizeWorkspaceFileAsset({
+        office,
         workspaceRoot,
         requestedPath: input.resource.path,
         resource: input.resource,
@@ -667,6 +706,30 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         return yield* new AssetAttachmentNotFoundError({
           resource: input.resource,
         });
+      }
+      if (office) {
+        const canonicalFile = yield* resolveCanonicalWorkspaceFile({
+          workspaceRoot: config.attachmentsDir,
+          relativePath: path.basename(attachmentPath),
+        }).pipe(
+          Effect.mapError(
+            (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+          ),
+        );
+        if (!canonicalFile)
+          return yield* new AssetAttachmentNotFoundError({ resource: input.resource });
+        const finalized = yield* finalizeAbsoluteMediaFileAsset({
+          requestedPath: canonicalFile,
+          expectedCanonicalPath: canonicalFile,
+          workspaceRoot: config.attachmentsDir,
+          resource: input.resource,
+          expiresAt,
+          office,
+        });
+        claims = finalized.claims;
+        fileRevision = finalized.fileRevision;
+        fileName = path.basename(input.resource.fileName ?? attachmentPath);
+        break;
       }
       const extension = parseAttachmentFileExtension(input.resource.attachmentId);
       const isGenericFile = extension !== null;
@@ -862,6 +925,10 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
     }
   }
 
+  if (office && claims.kind === "media-file-exact") {
+    fileName = path.parse(fileName).name + ".pdf";
+    claims = { ...claims, kind: "office-render-exact", fileName };
+  }
   if (claims.kind === "project-favicon" || claims.kind === "project-favicon-external") {
     const issuedAt = yield* Clock.currentTimeMillis;
     expiresAt =
@@ -991,8 +1058,10 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   const decodedPath = decodeRelativePath(relativePath);
   if (decodedPath === null) return null;
   const path = yield* Path.Path;
-  if (claims.kind === "media-file-exact") {
-    if (decodedPath !== path.basename(claims.filePath)) return null;
+  if (claims.kind === "media-file-exact" || claims.kind === "office-render-exact") {
+    const name =
+      claims.kind === "office-render-exact" ? claims.fileName : path.basename(claims.filePath);
+    if (decodedPath !== name) return null;
     const canonicalFile = yield* resolveCanonicalFile(claims.filePath).pipe(
       Effect.tapError((cause) =>
         Effect.logError("Failed to resolve canonical media path.", {
@@ -1003,17 +1072,31 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       Effect.orElseSucceed(() => null),
     );
     if (canonicalFile !== claims.filePath) return null;
-    const mimeType = claims.download
-      ? "application/octet-stream"
-      : hostPreviewMimeTypeFromExtension(path.extname(canonicalFile));
-    if (!mimeType) return null;
     const file = yield* openMediaFile(canonicalFile, claims).pipe(
       Effect.tapError((cause) =>
         Effect.logError("Failed to open canonical media file.", { filePath: canonicalFile, cause }),
       ),
       Effect.orElseSucceed(() => null),
     );
-    return file
+    if (!file) return null;
+    if (claims.kind === "office-render-exact") {
+      const renderer = yield* OfficeRender.OfficeRender;
+      const pdf = yield* renderer.renderPdf(canonicalFile, file);
+      const rendered = yield* openMediaFile(pdf).pipe(Effect.orElseSucceed(() => null));
+      return rendered
+        ? ({
+            kind: "file",
+            path: pdf,
+            file: rendered,
+            mimeType: "application/pdf",
+            fileName: claims.fileName,
+          } satisfies ResolvedAsset)
+        : null;
+    }
+    const mimeType = claims.download
+      ? "application/octet-stream"
+      : hostPreviewMimeTypeFromExtension(path.extname(canonicalFile));
+    return mimeType
       ? ({
           kind: "file",
           path: canonicalFile,
