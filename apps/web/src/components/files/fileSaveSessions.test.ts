@@ -352,6 +352,9 @@ it("keeps overlapping edits across release and resolves against the disk revisio
     local: "local",
     disk: "disk",
   });
+  // The editor keeps showing the draft, and the file still counts as unsaved (e.g. before a delete).
+  expect(h.publish).not.toHaveBeenCalled();
+  expect(h.sessions.unsavedUnder(target.environmentId, ["/workspace"])).toEqual(["file.txt"]);
   h.sessions.resolveConflict(target, "resolved");
   await vi.runAllTimersAsync();
   expect(h.persist.mock.calls[1]).toEqual([target, "resolved", "disk"]);

@@ -138,9 +138,8 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
             coordinator.flush();
             return result;
           }
+          // The draft stays in the editor; only the conflict bar shows the disk's version.
           updateConflict(session, { base: base.contents, local, disk });
-          deps.publish(target, disk, session.base);
-          deps.confirm(target, disk, cause.currentRevision);
         }
         deps.reportConflict(target, cause.message);
         return result;
@@ -256,7 +255,10 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
     /** Files at or under the absolute `paths` whose latest edit the server has not confirmed. */
     unsavedUnder(environmentId: EnvironmentId, paths: readonly string[]): readonly string[] {
       return sessionsUnder(environmentId, paths)
-        .filter(({ coordinator }) => coordinator.unconfirmedContents !== null)
+        .filter(
+          ({ coordinator, conflict }) =>
+            coordinator.unconfirmedContents !== null || conflict !== null,
+        )
         .map(({ target }) => target.relativePath);
     },
     /** Forgets drafts at or under the absolute `paths`, which no longer exist. */

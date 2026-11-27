@@ -119,6 +119,7 @@ import {
 } from "./filePath";
 
 import { FileMarkdownEditor, type MarkdownEditorHandle } from "./FileMarkdownEditor";
+import { FileSaveConflictBar } from "./FileSaveConflictBar";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { ReaderFindScope, type ReaderFindHandle } from "~/reader/find/ReaderFindScope";
 import {
@@ -991,72 +992,75 @@ function EditableFileSurface({
   };
 
   return (
-    <EditProvider createEditor={createFileEditor}>
-      <div ref={surfaceRef} className="flex min-h-0 flex-1">
-        <Virtualizer
-          className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
-          config={{
-            overscrollSize: 600,
-            intersectionObserverMargin: 1200,
-          }}
-        >
-          <File<FileCommentAnnotationGroup>
-            file={externalFile}
-            edit={editable}
-            editorOptions={editorOptions}
-            onEditChange={handleEditChange}
-            options={{
-              disableFileHeader: true,
-              enableGutterUtility: !hasOpenCommentForm,
-              enableLineSelection: !hasOpenCommentForm,
-              onGutterUtilityClick: setSelectedRange,
-              onLineSelectionChange: setSelectedRange,
-              onLineSelectionEnd: handleLineSelectionEnd,
-              overflow: wordWrap ? "wrap" : "scroll",
-              theme: resolveDiffThemeName(resolvedTheme),
-              preferredHighlighter: PREFERRED_HIGHLIGHTER,
-              themeType: resolvedTheme,
-              unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
-              onPostRender: handlePostRender,
+    <div className="flex min-h-0 flex-1 flex-col">
+      <FileSaveConflictBar target={{ environmentId, cwd, relativePath }} />
+      <EditProvider createEditor={createFileEditor}>
+        <div ref={surfaceRef} className="flex min-h-0 flex-1">
+          <Virtualizer
+            className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
+            config={{
+              overscrollSize: 600,
+              intersectionObserverMargin: 1200,
             }}
-            selectedLines={selectedRange}
-            lineAnnotations={lineAnnotations}
-            renderAnnotation={(annotation) => {
-              // Sent comments stay annotated so a failed send can restore them at remapped lines.
-              const entries = promptFileCommentEntries(
-                annotation.metadata.entries,
-                promptCommentIds,
-              );
-              if (entries.length === 0) return null;
-              return (
-                <div className="py-1">
-                  {entries.map((entry) => (
-                    <DiffCommentAnnotation
-                      key={entry.id}
-                      environmentId={environmentId}
-                      projectId={projectId}
-                      ownerKey={JSON.stringify([
-                        environmentId,
-                        composerDraftTarget,
-                        relativePath,
-                        entry.id,
-                      ])}
-                      kind={entry.kind}
-                      rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
-                      text={entry.text}
-                      onCancel={() => removeAnnotationEntry(entry.id)}
-                      onComment={(text) => submitAnnotationEntry(entry.id, text)}
-                      onDelete={() => removeAnnotationEntry(entry.id)}
-                    />
-                  ))}
-                </div>
-              );
-            }}
-            className="min-h-full"
-          />
-        </Virtualizer>
-      </div>
-    </EditProvider>
+          >
+            <File<FileCommentAnnotationGroup>
+              file={externalFile}
+              edit={editable}
+              editorOptions={editorOptions}
+              onEditChange={handleEditChange}
+              options={{
+                disableFileHeader: true,
+                enableGutterUtility: !hasOpenCommentForm,
+                enableLineSelection: !hasOpenCommentForm,
+                onGutterUtilityClick: setSelectedRange,
+                onLineSelectionChange: setSelectedRange,
+                onLineSelectionEnd: handleLineSelectionEnd,
+                overflow: wordWrap ? "wrap" : "scroll",
+                theme: resolveDiffThemeName(resolvedTheme),
+                preferredHighlighter: PREFERRED_HIGHLIGHTER,
+                themeType: resolvedTheme,
+                unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
+                onPostRender: handlePostRender,
+              }}
+              selectedLines={selectedRange}
+              lineAnnotations={lineAnnotations}
+              renderAnnotation={(annotation) => {
+                // Sent comments stay annotated so a failed send can restore them at remapped lines.
+                const entries = promptFileCommentEntries(
+                  annotation.metadata.entries,
+                  promptCommentIds,
+                );
+                if (entries.length === 0) return null;
+                return (
+                  <div className="py-1">
+                    {entries.map((entry) => (
+                      <DiffCommentAnnotation
+                        key={entry.id}
+                        environmentId={environmentId}
+                        projectId={projectId}
+                        ownerKey={JSON.stringify([
+                          environmentId,
+                          composerDraftTarget,
+                          relativePath,
+                          entry.id,
+                        ])}
+                        kind={entry.kind}
+                        rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
+                        text={entry.text}
+                        onCancel={() => removeAnnotationEntry(entry.id)}
+                        onComment={(text) => submitAnnotationEntry(entry.id, text)}
+                        onDelete={() => removeAnnotationEntry(entry.id)}
+                      />
+                    ))}
+                  </div>
+                );
+              }}
+              className="min-h-full"
+            />
+          </Virtualizer>
+        </div>
+      </EditProvider>
+    </div>
   );
 }
 
@@ -1093,6 +1097,7 @@ function RenderedMarkdownSurface({
   if (!readOnly) {
     return (
       <ReaderFindScope handleRef={findRef}>
+        <FileSaveConflictBar target={saveTarget} />
         <FileMarkdownEditor
           environmentId={environmentId}
           cwd={cwd}
