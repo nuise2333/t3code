@@ -30,7 +30,9 @@ it("has a Chinese entry for every literal gt() string", () => {
       if (!text.includes("gt-react")) return [];
       return [...text.matchAll(GT_CALL)].flatMap((match) => {
         const source = JSON.parse(`"${match[1]}"`) as string;
-        const context = /\$context:\s*"([^"]*)"/.exec(match[2] ?? "")?.[1];
+        // Options can hold a nested gt() call; its $context is not this call's.
+        const options = (match[2] ?? "").split(/\bgt\(/)[0] ?? "";
+        const context = /\$context:\s*"([^"]*)"/.exec(options)?.[1];
         const hash = hashSource({
           source,
           dataFormat: "ICU",
