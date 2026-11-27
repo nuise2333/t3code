@@ -61,6 +61,10 @@ vi.mock(import("~/hooks/useTheme"), async (original) => ({
 vi.mock(import("~/hooks/useWorkspaceMutationRefresh"), () => ({
   useWorkspaceMutationRefresh: vi.fn(),
 }));
+// These hosts have no LibreOffice; Office files here exercise the built-in preview.
+vi.mock(import("./useOfficeRender"), () => ({
+  useOfficeRender: () => ({ _tag: "fallback", reason: "unsupported" }) as const,
+}));
 vi.mock(import("~/assets/assetUrls"), async (original) => ({
   ...(await original()),
   useAssetUrlRefresh: () => state.mintUrl,

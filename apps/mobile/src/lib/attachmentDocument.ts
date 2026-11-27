@@ -5,7 +5,11 @@ import * as Dialog from "../components/ui/Dialog";
 import { filePreviewDelimiter, parseDelimitedPreview } from "@t3tools/shared/delimitedPreview";
 import type { AssetResource, EnvironmentId } from "@t3tools/contracts";
 import { readFilePreviewResponse } from "@t3tools/client-runtime/file-preview";
-import { filePreviewKind, FILE_TEXT_PREVIEW_MAX_BYTES } from "@t3tools/shared/filePreview";
+import {
+  filePreviewKind,
+  officeRenderKind,
+  FILE_TEXT_PREVIEW_MAX_BYTES,
+} from "@t3tools/shared/filePreview";
 import { fetch } from "expo/fetch";
 import { File } from "expo-file-system";
 import * as Effect from "effect/Effect";
@@ -18,6 +22,7 @@ import { localAttachmentPreviewAtom, localAttachmentPreviewState } from "./local
 import { downloadAndShareAttachment, shareLocalAttachment } from "./attachmentDownload";
 import { refreshAssetUrl, useFreshAssetUrl, useRefreshAssetUrl } from "../state/assets";
 import { attachmentDocumentPresentation } from "./attachmentDocumentPresentation";
+import { useOfficeRender } from "./officeRender";
 
 const isLocalUri = (uri: string) => /^(file|content):/.test(uri);
 
@@ -111,6 +116,12 @@ export function useAttachmentDocument(input: {
   const [rendered, setRendered] = useState(true);
   const [revision, setRevision] = useState(0);
   const [sharing, setSharing] = useState(false);
+  // A draft's local file is not on the host yet, so LibreOffice cannot reach it.
+  const office = useOfficeRender(
+    environmentId,
+    officeRenderKind(input) ? resource : null,
+    revision,
+  );
   const attachment = input.attachment;
   const localPreviewAtom = localAttachmentPreviewAtom(attachment);
   const localPreview = localAttachmentPreviewState(useAtomValue(localPreviewAtom));
@@ -174,6 +185,7 @@ export function useAttachmentDocument(input: {
   return {
     kind,
     ...presentation,
+    office,
     uri,
     /** Native viewers resolve their own fresh URL from this instead of reusing `uri`. */
     resource,

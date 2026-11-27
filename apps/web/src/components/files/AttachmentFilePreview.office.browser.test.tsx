@@ -1,16 +1,23 @@
-import { act, render } from "../../../test/render";
+import { act, render, stubGlobal } from "../../../test/render";
 import { expect, it, vi } from "vite-plus/test";
 import "~/index.css";
 
-const { refresh, assetUrlState } = vi.hoisted(() => ({
+const { refresh, mintRender, assetUrlState } = vi.hoisted(() => ({
   refresh: vi.fn<() => Promise<string | null>>(),
+  mintRender: vi.fn<() => Promise<string | null>>(),
   assetUrlState: vi.fn<() => import("~/assets/assetUrls").AssetUrlState>(),
 }));
 
 vi.mock(import("~/assets/assetUrls"), async (original) => ({
   ...(await original()),
-  useAssetUrlRefresh: () => refresh,
+  useAssetUrlRefresh: (_environmentId, resource) =>
+    resource?._tag === "office-render" ? mintRender : refresh,
   useAssetUrlState: assetUrlState,
+}));
+// PDF.js is covered by the PDF viewer's own tests; these need only the URL it is handed.
+vi.mock(import("./BrowserDocumentFrame"), async (original) => ({
+  ...(await original()),
+  BrowserDocumentFrame: ({ src }: { src: string }) => <div data-testid="pdf-frame">{src}</div>,
 }));
 // The real source view highlights through a worker pool; the text it receives is what matters here.
 // Never load the original: its highlighter graph can outlast waitFor on a cold CI browser.
@@ -40,6 +47,7 @@ vi.mock(import("./office/WordDocument"), async () => {
   };
 });
 
+import { EnvironmentId } from "@t3tools/contracts";
 import { AttachmentFilePreview } from "./AttachmentFilePreview";
 import JSZip from "jszip";
 import { OFFICE_PREVIEW_MAX_COLUMNS, type OfficeWorkerResult } from "./officePreviewProtocol";
@@ -1083,4 +1091,117 @@ it.each([60, 100])("prepares all %i pages of a table-heavy Word report", async (
   });
   expect(screen.container.textContent).not.toContain("Preview limited");
   expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+});
+
+const RENDER_URL = "https://host.test/render";
+
+async function hostOfficeFile(renderStatus: number) {
+  const archive = new JSZip().file(
+    "word/document.xml",
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Parsed outlook</w:t></w:r></w:p></w:body></w:document>',
+  );
+  const bytes = await archive.generateAsync({ type: "arraybuffer" });
+  const requests: Array<{ url: string; range: string | null }> = [];
+  refresh.mockReset().mockResolvedValue("https://host.test/original");
+  mintRender.mockReset().mockResolvedValue(RENDER_URL);
+  const stack = new DisposableStack();
+  stack.use(
+    stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, range: new Headers(init?.headers).get("Range") });
+        return url === RENDER_URL
+          ? new Response(renderStatus < 300 ? "%" : "failed", { status: renderStatus })
+          : new Response(bytes.slice(0));
+      }),
+    ),
+  );
+  const previous = localStorage.getItem("t3code.officeSheetView");
+  stack.defer(() => {
+    if (previous === null) localStorage.removeItem("t3code.officeSheetView");
+    else localStorage.setItem("t3code.officeSheetView", previous);
+  });
+  localStorage.removeItem("t3code.officeSheetView");
+  return {
+    requests,
+    asset: { environmentId: EnvironmentId.make("office-render-test"), attachmentId: "office" },
+    [Symbol.dispose]: () => stack.dispose(),
+  };
+}
+
+it("shows a host Word file in LibreOffice's layout", async () => {
+  using host = await hostOfficeFile(206);
+  await using screen = await render(
+    <AttachmentFilePreview
+      name="outlook.docx"
+      mimeType="application/octet-stream"
+      sizeBytes={0}
+      asset={host.asset}
+    />,
+  );
+  await expect.element(screen.getByTestId("pdf-frame")).toHaveTextContent(RENDER_URL);
+  expect(host.requests).toEqual([{ url: RENDER_URL, range: "bytes=0-0" }]);
+  expect(screen.container.textContent).not.toContain("LibreOffice");
+  expect(screen.getByRole("button", { name: "Show grid" }).query()).toBeNull();
+});
+
+it.each([
+  [503, "Install LibreOffice on this computer to see the original layout."],
+  [422, "LibreOffice couldn't open this file; showing a simplified preview."],
+])("falls back to the built-in preview when the host answers %i", async (status, notice) => {
+  using host = await hostOfficeFile(status);
+  await using screen = await render(
+    <AttachmentFilePreview
+      name="outlook.docx"
+      mimeType="application/octet-stream"
+      sizeBytes={0}
+      asset={host.asset}
+    />,
+  );
+  await vi.waitFor(() => expect(screen.container.textContent).toContain("Parsed outlook"), {
+    timeout: 10_000,
+  });
+  await expect.element(screen.getByRole("status").filter({ hasText: notice })).toBeVisible();
+  expect(screen.getByTestId("pdf-frame").query()).toBeNull();
+});
+
+it("shows a legacy Word file, which has no built-in preview, in LibreOffice's layout", async () => {
+  using host = await hostOfficeFile(206);
+  await using screen = await render(
+    <AttachmentFilePreview
+      name="legacy.doc"
+      mimeType="application/msword"
+      sizeBytes={0}
+      asset={host.asset}
+    />,
+  );
+  await expect.element(screen.getByTestId("pdf-frame")).toHaveTextContent(RENDER_URL);
+});
+
+it("switches a spreadsheet between LibreOffice's layout and the grid, and remembers it", async () => {
+  using host = await hostOfficeFile(206);
+  const sheet = (key: string) => (
+    <AttachmentFilePreview
+      key={key}
+      name="budget.xlsx"
+      mimeType="application/octet-stream"
+      sizeBytes={0}
+      asset={host.asset}
+    />
+  );
+  await using screen = await render(sheet("first"));
+  await expect.element(screen.getByTestId("pdf-frame")).toHaveTextContent(RENDER_URL);
+
+  await screen.getByRole("button", { name: "Show grid" }).click();
+  await expect.element(screen.getByRole("button", { name: "Show original layout" })).toBeVisible();
+  expect(screen.getByTestId("pdf-frame").query()).toBeNull();
+
+  mintRender.mockClear();
+  await screen.rerender(sheet("reopened"));
+  await expect.element(screen.getByRole("button", { name: "Show original layout" })).toBeVisible();
+  expect(mintRender, "the grid view asked the host to convert the file").not.toHaveBeenCalled();
+
+  await screen.getByRole("button", { name: "Show original layout" }).click();
+  await expect.element(screen.getByTestId("pdf-frame")).toHaveTextContent(RENDER_URL);
 });

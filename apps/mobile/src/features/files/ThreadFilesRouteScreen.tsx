@@ -17,7 +17,9 @@ import {
   isWorkspaceBrowserPreviewPath,
   isWorkspaceImagePreviewPath,
   mediaMimeTypeFromExtension,
+  officeRenderKind,
 } from "@t3tools/shared/filePreview";
+import { type OfficeRenderState, officeRenderNotice } from "@t3tools/client-runtime/office-render";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 
 import { ScreenContent } from "../../components/ui/ScreenContent";
@@ -48,6 +50,8 @@ import {
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { ThreadRouteScreen } from "../threads/ThreadRouteScreen";
 import { FilePreviewLoading, FilePreviewNotice } from "./FilePreviewFeedback";
+import { PdfPreview } from "../../components/PdfPreview";
+import { useOfficeRender } from "../../lib/officeRender";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { useFileTreeEntries } from "./useFileTreeEntries";
@@ -240,6 +244,7 @@ function FileContent(props: {
   readonly environmentId: EnvironmentId;
   readonly previewUri: string | null;
   readonly previewFailure: AssetUrlFailureReason | null;
+  readonly office: OfficeRenderState | null;
   readonly onRetryPreview: () => void;
   readonly videoSource: MediaVideoPreviewSource | null;
   readonly mediaSource?: MediaActionsSource;
@@ -256,7 +261,10 @@ function FileContent(props: {
   // Reopening a mutable host file must not reuse a poster from an earlier visit.
   const thumbnailInstanceId = useId();
   const barOverlap = useContentTopInset();
-  const reservedHeaderInset = props.truncated ? barOverlap : 0;
+  const officeNotice =
+    props.office?._tag === "fallback" ? officeRenderNotice(props.office.reason, false) : null;
+  const hasNotice = props.truncated || officeNotice !== null;
+  const reservedHeaderInset = hasNotice ? barOverlap : 0;
   const isMarkdown = isMarkdownPreviewFile(props.relativePath);
   const delimiter = filePreviewDelimiter({ name: props.relativePath });
   const isBrowserFile = isWorkspaceBrowserPreviewPath(props.relativePath);
@@ -315,10 +323,25 @@ function FileContent(props: {
     return <WorkspaceFileWebPreview uri={props.previewUri} />;
   }
 
+  if (props.office?._tag === "loading") {
+    return <FilePreviewLoading message="Preparing preview..." />;
+  }
+
+  if (props.office?._tag === "pdf") {
+    return (
+      <View className="flex-1" style={{ paddingTop: barOverlap }}>
+        <PdfPreview key={props.office.url} uri={props.office.url} />
+      </View>
+    );
+  }
+
   if (props.fileError && props.fileContents === null) {
     return (
-      <View className="flex-1 items-center justify-center bg-sheet px-6">
-        <EmptyState title="File unavailable" detail={props.fileError} />
+      <View className="flex-1 bg-sheet" style={{ paddingTop: reservedHeaderInset }}>
+        {officeNotice ? <FilePreviewNotice>{officeNotice}</FilePreviewNotice> : null}
+        <View className="flex-1 items-center justify-center px-6">
+          <EmptyState title="File unavailable" detail={props.fileError} />
+        </View>
       </View>
     );
   }
@@ -334,6 +357,7 @@ function FileContent(props: {
           Preview limited to the first 1 MB of a truncated file.
         </FilePreviewNotice>
       ) : null}
+      {officeNotice ? <FilePreviewNotice>{officeNotice}</FilePreviewNotice> : null}
       {props.activeMode === "preview" && delimiter ? (
         <DelimitedFilePreview table={parseDelimitedPreview(props.fileContents, delimiter)} />
       ) : props.activeMode === "preview" && isMarkdown ? (
@@ -351,7 +375,7 @@ function FileContent(props: {
           contents={props.fileContents}
           path={props.relativePath}
           initialLine={props.initialLine}
-          headerInsetTop={props.truncated ? 0 : undefined}
+          headerInsetTop={hasNotice ? 0 : undefined}
           selectable={props.selectable}
           onRefresh={props.onRefresh}
         />
@@ -733,12 +757,25 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
   const handleRetryPreview = () => {
     void assetPreview.refresh().finally(() => setPreviewRevision((current) => current + 1));
   };
+  const isOfficeFile = relativePath !== null && officeRenderKind({ name: relativePath }) !== null;
+  const office = useOfficeRender(
+    environmentId,
+    !isOfficeFile || metadataPending || directoryPath !== null || cwd === null
+      ? null
+      : threadId === null
+        ? { _tag: "draft-workspace-file", cwd, path: relativePath }
+        : { _tag: "media-file", threadId, path: resolveWorkspaceFilePath(cwd, relativePath) },
+    previewRevision,
+  );
   // Metadata is needed only to distinguish directories; file contents can load concurrently.
-  const needsFileContents = needsWorkspaceFileContents({
-    relativePath,
-    metadataKind: metadata.data?.kind,
-    activeMode: resolvedActiveMode,
-  });
+  // A file LibreOffice lays out is read as text only once that has fallen back.
+  const needsFileContents =
+    (!isOfficeFile || office?._tag === "fallback") &&
+    needsWorkspaceFileContents({
+      relativePath,
+      metadataKind: metadata.data?.kind,
+      activeMode: resolvedActiveMode,
+    });
   const fileQuery = useEnvironmentQuery(
     canReadFiles &&
       environmentId !== null &&
@@ -1052,6 +1089,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
           environmentId={environmentId}
           previewUri={previewUri}
           previewFailure={assetPreview._tag === "Failure" ? assetPreview.reason : null}
+          office={office}
           onRetryPreview={handleRetryPreview}
           videoSource={videoSource}
           mediaSource={mediaSource}

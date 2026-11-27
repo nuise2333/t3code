@@ -8,8 +8,11 @@ import * as Cause from "effect/Cause";
 import {
   filePreviewKind,
   officePreviewKind,
+  officeRenderKind,
   FILE_TEXT_PREVIEW_MAX_BYTES,
 } from "@t3tools/shared/filePreview";
+import { officePreviewView, wantsOfficeRender } from "@t3tools/client-runtime/office-render";
+import * as Schema from "effect/Schema";
 import {
   ChevronRightIcon,
   DownloadIcon,
@@ -21,6 +24,7 @@ import {
   CopyIcon,
   EyeIcon,
   FileDownIcon,
+  FileTextIcon,
   ListTreeIcon,
   SearchIcon,
   Table2Icon,
@@ -32,6 +36,7 @@ import ChatMarkdown from "~/components/ChatMarkdown";
 import { maskMarkdownFrontmatter } from "@t3tools/shared/markdownFrontmatter";
 import { toastManager } from "~/components/ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { ReaderFindScope, type ReaderFindHandle } from "~/reader/find/ReaderFindScope";
@@ -54,6 +59,7 @@ import {
   FileSurfaceLoading,
   FileSurfaceNotice,
 } from "./fileSurfaceChrome";
+import { useOfficeRender } from "./useOfficeRender";
 
 const LargeTextViewer = lazy(() => import("./LargeTextViewer"));
 
@@ -72,6 +78,8 @@ const MermaidFilePreview = lazy(() =>
 const SourcePreview = lazy(() => import("./ReadOnlySourcePreview"));
 
 const STALE_URL_MS = 5 * 60_000;
+const OFFICE_SHEET_VIEW_STORAGE_KEY = "t3code.officeSheetView";
+const OfficeSheetView = Schema.Literals(["layout", "grid"]);
 
 const blobKeys = new WeakMap<Blob, string>();
 let nextBlobKey = 0;
@@ -164,6 +172,29 @@ export function AttachmentFilePreview(props: {
   const readerSurfaceKey = readerAttachmentSurfaceKey(props.asset);
   const readerOutline = useReaderOutlineToggle(readerSurfaceKey ?? "");
   const [revision, setRevision] = useState(0);
+  const [sheetView, setSheetView] = useLocalStorage(
+    OFFICE_SHEET_VIEW_STORAGE_KEY,
+    "layout",
+    OfficeSheetView,
+  );
+  // A draft's Blob is not on the host yet, so only its built-in preview can show it.
+  const officeSource = props.file ? null : resource;
+  const officeInput = {
+    renderKind: officeRenderKind(props),
+    hasParser: officeKind !== null,
+    hasSource: officeSource !== null,
+    sheetView,
+  };
+  const officeRender = useOfficeRender({
+    environmentId: props.asset?.environmentId ?? null,
+    source: officeSource,
+    enabled: wantsOfficeRender(officeInput),
+    revision,
+  });
+  const officeView =
+    officeInput.renderKind || officeKind
+      ? officePreviewView({ ...officeInput, render: officeRender })
+      : null;
   const [content, setContent] = useState<{ text: string; truncated: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
@@ -341,7 +372,17 @@ export function AttachmentFilePreview(props: {
     <Suspense fallback={<FileSurfaceLoading />}>
       <FontFilePreview src={url} name={props.name} />
     </Suspense>
-  ) : officeKind ? (
+  ) : officeView?.body === "loading" ? (
+    <FileSurfaceLoading />
+  ) : officeView?.body === "pdf" && officeRender._tag === "pdf" ? (
+    <BrowserDocumentFrame
+      src={officeRender.url}
+      title={props.name}
+      pdf
+      // The signed URL changes on every mint; the source and retry count identify the document.
+      documentKey={JSON.stringify(["office", props.asset?.environmentId, officeSource, revision])}
+    />
+  ) : officeView?.body === "parser" && officeKind ? (
     <Suspense fallback={<FileSurfaceLoading />}>
       <OfficeFilePreview
         src={url}
@@ -429,6 +470,19 @@ export function AttachmentFilePreview(props: {
               <Table2Icon className="size-3.5" />
             ) : (
               <EyeIcon className="size-3.5" />
+            )}
+          </FileSurfaceAction>
+        ) : null}
+        {officeView?.sheetToggle ? (
+          <FileSurfaceAction
+            label={sheetView === "grid" ? "Show original layout" : "Show grid"}
+            pressed={sheetView === "layout"}
+            onPress={() => setSheetView(sheetView === "grid" ? "layout" : "grid")}
+          >
+            {sheetView === "grid" ? (
+              <FileTextIcon className="size-3.5" />
+            ) : (
+              <Table2Icon className="size-3.5" />
             )}
           </FileSurfaceAction>
         ) : null}
@@ -523,6 +577,9 @@ export function AttachmentFilePreview(props: {
           {props.sizeBytes > 0 ? ` of a ${props.sizeBytes.toLocaleString()} byte file` : ""}. Save
           the file to read it in full.
         </FileSurfaceNotice>
+      ) : null}
+      {officeView?.notice && !failure ? (
+        <FileSurfaceNotice>{officeView.notice}</FileSurfaceNotice>
       ) : null}
       {body}
     </div>

@@ -2,6 +2,8 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { View } from "react-native";
 
 import { EmptyState } from "../../components/ui/EmptyState";
+import { PdfPreview } from "../../components/PdfPreview";
+import { useContentTopInset } from "../../components/ui/useBarInset";
 import type { useAttachmentDocument } from "../../lib/attachmentDocument";
 import { HtmlRenderWebView } from "../threads/HtmlRenderWebView";
 import { AudioFilePreview } from "./AudioFilePreview";
@@ -22,6 +24,7 @@ export function AttachmentDocumentBody(props: {
   readonly document: Pick<
     ReturnType<typeof useAttachmentDocument>,
     | "kind"
+    | "office"
     | "activeMode"
     | "uri"
     | "content"
@@ -39,6 +42,7 @@ export function AttachmentDocumentBody(props: {
   readonly onOpenNative: () => void;
 }) {
   const { document } = props;
+  const topInset = useContentTopInset();
   if (document.error) {
     return (
       <View className="flex-1 items-center justify-center bg-sheet px-6">
@@ -48,6 +52,16 @@ export function AttachmentDocumentBody(props: {
           actionLabel="Try again"
           onAction={document.retry}
         />
+      </View>
+    );
+  }
+  if (document.office?._tag === "loading") {
+    return <FilePreviewLoading message="Preparing preview..." />;
+  }
+  if (document.office?._tag === "pdf") {
+    return (
+      <View className="flex-1" style={{ paddingTop: topInset }}>
+        <PdfPreview key={document.office.url} uri={document.office.url} />
       </View>
     );
   }

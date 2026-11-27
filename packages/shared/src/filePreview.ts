@@ -168,6 +168,42 @@ export function officePreviewKind(file: {
   return null;
 }
 
+export type OfficeRenderKind = "document" | "spreadsheet" | "presentation";
+
+const OFFICE_RENDER_KINDS: Readonly<Record<string, OfficeRenderKind>> = {
+  doc: "document",
+  docx: "document",
+  odt: "document",
+  rtf: "document",
+  xls: "spreadsheet",
+  xlsx: "spreadsheet",
+  ods: "spreadsheet",
+  ppt: "presentation",
+  pptx: "presentation",
+  odp: "presentation",
+};
+
+const LEGACY_OFFICE_MIME_TYPES: Readonly<Record<string, OfficeRenderKind>> = {
+  "application/msword": "document",
+  "application/vnd.ms-excel": "spreadsheet",
+  "application/vnd.ms-powerpoint": "presentation",
+};
+
+/** Formats the host's LibreOffice lays out as PDF. The legacy binary ones have no built-in parser. */
+export function officeRenderKind(file: {
+  readonly name: string;
+  readonly mimeType?: string;
+}): OfficeRenderKind | null {
+  const parsed = officePreviewKind(file);
+  if (parsed) return OFFICE_RENDER_KINDS[parsed] ?? null;
+  const mime = file.mimeType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const legacy = LEGACY_OFFICE_MIME_TYPES[mime];
+  if (legacy) return legacy;
+  if (mime && !GENERIC_MIME_TYPES.has(mime) && mime !== "text/plain") return null;
+  const extension = /\.(doc|xls|ppt)$/i.exec(file.name)?.[1]?.toLowerCase();
+  return extension ? (OFFICE_RENDER_KINDS[extension] ?? null) : null;
+}
+
 export function decodeFilePreviewText(bytes: Uint8Array, truncated = false) {
   const bounded = bytes.subarray(0, FILE_TEXT_PREVIEW_MAX_BYTES);
   if (bounded.some((byte) => byte === 0))

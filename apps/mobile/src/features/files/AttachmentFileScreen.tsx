@@ -5,6 +5,7 @@ import {
   clampFileAttachmentUploadBytes,
   formatAttachmentSize,
 } from "@t3tools/client-runtime/state/attachments";
+import { officeRenderNotice } from "@t3tools/client-runtime/office-render";
 import { useRef, useState } from "react";
 import { View } from "react-native";
 
@@ -21,6 +22,8 @@ import { scopedThreadKey } from "../../lib/scopedEntities";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { isZipFile, ZipArchiveView } from "./ZipArchiveView";
 import { AttachmentDocumentBody, nativeViewerKind } from "./AttachmentDocumentBody";
+import { FilePreviewNotice } from "./FilePreviewFeedback";
+import { useContentTopInset } from "../../components/ui/useBarInset";
 
 export type AttachmentFileRouteParams = {
   readonly environmentId?: string;
@@ -68,9 +71,15 @@ export function AttachmentFileScreen(props: AttachmentFileScreenProps) {
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();
   };
-  const { uri, resource } = document;
-  // A file only the native viewer can show opens it as soon as the file resolves.
-  if (nativeViewer === "pending" && uri) {
+  const { uri, resource, office } = document;
+  const topInset = useContentTopInset();
+  const officeNotice =
+    office?._tag === "fallback" ? officeRenderNotice(office.reason, false) : null;
+  // LibreOffice's PDF shows in place, so the native viewer no longer opens by itself.
+  if (nativeViewer === "pending" && office?._tag === "pdf") {
+    setNativeViewer(null);
+  } else if (nativeViewer === "pending" && uri && office?._tag !== "loading") {
+    // A file only the native viewer can show opens it as soon as the file resolves.
     setNativeViewer("open");
     setNativeOpen(true);
   }
@@ -243,6 +252,11 @@ export function AttachmentFileScreen(props: AttachmentFileScreenProps) {
   return (
     <View className="flex-1 bg-sheet">
       <AppBar title={params.name} subtitle={subtitle} onBack={handleBack} menus={[fileMenu]} />
+      {officeNotice ? (
+        <View style={{ paddingTop: topInset }}>
+          <FilePreviewNotice>{officeNotice}</FilePreviewNotice>
+        </View>
+      ) : null}
       <AttachmentDocumentBody
         document={document}
         name={params.name}
