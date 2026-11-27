@@ -117,23 +117,3 @@ export function newThreadModelSelection(input: {
   const kind = input.rememberedKind ?? null;
   return (kind === null ? undefined : input.leads?.[kind]) ?? input.shown;
 }
-
-/** Whether a started thread can switch to the lead; one that cannot must not join the team. */
-export function leadReachable(
-  lead: ModelSelection,
-  entries: ReadonlyArray<{
-    readonly instanceId: string;
-    readonly driverKind: string;
-    readonly enabled: boolean;
-    readonly installed: boolean;
-  }>,
-  lockedProvider: string | null,
-): boolean {
-  const entry = entries.find((candidate) => candidate.instanceId === lead.instanceId);
-  return (
-    entry !== undefined &&
-    entry.enabled &&
-    entry.installed &&
-    (lockedProvider === null || entry.driverKind === lockedProvider)
-  );
-}

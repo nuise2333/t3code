@@ -10,7 +10,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   agentTeamLeadPatch,
   newThreadModelSelection,
-  leadReachable,
   AUTO_TEAM_TEXT,
   leadSelectionToApply,
   modelPickTeamExit,
@@ -125,17 +124,5 @@ describe("newThreadModelSelection", () => {
     );
     expect(newThreadModelSelection({ ...base, leads: {} })).toStrictEqual(shown);
     expect(newThreadModelSelection({ ...base, rememberedKind: null })).toStrictEqual(shown);
-  });
-});
-
-describe("leadReachable", () => {
-  const lead = { instanceId: ProviderInstanceId.make("claude"), model: "lead" };
-  const entry = { instanceId: "claude", driverKind: "claudeAgent", enabled: true, installed: true };
-  it("joins only when the thread can switch to the lead", () => {
-    expect(leadReachable(lead, [entry], null)).toBe(true);
-    expect(leadReachable(lead, [], null)).toBe(false);
-    expect(leadReachable(lead, [{ ...entry, enabled: false }], null)).toBe(false);
-    expect(leadReachable(lead, [entry], "codex")).toBe(false);
-    expect(leadReachable(lead, [entry], "claudeAgent")).toBe(true);
   });
 });

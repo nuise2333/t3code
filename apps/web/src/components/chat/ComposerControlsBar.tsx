@@ -69,7 +69,6 @@ import type { useComposerProviderModel } from "./useComposerProviderModel";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 import {
   agentTeamLeadPatch,
-  leadReachable,
   leadSelectionToApply,
   modelPickTeamExit,
   teamDisplayName,
@@ -443,14 +442,13 @@ export function ComposerControlsBar(props: {
       onProviderModelSelect(...args);
     },
   );
-  const canRunOn = (lead: ModelSelection) =>
-    leadReachable(lead, providerInstanceEntries, lockedProvider);
   // The thread runs on its team's lead. Not a pick in the model list, so it leaves no team.
-  const runOnLead = (lead: ModelSelection | null) => {
-    if (lead === null) return;
+  // False when a started thread could not switch (another provider or checkout): it joins nothing.
+  const runOnLead = (lead: ModelSelection | null): boolean => {
+    if (lead === null) return true;
     if (routeKind !== "server") {
       if (draftId) setDraftModelSelection(draftId, lead, { explicit: true, replaceOptions: true });
-      return;
+      return true;
     }
     if (
       lead.instanceId !== selectedModelSelection.instanceId ||
@@ -464,10 +462,12 @@ export function ComposerControlsBar(props: {
       (draft?.modelSelectionExplicit && draft.activeProvider
         ? draft.modelSelectionByProvider[draft.activeProvider]
         : undefined) ?? selectedModelSelection;
+    if (shown.instanceId !== lead.instanceId || shown.model !== lead.model) return false;
     const exact = leadSelectionToApply(shown, lead);
-    if (exact === null) return;
+    if (exact === null) return true;
     setDraftModelSelection(routeThreadRef, exact, { explicit: true, replaceOptions: true });
     applyRouteThreadModelPick();
+    return true;
   };
   // An automatic kind is remembered for new threads until a model is picked in the list.
   const selectAutoTeam = useStableCallback((kind: AutoTeamKind) => {
@@ -475,7 +475,7 @@ export function ComposerControlsBar(props: {
     if (!team) return;
     const ref = { id: team.id, name: team.name };
     const lead = teamLeadSelection({ kind: "auto", auto: kind }, agentTeamLeads);
-    if (routeKind === "server" && lead !== null && !canRunOn(lead)) return;
+    if (!runOnLead(lead)) return;
     updateSettings({ agentTeamDefault: kind });
     if (routeKind !== "server") {
       if (pickedGroup?.team) clearPickedGroup();
@@ -483,7 +483,6 @@ export function ComposerControlsBar(props: {
     } else {
       setThreadTeam(ref);
     }
-    runOnLead(lead);
   });
   const setAutoTeamLead = useStableCallback((kind: AutoTeamKind, lead: ModelSelection) => {
     updateSettings(agentTeamLeadPatch(agentTeamLeads, kind, lead));
@@ -498,8 +497,7 @@ export function ComposerControlsBar(props: {
       setDraftTeam(ref);
       return;
     }
-    if (!canRunOn(lead)) return;
-    runOnLead(lead);
+    if (!runOnLead(lead)) return;
     setThreadTeam(ref);
   };
   const selectSavedTeam = useStableCallback((teamId: string) => {

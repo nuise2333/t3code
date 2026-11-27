@@ -265,3 +265,26 @@ it("switches a started thread to its team's lead and leaves the team on a model 
   expect(mocks.runCommand).toHaveBeenLastCalledWith(teamChange(null));
   expect(mocks.updateSettings).toHaveBeenLastCalledWith({ agentTeamDefault: null });
 });
+
+it("keeps a started thread out of a team whose lead it cannot switch to", async () => {
+  setup();
+  const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread-team-locked"));
+  // The composer refuses the switch, as it does across providers or checkouts.
+  const onProviderModelSelect = vi.fn();
+  await using _screen = await render(
+    <Bar
+      routeKind="server"
+      routeThreadRef={threadRef}
+      draftId={null}
+      onProviderModelSelect={onProviderModelSelect}
+      agentTeam={{ id: "auto-cheap", name: "Cheap team" }}
+    />,
+  );
+
+  await page.getByRole("option", { name: /Content team/ }).click();
+  expect(onProviderModelSelect).toHaveBeenLastCalledWith(codex, "beta", { focusComposer: false });
+  expect(mocks.runCommand).not.toHaveBeenCalled();
+  await page.getByRole("option", { name: /Balanced team/ }).click();
+  expect(mocks.runCommand).not.toHaveBeenCalled();
+  expect(mocks.updateSettings).not.toHaveBeenCalledWith({ agentTeamDefault: "balanced" });
+});

@@ -1375,7 +1375,8 @@ export function useComposerSend(input: ComposerSendInput) {
           dispatchMode: turnDispatchMode,
           ...(freshArm === undefined ? {} : { freshContext: true }),
           ...(bootstrap ? { bootstrap } : {}),
-          ...(routing ? { routing } : {}),
+          // The remembered team's lead was chosen for it, so Auto must not route it elsewhere.
+          ...(routing && launchModelSelection === ctxSelectedModelSelection ? { routing } : {}),
           ...draftAssists,
           createdAt: messageCreatedAt,
         },
