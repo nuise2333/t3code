@@ -40,7 +40,10 @@ export type {
 export type OptimisticProjectFile = {
   readonly data: ProjectReadFileResult;
 } & (
-  | { readonly saved: false }
+  | {
+      readonly saved: false;
+      readonly base?: Pick<ProjectReadFileResult, "contents" | "revision"> | undefined;
+    }
   | {
       readonly saved: true;
       /** Only this query's next successful answer can replace the saved contents. */

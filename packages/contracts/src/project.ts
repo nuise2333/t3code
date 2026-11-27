@@ -458,6 +458,7 @@ export const ProjectReadFileInput = Schema.Struct({
 export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
 
 export const ProjectReadFileResult = Schema.Struct({
+  revision: Schema.optional(Schema.String),
   relativePath: Schema.NonEmptyString,
   contents: Schema.String,
   byteLength: NonNegativeInt,
@@ -530,6 +531,7 @@ export const PROJECT_WRITE_FILE_BINARY_MAX_BYTES = 25 * 1024 * 1024;
 const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 export const ProjectWriteFileInput = Schema.Struct({
+  expectedRevision: Schema.optional(Schema.String),
   cwd: TrimmedNonEmptyString,
   relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
@@ -550,6 +552,7 @@ export const ProjectWriteFileInput = Schema.Struct({
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 
 export const ProjectWriteFileResult = Schema.Struct({
+  revision: Schema.optional(Schema.String),
   relativePath: Schema.NonEmptyString,
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
@@ -581,6 +584,19 @@ export const ProjectCreateFromThreadResult = Schema.Struct({
   projectId: ProjectId,
 });
 export type ProjectCreateFromThreadResult = typeof ProjectCreateFromThreadResult.Type;
+
+export class ProjectWriteFileConflictError extends Schema.TaggedError<ProjectWriteFileConflictError>()(
+  "ProjectWriteFileConflictError",
+  {
+    relativePath: Schema.NonEmptyString,
+    currentRevision: Schema.String,
+    currentContents: Schema.optional(Schema.String),
+  },
+) {
+  override get message(): string {
+    return "The file changed on disk since it was opened.";
+  }
+}
 
 export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileError>()(
   "ProjectWriteFileError",

@@ -135,7 +135,7 @@ function setup() {
   state.assetUrl = { _tag: "Loading" };
   let mints = 0;
   state.mintUrl.mockReset().mockImplementation(async () => `/assets/report.docx?mint=${++mints}`);
-  state.writeFile.mockReset().mockResolvedValue(AsyncResult.success(undefined));
+  state.writeFile.mockReset().mockResolvedValue(AsyncResult.success({ relativePath: "tasks.md" }));
   return {
     [Symbol.dispose]() {
       for (const [index, key] of keys.entries()) {

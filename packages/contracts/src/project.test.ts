@@ -17,6 +17,7 @@ import {
   ProjectMutation,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
+  ProjectWriteFileConflictError,
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
@@ -31,6 +32,33 @@ describe("project RPC errors", () => {
     const roundTrip = <S extends Schema.Codec<unknown, unknown>>(schema: S, value: S["Type"]) =>
       Schema.decodeUnknownSync(schema)(Schema.encodeSync(schema)(value));
 
+    const target = { cwd: "/w", relativePath: "a" };
+    expect(
+      roundTrip(ProjectWriteFileInput, { ...target, contents: "", expectedRevision: "old" })
+        .expectedRevision,
+    ).toBe("old");
+    expect(
+      roundTrip(ProjectReadFileResult, {
+        relativePath: "a",
+        contents: "",
+        truncated: false,
+        byteLength: 0,
+        revision: "old",
+      }).revision,
+    ).toBe("old");
+    expect(roundTrip(ProjectWriteFileResult, { relativePath: "a", revision: "new" }).revision).toBe(
+      "new",
+    );
+    for (const currentContents of [undefined, "", "disk"]) {
+      const error = new ProjectWriteFileConflictError({
+        relativePath: "a",
+        currentRevision: "disk",
+        currentContents,
+      });
+      const decoded = roundTrip(ProjectWriteFileConflictError, error);
+      expect(decoded.currentContents).toBe(currentContents);
+      expect(decoded.message).toBe("The file changed on disk since it was opened.");
+    }
     for (const relativePath of [" ", " report.txt", "report.txt\t"]) {
       const cwd = "/workspace";
       const resolvedPath = `${cwd}/${relativePath}`;

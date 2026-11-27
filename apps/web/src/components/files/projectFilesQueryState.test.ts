@@ -26,6 +26,7 @@ import {
   clearProjectFileQueryData,
   confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
+  getProjectFileBase,
   getUnsavedProjectFileQueryData,
   resolveProjectFileQueryData,
   setProjectFileQueryData,
@@ -152,23 +153,45 @@ describe("project files queries", () => {
     const initial = {
       relativePath: "convex.json",
       contents: '{"nodeVersion":"20"}',
+      revision: "initial",
       byteLength: 20,
       truncated: false,
     } satisfies ProjectReadFileResult;
-    setProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"220"}');
+    setProjectFileQueryData(
+      environmentId,
+      "/repo",
+      "convex.json",
+      '{"nodeVersion":"220"}',
+      initial,
+    );
     setProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"22"}');
 
+    expect(getProjectFileBase(environmentId, "/repo", "convex.json")).toMatchObject({
+      contents: initial.contents,
+      revision: "initial",
+    });
     expect(getOptimisticProjectFileQueryData(environmentId, "/repo", "convex.json")?.contents).toBe(
       '{"nodeVersion":"22"}',
     );
 
     expect(
-      confirmProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"220"}'),
+      confirmProjectFileQueryData(
+        environmentId,
+        "/repo",
+        "convex.json",
+        '{"nodeVersion":"220"}',
+        "written",
+      ),
     ).toBe(false);
 
+    expect(getProjectFileBase(environmentId, "/repo", "convex.json")).toEqual({
+      contents: '{"nodeVersion":"220"}',
+      revision: "written",
+    });
     expect(resolveProjectFileQueryData(environmentId, "/repo", "convex.json", initial)).toEqual({
       relativePath: "convex.json",
       contents: '{"nodeVersion":"22"}',
+      revision: "written",
       byteLength: 20,
       truncated: false,
     });
