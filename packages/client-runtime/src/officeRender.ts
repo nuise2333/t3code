@@ -25,7 +25,9 @@ export function officeRenderFallback(cause: unknown): OfficeRenderFallback {
 
 export function officeRenderNotice(reason: OfficeRenderFallback, hasParser: boolean) {
   if (reason === "unavailable")
-    return "Install LibreOffice on this computer to see the original layout.";
+    return hasParser
+      ? "Install LibreOffice on the computer running T3 Code to see the original layout; showing a simplified preview."
+      : "Install LibreOffice on the computer running T3 Code to preview this file.";
   if (reason === "failed")
     return hasParser
       ? "LibreOffice couldn't open this file; showing a simplified preview."

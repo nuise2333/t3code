@@ -1651,7 +1651,7 @@ export default function FilePreviewPanel({
           !isHostFile &&
           canWriteFiles ? (
             <FileSurfaceAction
-              label={markdownReadOnly ? "Edit document" : "Read only"}
+              label={markdownReadOnly ? "Enable editing" : "Switch to read-only"}
               pressed={markdownReadOnly}
               onPress={() => setMarkdownReadOnly(!markdownReadOnly)}
             >

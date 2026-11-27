@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { READER_ROOT_CLASS } from "~/components/ChatMarkdown";
+import { toastManager } from "~/components/ui/toast";
 import { cn, isMacPlatform } from "~/lib/utils";
 
 import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskList";
@@ -31,6 +32,9 @@ interface OpenBlock {
   /** Written before an appended block's draft, and dropped again if the draft stays empty. */
   readonly joiner: string;
   readonly caret: number;
+  /** The block's bytes as opened; a textarea reads every line end as "\n". */
+  readonly original: string;
+  readonly lineEnding: "\n" | "\r\n";
 }
 
 export interface MarkdownBlockEditorProps {
@@ -51,9 +55,23 @@ export interface MarkdownBlockEditorProps {
 const HISTORY_LIMIT = 100;
 
 /** `base` with the open block's source written over the bytes it was opened from. */
+/** `base` with the open block's source written over its bytes, in the block's own line ends. */
 function textWith(base: string, open: OpenBlock) {
-  const draft = open.draft === "" ? "" : open.joiner + open.draft;
+  const source =
+    open.draft === open.original.replace(/\r\n/g, "\n")
+      ? open.original
+      : open.draft.replace(/\n/g, open.lineEnding);
+  const draft = source === "" ? "" : open.joiner + source;
   return base.slice(0, open.from) + draft + base.slice(open.to);
+}
+
+function lineEndingOf(source: string, document: string): "\n" | "\r\n" {
+  return (source || document).includes("\r\n") ? "\r\n" : "\n";
+}
+
+/** A caret offset in CRLF source, as the same place in its "\n"-only textarea value. */
+function textareaOffset(source: string, offset: number) {
+  return offset - (source.slice(0, offset).match(/\r\n/g)?.length ?? 0);
 }
 
 /** The clicked text position in a rendered block, read from the DOM under the pointer. */
@@ -110,6 +128,7 @@ export function MarkdownBlockEditor(props: MarkdownBlockEditorProps) {
   if (externalRevision !== props.externalRevision) {
     setExternalRevision(props.externalRevision);
     setOpen(null);
+    setMenu(null);
     setHistory({ undo: [], redo: [] });
   }
   // Blocks are parsed again only while none is open, so typing never re-parses the file.
@@ -152,21 +171,38 @@ export function MarkdownBlockEditor(props: MarkdownBlockEditorProps) {
       if (!target) return;
     }
     const source = view.text.slice(target.from, target.to);
+    const draft = source.replace(/\r\n/g, "\n");
     setOpen({
       from: target.from,
       to: target.to,
-      draft: source,
+      draft,
       joiner: "",
+      original: source,
+      lineEnding: lineEndingOf(source, view.text),
       caret:
-        caret === "start" ? 0 : caret === "end" ? source.length : Math.min(caret, source.length),
+        caret === "start"
+          ? 0
+          : caret === "end"
+            ? draft.length
+            : textareaOffset(source, Math.min(caret, source.length)),
     });
   };
 
   const appendBlock = () => {
     const base = commit().text;
-    const joiner =
-      base === "" ? "" : base.endsWith("\n\n") ? "" : base.endsWith("\n") ? "\n" : "\n\n";
-    setOpen({ from: base.length, to: base.length, draft: "", joiner, caret: 0 });
+    const lineEnding = lineEndingOf("", base);
+    const joiner = (
+      base === "" ? "" : /\r?\n\r?\n$/.test(base) ? "" : /\r?\n$/.test(base) ? "\n" : "\n\n"
+    ).replace(/\n/g, lineEnding);
+    setOpen({
+      from: base.length,
+      to: base.length,
+      draft: "",
+      joiner,
+      caret: 0,
+      original: "",
+      lineEnding,
+    });
   };
 
   const changeDraft = (draft: string) => {
@@ -207,35 +243,56 @@ export function MarkdownBlockEditor(props: MarkdownBlockEditorProps) {
 
   const applyCommand = (command: MarkdownCommand) => {
     const node = field.current;
-    if (!node || !open) return null;
+    if (!node || !open) return;
     const blockIndex = parsed.blocks.findIndex((block) => block.from === open.from);
     const result = runMarkdownCommand(command, open.draft, {
       start: node.selectionStart,
       end: node.selectionEnd,
       isFirstBlock: blockIndex <= 0,
     });
-    if ("refused" in result) return result.refused;
+    if ("refused" in result) {
+      // Shortcuts and the menu both land here, so a command that can't apply always says why.
+      toastManager.add({ type: "info", title: result.refused });
+      return;
+    }
     node.focus();
     node.setSelectionRange(0, node.value.length);
     // insertText keeps the change on the field's own undo stack, one step per command.
     if (!node.ownerDocument.execCommand("insertText", false, result.text)) changeDraft(result.text);
     node.setSelectionRange(result.selection.start, result.selection.end);
-    return null;
   };
 
-  const deleteBlock = (index: number) => {
+  /** The block a menu was opened on, if the text still holds it where it was. */
+  const menuBlock = (view: typeof parsed) => {
+    if (!menu?.block) return undefined;
+    const { from, source } = menu.block;
+    const index = view.blocks.findIndex(
+      (block) => block.from === from && view.text.slice(block.from, block.to) === source,
+    );
+    return index < 0 ? undefined : index;
+  };
+
+  const deleteBlock = () => {
     const view = commit();
-    const block = view.blocks[index];
-    if (!block) return;
+    const index = menuBlock(view);
+    if (index === undefined) return;
+    const block = view.blocks[index]!;
     const next = view.blocks[index + 1];
     const previous = view.blocks[index - 1];
     // The blank lines after the block go with it; the last block takes the ones before it.
     const written = next
       ? view.text.slice(0, block.from) + view.text.slice(next.from)
       : view.text.slice(0, previous ? previous.to : block.from) +
-        view.text.slice(block.to).replace(/^[\r\n]+/, previous ? "\n" : "");
+        view.text.slice(block.to).replace(/^(\r?\n)[\r\n]*/, previous ? "$1" : "");
     remember(view.text);
     onTextChange(written);
+    // Focus stays in the file so Undo works at once; the toast offers it to the pointer too.
+    root.current?.focus({ preventScroll: true });
+    toastManager.add({
+      type: "success",
+      title: "Block deleted",
+      actionProps: { children: "Undo", onClick: () => onTextChange(view.text) },
+    });
   };
 
   // A task box ticked in a rendered block changes only its marker, as one undo step.
@@ -250,7 +307,8 @@ export function MarkdownBlockEditor(props: MarkdownBlockEditorProps) {
   const clipboard = async (action: "cut" | "copy" | "paste") => {
     const node = field.current;
     if (!node || !open) {
-      const block = menu?.index === undefined ? undefined : parsed.blocks[menu.index];
+      const index = menuBlock(parsed);
+      const block = index === undefined ? undefined : parsed.blocks[index];
       if (action === "copy" && block)
         await navigator.clipboard?.writeText(parsed.text.slice(block.from, block.to));
       return;
@@ -362,12 +420,14 @@ export function MarkdownBlockEditor(props: MarkdownBlockEditorProps) {
     if (!image || !props.onPasteImage) return;
     event.preventDefault();
     const node = event.currentTarget;
-    const at = { start: node.selectionStart, end: node.selectionEnd };
+    const at = { start: node.selectionStart, end: node.selectionEnd, value: node.value };
     const path = await props.onPasteImage(image);
     if (path === null || field.current !== node) return;
     node.focus();
-    node.setSelectionRange(at.start, at.end);
-    const alt = node.value.slice(at.start, at.end);
+    // Text typed while the image saved stays; the link then goes where the caret is now.
+    const unchanged = node.value === at.value;
+    if (unchanged) node.setSelectionRange(at.start, at.end);
+    const alt = unchanged ? node.value.slice(at.start, at.end) : "";
     node.ownerDocument.execCommand("insertText", false, `![${alt}](${path.replace(/ /g, "%20")})`);
   };
 
@@ -446,7 +506,7 @@ export function MarkdownBlockEditor(props: MarkdownBlockEditorProps) {
                 y: event.clientY,
                 kind: block.kind,
                 editing: false,
-                index,
+                block: { from: block.from, source: parsed.text.slice(block.from, block.to) },
               });
             }}
           >
@@ -477,10 +537,11 @@ export function MarkdownBlockEditor(props: MarkdownBlockEditorProps) {
         }}
         onCommand={(command) => applyCommand(command)}
         onEdit={() => {
-          if (menu?.index !== undefined) openBlock(menu.index, "end");
+          const index = menuBlock(parsed);
+          if (index !== undefined) openBlock(index, "end");
         }}
         onDelete={() => {
-          if (menu?.index !== undefined) deleteBlock(menu.index);
+          deleteBlock();
         }}
         onClipboard={(action) => void clipboard(action)}
       />

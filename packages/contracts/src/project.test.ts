@@ -136,6 +136,29 @@ describe("project RPC errors", () => {
   });
 });
 
+describe("ProjectWriteFileInput binary contents", () => {
+  const decode = Schema.decodeUnknownExit(ProjectWriteFileInput);
+  const write = (contents: string) => ({
+    cwd: "/w",
+    relativePath: "assets/a.png",
+    contents,
+    encoding: "base64",
+  });
+
+  it.each([
+    ["canonical base64", "aGVsbG8=", true],
+    ["an empty payload, which would truncate the file", "", false],
+    ["text that decodes to partial bytes", "aGVsbG8=!!!", false],
+    ["a payload missing its padding", "aGVsbG8", false],
+  ])("accepts %s: %s", (_name, contents, ok) => {
+    expect(decode(write(contents))._tag).toBe(ok ? "Success" : "Failure");
+  });
+
+  it("leaves text writes, empty ones included, unchecked", () => {
+    expect(decode({ cwd: "/w", relativePath: "a.md", contents: "" })._tag).toBe("Success");
+  });
+});
+
 describe("shared project payloads", () => {
   it("preserves omitted, false, and null values through RPC envelopes", () => {
     const create = decodeProjectCreatePayload({

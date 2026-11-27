@@ -24,7 +24,6 @@ import {
   CopyIcon,
   EyeIcon,
   FileDownIcon,
-  FileTextIcon,
   ListTreeIcon,
   SearchIcon,
   Table2Icon,
@@ -475,15 +474,11 @@ export function AttachmentFilePreview(props: {
         ) : null}
         {officeView?.sheetToggle ? (
           <FileSurfaceAction
-            label={sheetView === "grid" ? "Show original layout" : "Show grid"}
-            pressed={sheetView === "layout"}
+            label={sheetView === "grid" ? "Show original layout" : "Show spreadsheet grid"}
+            pressed={sheetView === "grid"}
             onPress={() => setSheetView(sheetView === "grid" ? "layout" : "grid")}
           >
-            {sheetView === "grid" ? (
-              <FileTextIcon className="size-3.5" />
-            ) : (
-              <Table2Icon className="size-3.5" />
-            )}
+            <Table2Icon className="size-3.5" />
           </FileSurfaceAction>
         ) : null}
         {kind === "markdown" && rendered && content ? (

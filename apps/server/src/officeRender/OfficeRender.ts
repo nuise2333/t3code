@@ -16,6 +16,7 @@ import {
   convert,
   findSoffice,
   prepareProfile,
+  removeStaleConversions,
   runSoffice,
   touchCached,
 } from "./officeHost.ts";
@@ -75,6 +76,8 @@ export const make = Effect.fn("OfficeRender.make")(function* (options?: {
     function* (bin: string, source: string, file: OpenMediaFile, pdf: string) {
       if (!prepared) {
         yield* attempt(() => prepareProfile(path.join(cache, "profile"), platform, home));
+        // Conversions run one at a time, so before the first none of these folders is in use.
+        yield* attempt(() => removeStaleConversions(cache));
         prepared = true;
       }
       return yield* attempt(() =>

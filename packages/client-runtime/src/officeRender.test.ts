@@ -28,7 +28,7 @@ describe("officePreviewView", () => {
       "a host without LibreOffice",
       { ...doc, render: fallback("unavailable") },
       "parser",
-      "Install LibreOffice on this computer to see the original layout.",
+      "Install LibreOffice on the computer running T3 Code to see the original layout; showing a simplified preview.",
       false,
     ],
     [

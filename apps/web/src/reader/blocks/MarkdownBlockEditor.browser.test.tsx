@@ -52,3 +52,16 @@ it("edits a pressed block as source and writes back only its bytes", async () =>
   await userEvent.keyboard(`{${mod}>}z{/${mod}}`);
   expect(latest).toBe(SOURCE.replace("# Plan", "# Plan today"));
 });
+
+it("keeps a CRLF block's line ends when one of its lines is edited", async () => {
+  let latest = SOURCE;
+  await using screen = await render(<Harness onText={(text) => (latest = text)} />, {
+    router: false, // The editor is a plain component; no route reads it.
+  });
+  await userEvent.click(screen.container.querySelector('[data-kind="list"]')!);
+  const field = screen.getByRole("textbox", { name: "Markdown source" });
+  // The field shows "\n" line ends; the file keeps its own.
+  await expect.element(field).toHaveValue("- a\n- b");
+  await userEvent.keyboard("{End}c{Escape}");
+  expect(latest).toBe(SOURCE.replace("- a\r\n- b", "- a\r\n- bc"));
+});

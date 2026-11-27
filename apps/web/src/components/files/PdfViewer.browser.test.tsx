@@ -243,7 +243,7 @@ it("jumps from a page thumbnail, turns pages, and sets two pages side by side", 
     const box = (index: number) =>
       region.querySelector(`canvas[aria-label="Page ${index}"]`)!.getBoundingClientRect();
 
-    await screen.getByRole("button", { name: "Pages and bookmarks" }).click();
+    await screen.getByRole("button", { name: "Show pages and bookmarks" }).click();
     await screen.getByRole("button", { name: "Page 3", exact: true }).click();
     await expect.element(screen.getByText("3 / 3 pages")).toBeVisible();
 

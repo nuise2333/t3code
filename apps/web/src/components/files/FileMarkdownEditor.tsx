@@ -1,4 +1,8 @@
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  PROJECT_WRITE_FILE_BINARY_MAX_BYTES,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
@@ -60,9 +64,11 @@ function imageExtension(file: File) {
   return (fromName ?? file.type.split("/")[1] ?? "png").toLowerCase().replace("jpeg", "jpg");
 }
 
-function pastedImageName(file: File, now: Date) {
-  const stamp = now.toISOString().replace(/\D/g, "").slice(0, 14);
-  return `image-${stamp}.${imageExtension(file)}`;
+// Down to the millisecond, plus a running count, so two images pasted together never share a name.
+let pastedImages = 0;
+function pastedImageName(file: File, now: Date, random: string) {
+  const stamp = now.toISOString().replace(/\D/g, "").slice(0, 17);
+  return `image-${stamp}-${random}.${imageExtension(file)}`;
 }
 
 async function fileBase64(file: File) {
@@ -169,6 +175,16 @@ export function FileMarkdownEditor(props: {
   const reconcile = useEffectEvent((contents: string) => {
     const current = status.current;
     const outcome = reconcileIncoming(contents, current);
+    // While a conflict stands, `published` is still the base both sides started from, so a newer
+    // disk version is weighed against it again: a clean merge or a revert to the base settles it.
+    if (current.conflict && outcome.kind !== "conflict") {
+      settle();
+      if (outcome.kind === "ignore") {
+        current.dirty = true;
+        publish();
+        return;
+      }
+    }
     if (outcome.kind === "ignore") return;
     if (outcome.kind === "apply") {
       takeIn(outcome.text);
@@ -193,19 +209,22 @@ export function FileMarkdownEditor(props: {
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the last keystrokes reach the save session before the page is hidden, and before the session's lease is released on unmount: layout cleanups run ahead of passive ones
   useLayoutEffect(() => {
-    const onPageHide = () => publish();
-    window.addEventListener("pagehide", onPageHide);
-    return () => {
-      window.removeEventListener("pagehide", onPageHide);
-      // An unsettled conflict is not dropped with the editor: both sides are saved, marked.
+    // An unsettled conflict is not dropped with the editor or the page: both sides are saved, marked.
+    const leave = () => {
       const current = status.current;
       if (current.conflict) {
         current.latest = contentsOnClose(current.latest, current.conflict);
         current.published = current.conflict.disk;
         current.dirty = true;
         current.conflicted = false;
+        current.conflict = null;
       }
       publish();
+    };
+    window.addEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      leave();
     };
   }, []);
 
@@ -225,7 +244,11 @@ export function FileMarkdownEditor(props: {
     const folder = relativePath.includes("/")
       ? relativePath.slice(0, relativePath.lastIndexOf("/") + 1)
       : "";
-    const name = pastedImageName(file, new Date());
+    if (file.size > PROJECT_WRITE_FILE_BINARY_MAX_BYTES) {
+      toastManager.add({ type: "error", title: "Images over 25 MB can't be pasted" });
+      return null;
+    }
+    const name = pastedImageName(file, new Date(), String((pastedImages += 1)));
     const result = await writeFile({
       environmentId,
       input: {
@@ -237,7 +260,11 @@ export function FileMarkdownEditor(props: {
       },
     });
     if (result._tag === "Success") return `assets/${name}`;
-    toastManager.add({ type: "error", title: "Could not save the pasted image" });
+    toastManager.add({
+      type: "error",
+      title: "Could not save the pasted image",
+      description: "Check that you can write to this folder, then paste again.",
+    });
     return null;
   };
 
@@ -245,7 +272,7 @@ export function FileMarkdownEditor(props: {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <p className="shrink-0 border-b px-3 py-1.5 text-2xs text-muted-foreground">
-          This file is too long to edit by block; use source view to edit it.
+          Too large for block editing. Use Show markdown source to edit it.
         </p>
         <FileMarkdownPreview
           cwd={cwd}
@@ -264,7 +291,10 @@ export function FileMarkdownEditor(props: {
           role="alert"
           className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-warning/10 px-3 py-1.5 text-xs"
         >
-          <span className="mr-auto">This file changed on disk while you were editing it.</span>
+          <span className="mr-auto">
+            This file changed on disk while you were editing. Saving is paused until you choose a
+            version.
+          </span>
           <Button
             size="xs"
             variant="outline"
@@ -290,6 +320,7 @@ export function FileMarkdownEditor(props: {
           </Button>
           <Button
             size="xs"
+            variant="outline"
             onClick={() => {
               const merged = contentsOnClose(status.current.latest, conflict);
               settle();
@@ -300,7 +331,7 @@ export function FileMarkdownEditor(props: {
               publish();
             }}
           >
-            Merge with markers
+            Insert conflict markers
           </Button>
         </div>
       ) : null}

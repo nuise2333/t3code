@@ -525,6 +525,10 @@ export class ProjectReadFileError extends Schema.TaggedError<ProjectReadFileErro
   }
 }
 
+/** Bytes a binary write (an image pasted into a Markdown file) may carry. */
+export const PROJECT_WRITE_FILE_BINARY_MAX_BYTES = 25 * 1024 * 1024;
+const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
 export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
@@ -532,7 +536,17 @@ export const ProjectWriteFileInput = Schema.Struct({
   encoding: Schema.optional(Schema.Literal("base64")),
   /** False for autosave, so a save cannot bring back a file renamed or trashed meanwhile. */
   createIfMissing: Schema.optional(Schema.Boolean),
-});
+}).check(
+  // Lenient decoding turns bad input into empty or partial bytes, which would truncate the file.
+  Schema.makeFilter(
+    (input) =>
+      input.encoding !== "base64" ||
+      (input.contents.length > 0 &&
+        input.contents.length <= Math.ceil(PROJECT_WRITE_FILE_BINARY_MAX_BYTES / 3) * 4 &&
+        CANONICAL_BASE64.test(input.contents)),
+    { message: "Binary contents must be non-empty base64 of at most 25 MB." },
+  ),
+);
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 
 export const ProjectWriteFileResult = Schema.Struct({

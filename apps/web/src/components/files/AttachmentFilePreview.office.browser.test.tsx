@@ -1143,11 +1143,11 @@ it("shows a host Word file in LibreOffice's layout", async () => {
   await expect.element(screen.getByTestId("pdf-frame")).toHaveTextContent(RENDER_URL);
   expect(host.requests).toEqual([{ url: RENDER_URL, range: "bytes=0-0" }]);
   expect(screen.container.textContent).not.toContain("LibreOffice");
-  expect(screen.getByRole("button", { name: "Show grid" }).query()).toBeNull();
+  expect(screen.getByRole("button", { name: "Show spreadsheet grid" }).query()).toBeNull();
 });
 
 it.each([
-  [503, "Install LibreOffice on this computer to see the original layout."],
+  [503, "Install LibreOffice on the computer running T3 Code to see the original layout; showing a simplified preview."],
   [422, "LibreOffice couldn't open this file; showing a simplified preview."],
 ])("falls back to the built-in preview when the host answers %i", async (status, notice) => {
   using host = await hostOfficeFile(status);
@@ -1193,7 +1193,7 @@ it("switches a spreadsheet between LibreOffice's layout and the grid, and rememb
   await using screen = await render(sheet("first"));
   await expect.element(screen.getByTestId("pdf-frame")).toHaveTextContent(RENDER_URL);
 
-  await screen.getByRole("button", { name: "Show grid" }).click();
+  await screen.getByRole("button", { name: "Show spreadsheet grid" }).click();
   await expect.element(screen.getByRole("button", { name: "Show original layout" })).toBeVisible();
   expect(screen.getByTestId("pdf-frame").query()).toBeNull();
 

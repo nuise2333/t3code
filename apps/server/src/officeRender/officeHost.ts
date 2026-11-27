@@ -1,3 +1,4 @@
+// @effect-diagnostics globalTimers:off - the timeout guards a spawned process outside Effect.
 // @effect-diagnostics nodeBuiltinImport:off - the host adapter spawns a specific PID and copies from a validated native descriptor.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -140,24 +141,63 @@ export const cacheName = (filePath: string, file: OpenMediaFile) =>
     )
     .digest("hex") + ".pdf";
 
+const SOFFICE_TIMEOUT_MS = 60_000;
+// Office files larger than this are not converted; LibreOffice's output can outgrow its input.
+export const OFFICE_RENDER_MAX_SOURCE_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Runs one conversion. On Linux and macOS `soffice` is a launcher that starts `soffice.bin`, so
+ * the run gets its own process group and a timeout kills the whole group, not just the launcher.
+ * The run ends when the launcher exits, even if a child still holds stderr open.
+ */
 export function runSoffice(binary: string, args: string[]) {
   return new Promise<string>((resolve, reject) => {
+    const windows = NodePath.sep === "\\";
     const child = NodeChildProcess.spawn(binary, args, {
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
-      timeout: 60_000,
-      killSignal: "SIGKILL",
+      detached: !windows,
     });
     let stderr = "";
+    let settled = false;
+    const killGroup = () => {
+      try {
+        if (!windows && child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+        else child.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    };
+    const timer = setTimeout(() => {
+      killGroup();
+      finish(new Error(`LibreOffice took longer than ${SOFFICE_TIMEOUT_MS / 1000} s. ${stderr}`));
+    }, SOFFICE_TIMEOUT_MS);
+    const finish = (error: Error | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stderr.destroy();
+      if (error) reject(error);
+      else resolve(stderr);
+    };
     child.stderr.setEncoding("utf8").on("data", (text: string) => {
       stderr = (stderr + text).slice(-2048);
     });
-    child.once("error", reject);
-    child.once("close", (code, signal) => {
-      if (code !== 0) reject(new Error(`LibreOffice exited with ${signal ?? code}. ${stderr}`));
-      else resolve(stderr);
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code, signal) => {
+      // A launcher that exits leaves nothing of this run behind.
+      if (code !== 0) killGroup();
+      finish(code === 0 ? null : new Error(`LibreOffice exited with ${signal ?? code}. ${stderr}`));
     });
   });
+}
+
+/** Working folders of conversions a previous server run left behind when it stopped mid-way. */
+export async function removeStaleConversions(cache: string) {
+  for (const name of await NodeFSP.readdir(cache).catch(() => [])) {
+    if (name.startsWith("convert-"))
+      await NodeFSP.rm(NodePath.join(cache, name), { recursive: true, force: true });
+  }
 }
 
 export async function touchCached(filePath: string, millis: number) {
@@ -183,6 +223,8 @@ export async function convert(
   budget: number,
   run: typeof runSoffice,
 ) {
+  if (file.info.size > BigInt(Math.min(budget, OFFICE_RENDER_MAX_SOURCE_BYTES)))
+    throw new Error("This file is too large to render.");
   const cache = NodePath.dirname(pdf);
   const temp = await NodeFSP.mkdtemp(NodePath.join(cache, "convert-"));
   try {

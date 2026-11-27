@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import {
   Menu,
   MenuItem,
@@ -20,7 +18,8 @@ export interface MarkdownBlockMenuTarget {
   readonly kind: string;
   /** Opened from the block's source field rather than its rendering. */
   readonly editing: boolean;
-  readonly index?: number;
+  /** The rendered block it was opened on: where it began, and its source then. */
+  readonly block?: { readonly from: number; readonly source: string };
 }
 
 const PARAGRAPH: readonly (readonly [string, MarkdownCommand] | null)[] = [
@@ -31,8 +30,8 @@ const PARAGRAPH: readonly (readonly [string, MarkdownCommand] | null)[] = [
   ["Heading 5", { type: "paragraph", command: { kind: "heading", level: 5 } }],
   ["Heading 6", { type: "paragraph", command: { kind: "heading", level: 6 } }],
   ["Paragraph", { type: "paragraph", command: { kind: "paragraph" } }],
-  ["Increase heading level", { type: "paragraph", command: "promote" }],
-  ["Decrease heading level", { type: "paragraph", command: "demote" }],
+  ["Promote heading", { type: "paragraph", command: "promote" }],
+  ["Demote heading", { type: "paragraph", command: "demote" }],
   null,
   ["Quote", { type: "paragraph", command: "quote" }],
   ["Ordered list", { type: "paragraph", command: "orderedList" }],
@@ -46,8 +45,8 @@ const PARAGRAPH: readonly (readonly [string, MarkdownCommand] | null)[] = [
   ["Table of contents", { type: "paragraph", command: "toc" }],
   ["Front matter", { type: "paragraph", command: "frontMatter" }],
   null,
-  ["Paragraph before", { type: "paragraph", command: "paragraphBefore" }],
-  ["Paragraph after", { type: "paragraph", command: "paragraphAfter" }],
+  ["Insert paragraph before", { type: "paragraph", command: "paragraphBefore" }],
+  ["Insert paragraph after", { type: "paragraph", command: "paragraphAfter" }],
 ];
 
 const FORMAT: readonly (readonly [string, MarkdownCommand])[] = [
@@ -83,20 +82,18 @@ const TABLE: readonly (readonly [string, MarkdownCommand] | null)[] = [
 export function MarkdownBlockMenu(props: {
   readonly target: MarkdownBlockMenuTarget | null;
   readonly onClose: () => void;
-  readonly onCommand: (command: MarkdownCommand) => string | null;
+  readonly onCommand: (command: MarkdownCommand) => void;
   readonly onClipboard: (action: "cut" | "copy" | "paste") => void;
   readonly onEdit: () => void;
   readonly onDelete: () => void;
 }) {
   const { target } = props;
-  const [refusal, setRefusal] = useState<string | null>(null);
   const mac = isMacPlatform(navigator.platform);
   const anchor = target
     ? { getBoundingClientRect: () => new DOMRect(target.x, target.y, 0, 0) }
     : undefined;
   const run = (command: MarkdownCommand) => {
-    const refused = props.onCommand(command);
-    setRefusal(refused);
+    props.onCommand(command);
   };
   const items = (list: readonly (readonly [string, MarkdownCommand] | null)[]) =>
     list.map((item, position) =>
@@ -150,7 +147,7 @@ export function MarkdownBlockMenu(props: {
             </>
           ) : (
             <>
-              <MenuItem onClick={props.onEdit}>Edit source</MenuItem>
+              <MenuItem onClick={props.onEdit}>Edit block</MenuItem>
               <MenuItem onClick={() => props.onClipboard("copy")}>Copy as Markdown</MenuItem>
               <MenuSeparator />
               <MenuItem variant="destructive" onClick={props.onDelete}>
@@ -160,11 +157,6 @@ export function MarkdownBlockMenu(props: {
           )}
         </MenuPopup>
       </Menu>
-      {refusal ? (
-        <p role="status" className="sr-only">
-          {refusal}
-        </p>
-      ) : null}
     </>
   );
 }

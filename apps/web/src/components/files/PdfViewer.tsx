@@ -186,6 +186,7 @@ export default function PdfViewer(props: {
   const [password, setPassword] = useState<{
     update: (password: string) => void;
     wrong: boolean;
+    checking: boolean;
   } | null>(null);
   const [passwordText, setPasswordText] = useState("");
   const [viewport, setViewport] = useState({ width: 600, height: 800 });
@@ -220,7 +221,11 @@ export default function PdfViewer(props: {
         task = openPdf(bytes);
         task.onPassword = (update: (password: string) => void, reason: number) => {
           clearTimeout(timeout);
-          setPassword({ update, wrong: reason === PasswordResponses.INCORRECT_PASSWORD });
+          setPassword({
+            update,
+            wrong: reason === PasswordResponses.INCORRECT_PASSWORD,
+            checking: false,
+          });
         };
         const document = await task.promise;
         if (document.numPages > MAX_PAGES)
@@ -413,7 +418,7 @@ export default function PdfViewer(props: {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b border-border/60 px-2 py-1 text-xs">
         <FileSurfaceAction
-          label="Pages and bookmarks"
+          label={sidebar ? "Hide pages and bookmarks" : "Show pages and bookmarks"}
           pressed={sidebar !== null}
           disabled={!pdf}
           onPress={toggleSidebar}
@@ -588,25 +593,30 @@ export default function PdfViewer(props: {
               className="mx-auto flex max-w-xs flex-col gap-2 px-4 py-10 text-sm"
               onSubmit={(event) => {
                 event.preventDefault();
+                // The form stays while pdf.js checks; it asks again if the password is wrong.
                 password.update(passwordText);
-                setPassword(null);
+                setPassword({ ...password, checking: true });
                 setPasswordText("");
               }}
             >
               <label htmlFor="pdf-password">
-                {password.wrong
-                  ? "That password is incorrect. Try again."
-                  : "This PDF is protected. Enter its password to open it."}
+                This PDF is protected. Enter its password to open it.
               </label>
+              {password.wrong ? (
+                <p role="alert" className="text-destructive">
+                  That password is incorrect. Try again.
+                </p>
+              ) : null}
               <Input
                 id="pdf-password"
                 type="password"
+                aria-invalid={password.wrong}
                 autoFocus
                 value={passwordText}
                 onChange={(event) => setPasswordText(event.target.value)}
               />
-              <Button type="submit" size="sm" disabled={!passwordText}>
-                Open
+              <Button type="submit" size="sm" disabled={!passwordText || password.checking}>
+                {password.checking ? "Opening…" : "Open"}
               </Button>
             </form>
           ) : !pdf ? (
