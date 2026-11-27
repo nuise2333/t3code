@@ -1011,7 +1011,7 @@ const BALANCED_LEVEL_SLACK = 5;
 /** Best takes the fastest within this many points, when its broader score is about as good too. */
 const BEST_NEAR_SCORE = 3;
 const BEST_NEAR_BROADER = 4;
-/** What a subscription with usage left makes of a model's list price; only Balanced counts it. */
+/** A subscription with usage left, on a plan the board does not price, costs this share of list. */
 const SUBSCRIPTION_PRICE_SHARE = 0.3;
 /** Among Balanced's preferred models, this close in score the faster wins. */
 const PREFERRED_NEAR_SCORE = 3;
@@ -1029,7 +1029,8 @@ const effortLevel = (effort: string) => EFFORT_LEVELS.indexOf(effort);
 function topEffort(kind: AutoTeamKind, taskClass: RoutingTaskClass): string {
   if (kind === "cheap") return "max";
   if (kind === "best" && taskClass === "hard") return "max";
-  return kind === "best" && taskClass === "quick_edit" ? "high" : "xhigh";
+  if (taskClass === "quick_edit") return "high";
+  return kind === "balanced" && taskClass === "readonly" ? "high" : "xhigh";
 }
 
 /** One model at one level: what it scored there and what that cost. */
@@ -1143,7 +1144,9 @@ function chooseBoardModel(
     kind === "cheap"
       ? pick.board.chinese === true && (pick.board.newest === true || affordable(pick))
       : pick.costUsd !== undefined &&
-        pick.board.marketShare !== undefined &&
+        // Adoption counts gateway traffic only, so a preferred model sold direct still counts.
+        (pick.board.marketShare !== undefined ||
+          pick.board.models.some((id) => first.includes(id))) &&
         pick.board.fading !== true &&
         pick.coding >= BALANCED_MIN_CODING &&
         nearOwnBest(pick),
@@ -1175,9 +1178,10 @@ function chooseBoardModel(
       spend(a) === spend(b) ? strongest(a, b) : spend(a) - spend(b),
     )[0];
   }
+  // Below a dollar a run, price stops buying points: subscriptions bring many models near zero.
   const value = (pick: TeamBoardPick) =>
     pick.score -
-    POINTS_PER_COST_DOUBLING * Math.log2(cost(pick)) -
+    POINTS_PER_COST_DOUBLING * Math.log2(Math.max(cost(pick), 1)) -
     POINTS_PER_TIME_DOUBLING * Math.log2(time(pick));
   const preferred = passing.filter((pick) => pick.board.models.some((id) => first.includes(id)));
   if (preferred.length > 0) {
@@ -1414,15 +1418,26 @@ export function chooseTeamWorkerModel(input: {
           byAgent(a, b),
       )[0];
   };
-  const onSubscription = (board: TeamBoardModel, effort: string) => {
+  /** The share of list price a run costs on the agent that would take it; 1 off a subscription. */
+  const priceShare = (board: TeamBoardModel, effort: string) => {
     const agent = agentFor(board, effort)?.candidate;
-    if (agent === undefined) return false;
+    if (agent === undefined) return 1;
     const standing = quotaStanding(agent.provider, agent.slug, input.now);
     // Spend budgets and add-on credits report monthly windows too, and bill at list price.
     const rolling = applicableUsageWindows(agent.provider, input.now, agent.slug).some(
       (window) => window.kind === "session" || window.kind === "weekly",
     );
-    return rolling && standing.funding === "subscription" && !standing.inReserve;
+    if (!rolling || standing.funding !== "subscription" || standing.inReserve) return 1;
+    const key = agentIdOf(agent.provider, input.settings) ?? agent.provider.driver;
+    const label = agent.provider.auth.label ?? "";
+    const plan = input.table.teamBoard?.subscriptionPlans?.find(
+      (entry) => entry.agent === key && (entry.label === undefined || label.includes(entry.label)),
+    );
+    const worth =
+      plan && board.models.map((id) => plan.apiUsd[id]).find((usd) => usd !== undefined);
+    return plan && worth !== undefined
+      ? Math.min(1, plan.monthlyUsd / worth)
+      : SUBSCRIPTION_PRICE_SHARE;
   };
   const balancedFirst = input.table.teamBoard?.balancedFirst;
   const pick = chooseBoardModel(
@@ -1445,10 +1460,8 @@ export function chooseTeamWorkerModel(input: {
         },
         cap,
       ).map((entry) =>
-        input.kind === "balanced" &&
-        entry.costUsd !== undefined &&
-        onSubscription(entry.board, entry.effort)
-          ? { ...entry, costUsd: entry.costUsd * SUBSCRIPTION_PRICE_SHARE }
+        input.kind === "balanced" && entry.costUsd !== undefined
+          ? { ...entry, costUsd: entry.costUsd * priceShare(entry.board, entry.effort) }
           : entry,
       ),
     ),

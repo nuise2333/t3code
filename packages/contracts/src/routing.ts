@@ -178,6 +178,21 @@ const TeamBoard = Schema.Struct({
       bySubtask: Schema.Record(Schema.String, Schema.Array(TrimmedNonEmptyString)),
     }),
   ),
+  /**
+   * What a plan's full monthly quota is worth at API prices, by model. While the plan has room,
+   * Balanced prices a model at `monthlyUsd / apiUsd` of its list price. Keyed like `harnesses`;
+   * a plan with a `label` applies only when the agent's auth label contains it.
+   */
+  subscriptionPlans: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        agent: TrimmedNonEmptyString,
+        label: Schema.optionalKey(TrimmedNonEmptyString),
+        monthlyUsd: Schema.Finite.check(Schema.isGreaterThan(0)),
+        apiUsd: Schema.Record(Schema.String, Schema.Finite.check(Schema.isGreaterThan(0))),
+      }),
+    ),
+  ),
   /** The harness board's scores by kind of work, with the same keys. */
   harnessScenarios: Schema.optionalKey(
     Schema.Record(

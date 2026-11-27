@@ -306,6 +306,17 @@ describe("resolveRoutingTable", () => {
     }
   });
 
+  it("prices subscription plans only for models on the team board", () => {
+    const board = ModelManifest.BUNDLED_ROUTING_TABLE.teamBoard;
+    const ids = new Set(board?.models.flatMap((model) => model.models));
+    assert.isNotEmpty(board?.subscriptionPlans ?? []);
+    for (const plan of board?.subscriptionPlans ?? []) {
+      for (const id of Object.keys(plan.apiUsd)) {
+        assert.isTrue(ids.has(id), `${plan.agent} ${plan.label ?? ""}: ${id}`);
+      }
+    }
+  });
+
   it("keeps only remote rows for drivers the bundled table knows", () => {
     const table = ModelManifest.resolveRoutingTable({ ...REMOTE_MANIFEST, routing: remoteRouting });
     assert.strictEqual(table.updatedAt, REMOTE_UPDATED_AT);

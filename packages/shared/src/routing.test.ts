@@ -2288,7 +2288,7 @@ describe("chooseAutoModel", () => {
       kind: "cheap" | "balanced" | "best",
       subtask: TeamSubtask | null,
       options: {
-        readonly taskClass?: "implement" | "hard" | "quick_edit";
+        readonly taskClass?: "implement" | "hard" | "quick_edit" | "readonly";
         readonly providers?: ReadonlyArray<ServerProvider>;
         readonly models?: typeof board.models;
       } = {},
@@ -2396,6 +2396,13 @@ describe("chooseAutoModel", () => {
       entry.models[0] === "model-opus" ? { ...entry, scores: scores(50) } : entry,
     );
     expect(firstPick("backend", weakOpus)).toStrictEqual(sol);
+    // A preferred model sold direct has no gateway share, yet stays in.
+    const unlistedSol = board.models.map((entry) => {
+      if (entry.models[0] !== "model-sol") return entry;
+      const { marketShare: _share, ...unlisted } = entry;
+      return unlisted;
+    });
+    expect(firstPick("frontend", unlistedSol)).toStrictEqual(sol);
     // A subscription with usage left costs Balanced a share of the list price.
     const subscribed = {
       ...claude(),
@@ -2419,6 +2426,60 @@ describe("chooseAutoModel", () => {
       worker("balanced", null, { providers: [provider, codex()], models: nearPrice });
     expect(byPrice(claude())).toStrictEqual(sol);
     expect(byPrice(subscribed as ServerProvider)).toStrictEqual(opus);
+    // A plan the board prices costs its fee over what its quota is worth at list price.
+    const onPlan = (worthUsd: number, plan?: { label: string; account: string }) => {
+      const account = plan === undefined ? {} : { auth: { ...claude().auth, label: plan.account } };
+      const providers = [{ ...subscribed, ...account } as ServerProvider, codex()];
+      return chooseTeamWorkerModel({
+        kind: "balanced",
+        subtask: null,
+        table: {
+          ...tableOf(ROWS),
+          teamBoard: {
+            ...board,
+            models: nearPrice,
+            subscriptionPlans: [
+              {
+                agent: "claudeAgent",
+                ...(plan === undefined ? {} : { label: plan.label }),
+                monthlyUsd: 100,
+                apiUsd: { "model-opus": worthUsd },
+              },
+            ],
+          },
+        },
+        taskClass: "implement",
+        providers,
+        settings: settingsFor(providers),
+        projectId: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        now: NOW,
+      })?.selection;
+    };
+    expect(onPlan(100)).toStrictEqual(sol);
+    expect(onPlan(5000)).toStrictEqual(opus);
+    // A labelled plan prices only the account whose auth label names it.
+    const maxPlan = (account: string) => onPlan(5000, { label: "Claude Max", account });
+    expect(maxPlan("Claude Max Subscription")).toStrictEqual(opus);
+    expect(maxPlan("Claude Pro Subscription")).toStrictEqual(opus);
+    expect(onPlan(100, { label: "Claude Max", account: "Claude Pro Subscription" })).toStrictEqual(
+      opus,
+    );
+    expect(onPlan(100, { label: "Claude Max", account: "Claude Max Subscription" })).toStrictEqual(
+      sol,
+    );
+    // Under a dollar a run, a lower price buys no points, so the stronger model holds.
+    const underDollar = board.models.map((entry) =>
+      entry.models[0] === "model-opus"
+        ? { ...entry, costUsd: 0.9 }
+        : entry.models[0] === "model-sol"
+          ? { ...entry, costUsd: 0.1 }
+          : entry,
+    );
+    expect(
+      worker("balanced", null, { providers: [claude(), codex()], models: underDollar }),
+    ).toStrictEqual(opus);
     // A spend budget or add-on credits are no subscription.
     for (const id of ["monthly_spend", "add-on"]) {
       const budget = {
@@ -2558,6 +2619,24 @@ describe("chooseAutoModel", () => {
     expect(solPick("balanced", solAt(58, 60, 61))).toStrictEqual([{ id: "effort", value: "low" }]);
     // Low's sub-score is no bargain when the level loses that much overall.
     expect(solPick("balanced", solAt(55, 70, 90))).toStrictEqual([{ id: "effort", value: "high" }]);
+    // A quick edit stops at high, where implementing would buy xhigh's points.
+    const solHighXhigh = board.models.map((entry) =>
+      entry.models[0] === "model-sol"
+        ? {
+            ...entry,
+            efforts: [
+              { effort: "high", scores: scores(60), costUsd: 10 },
+              { effort: "xhigh", scores: scores(75), costUsd: 12 },
+            ],
+          }
+        : entry,
+    );
+    const balancedLevel = (taskClass: "implement" | "quick_edit" | "readonly") =>
+      worker("balanced", "backend", { providers: codexOnly, models: solHighXhigh, taskClass })
+        ?.options;
+    expect(balancedLevel("implement")).toStrictEqual([{ id: "effort", value: "xhigh" }]);
+    expect(balancedLevel("quick_edit")).toStrictEqual([{ id: "effort", value: "high" }]);
+    expect(balancedLevel("readonly")).toStrictEqual([{ id: "effort", value: "high" }]);
     expect(
       worker("best", "backend", {
         providers: codexOnly,

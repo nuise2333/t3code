@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-25T22:00:00Z",
+  "updatedAt": "2026-11-26T23:00:00Z",
   "routing": {
     "version": 1,
-    "updatedAt": "2026-11-25T22:00:00Z",
+    "updatedAt": "2026-11-26T23:00:00Z",
     "sources": {
       "tb41": { "url": "https://www.tbench.ai/leaderboard", "dataDate": "2026-11-15" },
       "aa-coding": {
@@ -76,14 +76,19 @@
         "url": "https://modeldial.com/leaderboard/harness",
         "dataDate": "2026-11-22"
       },
-      "modeldial-trends": { "url": "https://modeldial.com/trends", "dataDate": "2026-11-23" }
+      "modeldial-trends": { "url": "https://modeldial.com/trends", "dataDate": "2026-11-23" },
+      "modeldial-subscriptions": {
+        "url": "https://modeldial.com/subscriptions",
+        "dataDate": "2026-11-25"
+      }
     },
     "teamBoard": {
       "sourceIds": [
         "modeldial-coding",
         "modeldial-writing",
         "modeldial-harness",
-        "modeldial-trends"
+        "modeldial-trends",
+        "modeldial-subscriptions"
       ],
       "models": [
         {
@@ -1904,6 +1909,103 @@
           ]
         }
       },
+      "subscriptionPlans": [
+        {
+          "agent": "claudeAgent",
+          "label": "Claude Pro",
+          "monthlyUsd": 20,
+          "apiUsd": { "claude-opus-5-5": 1178, "claude-sonnet-5-5": 1241 }
+        },
+        {
+          "agent": "claudeAgent",
+          "label": "Claude Max",
+          "monthlyUsd": 100,
+          "apiUsd": {
+            "claude-opus-5-5": 5725,
+            "claude-sonnet-5-5": 5919,
+            "claude-fable-5-2": 1564.77,
+            "claude-fable-5-1": 1273
+          }
+        },
+        {
+          "agent": "claudeAgent",
+          "label": "Claude Ultra",
+          "monthlyUsd": 200,
+          "apiUsd": {
+            "claude-opus-5-5": 11726,
+            "claude-sonnet-5-5": 12529,
+            "claude-fable-5-2": 3054.57,
+            "claude-fable-5-1": 2485
+          }
+        },
+        {
+          "agent": "codex",
+          "label": "ChatGPT Plus",
+          "monthlyUsd": 20,
+          "apiUsd": {
+            "gpt-6.2-sol": 286,
+            "gpt-6.2-astra": 286,
+            "gpt-6.1-sol": 202.8,
+            "gpt-6.1-terra": 202.8,
+            "gpt-6-sol": 286,
+            "gpt-6-astra": 286
+          }
+        },
+        {
+          "agent": "codex",
+          "label": "ChatGPT Pro 100",
+          "monthlyUsd": 100,
+          "apiUsd": {
+            "gpt-6.2-sol": 2897,
+            "gpt-6.2-astra": 2897,
+            "gpt-6.1-sol": 2084,
+            "gpt-6.1-terra": 2084,
+            "gpt-6-sol": 2878.82,
+            "gpt-6-astra": 2897
+          }
+        },
+        {
+          "agent": "codex",
+          "label": "ChatGPT Pro 200",
+          "monthlyUsd": 200,
+          "apiUsd": {
+            "gpt-6.2-sol": 5794,
+            "gpt-6.2-astra": 5794,
+            "gpt-6.1-sol": 4168,
+            "gpt-6.1-terra": 4168,
+            "gpt-6-sol": 5757.63,
+            "gpt-6-astra": 5794
+          }
+        },
+        {
+          "agent": "codex",
+          "label": "ChatGPT Pro 500",
+          "monthlyUsd": 500,
+          "apiUsd": {
+            "gpt-6.2-sol": 13910,
+            "gpt-6.2-astra": 13910,
+            "gpt-6.1-sol": 10772,
+            "gpt-6.1-terra": 10772,
+            "gpt-6-sol": 14845.66,
+            "gpt-6-astra": 13910
+          }
+        },
+        {
+          "agent": "antigravity",
+          "monthlyUsd": 19.99,
+          "apiUsd": {
+            "gemini-4-neon": 455.56,
+            "gemini-3.8-flash": 455,
+            "gemini-4-argon": 65
+          }
+        },
+        { "agent": "grok", "monthlyUsd": 100, "apiUsd": { "grok-4.7": 524.76 } },
+        {
+          "agent": "kimi-code",
+          "monthlyUsd": 29.64,
+          "apiUsd": { "k3.1-pro": 147.29, "kimi-k3": 236.87 }
+        }
+      ],
       "harnessScenarios": {
         "claudeAgent": {
           "software": 59.97,
