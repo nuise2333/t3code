@@ -10,6 +10,7 @@ import {
   isWorkspacePreviewEntryPath,
   mediaKindFromPath,
   officePreviewKind,
+  officeRenderKind,
 } from "./filePreview.ts";
 
 describe("workspace file previews", () => {
@@ -201,6 +202,20 @@ describe("attachment preview classification", () => {
       expect(filePreviewKind({ name: `sample.${extension}` })).toBe("unsupported");
     },
   );
+  it.each([
+    ["legacy.DOC", "", "document"],
+    ["report.docx", "application/octet-stream", "document"],
+    ["notes.rtf", "text/rtf", "document"],
+    ["download", "application/vnd.ms-excel", "spreadsheet"],
+    ["budget.ods", "", "spreadsheet"],
+    ["deck.ppt", "", "presentation"],
+    ["book.epub", "", null],
+    ["analysis.ipynb", "", null],
+    ["data.csv", "text/csv", null],
+    ["legacy.doc", "image/png", null],
+  ] as const)("sends %s (%s) to LibreOffice as %s", (name, mimeType, expected) => {
+    expect(officeRenderKind({ name, mimeType })).toBe(expected);
+  });
   it("does not corrupt a multi-byte character at the preview boundary", () => {
     const bytes = new Uint8Array(FILE_TEXT_PREVIEW_MAX_BYTES + 1).fill(97);
     bytes[FILE_TEXT_PREVIEW_MAX_BYTES - 1] = 0xe2;

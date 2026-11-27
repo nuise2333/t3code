@@ -778,6 +778,8 @@ function ZipEntryView(props: {
         <AttachmentDocumentBody
           document={{
             kind,
+            // An entry is unpacked on this device, where the host's LibreOffice cannot read it.
+            office: null,
             activeMode,
             uri,
             content: text,

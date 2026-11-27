@@ -620,7 +620,7 @@ On web and desktop, files open beside the conversation with the same controls as
 file: a header row with the view toggle, **Copy contents** and **Save file**. On mobile, documents
 open in the same file screen as workspace files; its menu holds **Copy contents**, **Save or
 share** and **Open in file viewer**. Pictures, videos and PDFs keep their native viewers, and
-other document formats such as Word or Pages open in the device's own viewer when it has one.
+other document formats such as Pages open in the device's own viewer when it has one.
 If nothing on the device can show a format, save or share it to open it elsewhere. A ZIP up to
 50 MB opens as a folder list on every surface; on mobile, select a file inside it to preview,
 save, or add it to chat.
@@ -643,6 +643,17 @@ can break the preview, so save a copy if you need to keep it.
 Follow an agent's file link to read a report or other file outside the workspace.
 These files open read-only. An HTML file outside the workspace cannot load scripts,
 styles, or images from neighboring files.
+
+## Word, Excel, and PowerPoint files
+
+Office files (`.docx`, `.xlsx`, `.pptx`, the older `.doc`, `.xls`, `.ppt`, OpenDocument, and
+RTF) open with their original layout on every surface when LibreOffice is installed on the
+environment's machine. T3 Code finds it by itself; the first open of a file takes a few
+seconds. For a spreadsheet on web and desktop, **Show grid** switches from the printed pages to
+a scrollable grid, and your choice is remembered.
+
+Without LibreOffice, web and desktop show a simplified preview of the newer formats, and
+mobile opens the file in the device's own viewer.
 
 ## HTML and PDF files in the file viewer
 
