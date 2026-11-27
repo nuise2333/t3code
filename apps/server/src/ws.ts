@@ -30,6 +30,7 @@ import {
   authScopeResponse,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
+  AuthFilesystemReadScope,
   AuthOrchestrationOperateScope,
   type AuthEnvironmentScope,
   type ScheduledTaskListResult,
@@ -77,6 +78,7 @@ import {
   ProjectReadFileError,
   ProjectSearchContentsError,
   ProjectSearchEntriesError,
+  ProjectWriteFileConflictError,
   ProjectWriteFileError,
   ProjectMutationError,
   ProviderUploadFeedbackError,
@@ -3024,15 +3026,22 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.projectsWriteFile]: (input) =>
           workspaceFileSystem.writeFile(input).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ProjectWriteFileError({
-                  cwd: input.cwd,
-                  relativePath: input.relativePath,
-                  ...projectFileFailureContext(cause),
-                  cause,
-                }),
-            ),
+            Effect.mapError((cause) => {
+              if (cause._tag === "ProjectWriteFileConflictError") {
+                return currentSession.scopes.includes(AuthFilesystemReadScope)
+                  ? cause
+                  : new ProjectWriteFileConflictError({
+                      relativePath: cause.relativePath,
+                      currentRevision: cause.currentRevision,
+                    });
+              }
+              return new ProjectWriteFileError({
+                cwd: input.cwd,
+                relativePath: input.relativePath,
+                ...projectFileFailureContext(cause),
+                cause,
+              });
+            }),
           ),
         [WS_METHODS.projectsMutate]: (mutation) =>
           startup.enqueueCommand(mutateProject(mutation)).pipe(

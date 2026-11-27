@@ -56,7 +56,7 @@ describe("file save sessions in React", () => {
     runAtomCommand.mockReset().mockImplementation(
       () =>
         new Promise((resolve) => {
-          finishWrite = () => resolve(AsyncResult.success(undefined));
+          finishWrite = () => resolve(AsyncResult.success({ relativePath: target.relativePath }));
         }),
     );
     getUnsavedFile.mockReset().mockReturnValue(null);

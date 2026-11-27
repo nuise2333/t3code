@@ -1,9 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off - FileSystem cannot create a FIFO, and reads spy on native realpath.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 
 import * as NodePath from "@effect/platform-node/NodePath";
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as PlatformNodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -73,7 +74,7 @@ const layerTest = Layer.empty.pipe(
       prefix: "t3-workspace-files-test-",
     }),
   ),
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, PlatformNodeCrypto.layer)),
 );
 
 const makeTempDir = Effect.gen(function* () {
@@ -232,6 +233,9 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         expect(result).toEqual({
           relativePath: "src/index.ts",
           contents: "export const answer = 42;\n",
+          revision: NodeCrypto.createHash("sha256")
+            .update("export const answer = 42;\n")
+            .digest("hex"),
           byteLength: 26,
           truncated: false,
         });
@@ -243,6 +247,7 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           cwd,
           relativePath: "bom.ts",
           contents: bomRead.contents.replace("42", "43"),
+          expectedRevision: bomRead.revision,
         });
         const fs = yield* FileSystem.FileSystem;
         const saved = yield* fs.readFile(`${cwd}/bom.ts`);
@@ -270,6 +275,7 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         expect(yield* files.readFile({ cwd, relativePath: "short.txt" })).toEqual({
           relativePath: "short.txt",
           contents,
+          revision: NodeCrypto.createHash("sha256").update(contents).digest("hex"),
           byteLength: Buffer.byteLength(contents),
           truncated: false,
         });
@@ -306,6 +312,7 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         expect(result).toEqual({
           relativePath: absolutePath,
           contents: "# Report\n",
+          revision: NodeCrypto.createHash("sha256").update("# Report\n").digest("hex"),
           byteLength: 9,
           truncated: false,
         });
@@ -337,6 +344,7 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           expect(result).toEqual({
             relativePath,
             contents: "# Notes\n",
+            revision: NodeCrypto.createHash("sha256").update("# Notes\n").digest("hex"),
             byteLength: 8,
             truncated: false,
           });
@@ -563,7 +571,16 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
 
         expect(result.truncated).toBe(true);
         expect(result.byteLength).toBe(bytes.length);
+        expect(result.revision).toBe(NodeCrypto.createHash("sha256").update(bytes).digest("hex"));
         expect(result.contents).toBe("a".repeat(limit - 1));
+        const error = yield* workspaceFileSystem
+          .writeFile({ cwd, relativePath: "large.txt", contents: "edit", expectedRevision: "old" })
+          .pipe(Effect.flip);
+        expect(error).toMatchObject({
+          _tag: "ProjectWriteFileConflictError",
+          currentRevision: result.revision,
+        });
+        expect(error).not.toHaveProperty("currentContents", expect.any(String));
       }),
     );
 
@@ -597,6 +614,44 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
   });
 
   describe("writeFile", () => {
+    it.effect("allows only one concurrent writer to replace the same revision", () =>
+      Effect.gen(function* () {
+        const files = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const target = { cwd: yield* makeTempDir, relativePath: "draft.txt" };
+        const initial = yield* files.writeFile({ ...target, contents: "base" });
+        const revision = NodeCrypto.createHash("sha256").update("base").digest("hex");
+        expect(initial.revision).toBe(revision);
+        const outcomes = yield* Effect.forEach(
+          ["first", "second"],
+          (contents) =>
+            files
+              .writeFile({ ...target, contents, expectedRevision: revision })
+              .pipe(Effect.result),
+          { concurrency: "unbounded" },
+        );
+        expect(outcomes.map((result) => result._tag).sort()).toEqual(["Failure", "Success"]);
+        const current = yield* files.readFile(target);
+        expect(outcomes.find((result) => result._tag === "Failure")?.failure).toMatchObject({
+          _tag: "ProjectWriteFileConflictError",
+          currentRevision: current.revision,
+          currentContents: current.contents,
+        });
+        expect(["first", "second"]).toContain(current.contents);
+        expect(outcomes.find((result) => result._tag === "Success")?.success.revision).toBe(
+          current.revision,
+        );
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.remove(target.cwd + "/" + target.relativePath);
+        const missing = yield* files
+          .writeFile({ ...target, contents: "restore", expectedRevision: revision })
+          .pipe(Effect.flip);
+        expect(missing).toMatchObject({
+          _tag: "ProjectWriteFileConflictError",
+          currentRevision: "missing",
+        });
+        expect(yield* fs.exists(target.cwd + "/" + target.relativePath)).toBe(false);
+      }),
+    );
     it.effect("rejects writes outside a known workspace", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;

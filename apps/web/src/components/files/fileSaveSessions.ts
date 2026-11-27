@@ -1,7 +1,9 @@
 import {
   AuthFilesystemWriteScope,
   type EnvironmentId,
+  ProjectWriteFileConflictError,
   ProjectWriteFileError,
+  type ProjectWriteFileResult,
 } from "@t3tools/contracts";
 import {
   type AtomCommandResult,
@@ -19,10 +21,14 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { environmentSession, readEnvironmentScope, sessionHasScope } from "~/state/session";
 
+import { mergeThreeWay } from "./markdownConflict";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import { absoluteFilePath, isSameOrInside } from "./fileOperations.logic";
 import {
   clearProjectFileQueryData,
+  getProjectFileBase,
+  setProjectFileQueryData,
+  type ProjectFileBase,
   confirmProjectFileQueryData,
   getProjectFileQueryAtom,
   getUnsavedProjectFileQueryData,
@@ -36,6 +42,13 @@ export interface FileSaveTarget {
 
 export type FilePendingListener = (relativePath: string, pending: boolean) => void;
 
+export interface FileSaveConflict {
+  readonly base: string;
+  readonly disk: string;
+  readonly local: string;
+}
+type ConflictListener = (conflict: FileSaveConflict | null) => void;
+
 export interface FileSaveSessionDeps {
   readonly debounceMs: number;
   readonly canPersist: (target: FileSaveTarget) => boolean;
@@ -44,15 +57,21 @@ export interface FileSaveSessionDeps {
   readonly persist: (
     target: FileSaveTarget,
     contents: string,
-  ) => Promise<AtomCommandResult<unknown, unknown>>;
-  readonly confirm: (target: FileSaveTarget, contents: string) => boolean;
+    expectedRevision?: string,
+  ) => Promise<AtomCommandResult<ProjectWriteFileResult, unknown>>;
+  readonly readBase: (target: FileSaveTarget) => ProjectFileBase | undefined;
+  readonly publish: (target: FileSaveTarget, contents: string, base?: ProjectFileBase) => void;
+  readonly reportConflict: (target: FileSaveTarget, message: string) => void;
+  readonly confirm: (target: FileSaveTarget, contents: string, revision?: string) => boolean;
   readonly readUnsaved: (target: FileSaveTarget) => string | null;
   readonly discardUnsaved: (target: FileSaveTarget) => void;
 }
 
 interface FileSaveSession {
   readonly target: FileSaveTarget;
-  readonly coordinator: FileSaveCoordinator;
+  readonly coordinator: FileSaveCoordinator<ProjectWriteFileResult>;
+  base: ProjectFileBase | undefined;
+  conflict: FileSaveConflict | null;
   /** Resolved when the next write pass ends. */
   readonly settleWaiters: Array<() => void>;
   /** Lease count per listener; surfaces may share one listener. */
@@ -72,44 +91,90 @@ interface FileSaveSession {
 export function createFileSaveSessions(deps: FileSaveSessionDeps) {
   const sessions = new Map<string, FileSaveSession>();
 
-  const recover = (target: FileSaveTarget, coordinator: FileSaveCoordinator) => {
-    if (!deps.canPersist(target)) return;
-    const unsaved = deps.readUnsaved(target);
-    if (unsaved !== null) coordinator.change(unsaved);
+  const conflictListeners = new Map<string, Set<ConflictListener>>();
+  const updateConflict = (session: FileSaveSession, conflict: FileSaveConflict | null) => {
+    session.conflict = conflict;
+    for (const listener of conflictListeners.get(fileSaveKey(session.target)) ?? [])
+      listener(conflict);
+  };
+
+  const recover = (session: FileSaveSession) => {
+    if (session.conflict || !deps.canPersist(session.target)) return;
+    const unsaved = deps.readUnsaved(session.target);
+    if (unsaved !== null) {
+      session.base ??= deps.readBase(session.target);
+      session.coordinator.change(unsaved);
+    }
   };
 
   const create = (key: string, target: FileSaveTarget): FileSaveSession => {
     const listeners = new Map<FilePendingListener, number>();
-    const coordinator: FileSaveCoordinator = new FileSaveCoordinator({
+    let retryingMerge = false;
+    const coordinator: FileSaveCoordinator<ProjectWriteFileResult> = new FileSaveCoordinator({
       debounceMs: deps.debounceMs,
-      canPersist: () => deps.canPersist(target),
+      canPersist: () => !session.conflict && deps.canPersist(target),
       // The last surface's listeners outlive it: a flush that settles after
       // the session is released still has to clear the pending marker.
       onPendingChange: (pending) => {
         for (const listener of listeners.keys()) listener(target.relativePath, pending);
       },
-      persist: (contents) => deps.persist(target, contents),
-      onConfirmed: (contents) => deps.confirm(target, contents),
+      persist: async (contents) => {
+        const base = session.base;
+        const result = await deps.persist(target, contents, base?.revision);
+        const retry = retryingMerge;
+        retryingMerge = false;
+        if (result._tag === "Success" || coordinator.unconfirmedContents === null) return result;
+        const cause = squashAtomCommandFailure(result);
+        if (!isWriteConflict(cause)) return result;
+        const disk = cause.currentContents;
+        if (disk !== undefined && base) {
+          const local = coordinator.unconfirmedContents;
+          const { merged, conflicts } = mergeThreeWay(base.contents, local, disk);
+          session.base = { contents: disk, revision: cause.currentRevision };
+          if (!conflicts && !retry) {
+            retryingMerge = true;
+            deps.publish(target, merged, session.base);
+            coordinator.change(merged);
+            coordinator.flush();
+            return result;
+          }
+          updateConflict(session, { base: base.contents, local, disk });
+          deps.publish(target, disk, session.base);
+          deps.confirm(target, disk, cause.currentRevision);
+        }
+        deps.reportConflict(target, cause.message);
+        return result;
+      },
+      onConfirmed: (contents, result) => {
+        session.base = { contents, revision: result.revision };
+        return deps.confirm(target, contents, result.revision);
+      },
       onSettled: () => {
         for (const resolve of session.settleWaiters.splice(0)) resolve();
         if (!session.flushingOnRelease) return;
         session.flushingOnRelease = false;
         if (session.leases === 0) {
+          if (session.conflict) {
+            session.listeners.clear();
+            return;
+          }
           if (sessions.get(key) === session) sessions.delete(key);
           session.unsubscribeWritable();
         } else if (coordinator.unconfirmedContents !== null) {
           // A surface rejoined while the release flush failed; retry it once.
-          recover(target, coordinator);
+          recover(session);
         }
       },
     });
-    const unsubscribeWritable = deps.subscribeWritable(target, () => recover(target, coordinator));
+    const unsubscribeWritable = deps.subscribeWritable(target, () => recover(session));
     const session: FileSaveSession = {
       target,
       coordinator,
       settleWaiters: [],
       listeners,
       unsubscribeWritable,
+      base: undefined,
+      conflict: null,
       leases: 0,
       flushingOnRelease: false,
     };
@@ -123,7 +188,7 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
     sessions.set(key, session);
     session.leases += 1;
     session.listeners.set(onPendingChange, (session.listeners.get(onPendingChange) ?? 0) + 1);
-    if (!existing) recover(target, session.coordinator);
+    if (!existing) recover(session);
     else if (session.coordinator.unconfirmedContents !== null) {
       onPendingChange(target.relativePath, true);
     }
@@ -156,6 +221,26 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
   return {
     /** Holds the file's session open until the returned release runs. */
     acquire,
+    subscribeConflict(target: FileSaveTarget, listener: ConflictListener): () => void {
+      const key = fileSaveKey(target);
+      const listeners = conflictListeners.get(key) ?? new Set<ConflictListener>();
+      listeners.add(listener);
+      conflictListeners.set(key, listeners);
+      listener(sessions.get(key)?.conflict ?? null);
+      return () => {
+        listeners.delete(listener);
+        if (!listeners.size) conflictListeners.delete(key);
+      };
+    },
+    resolveConflict(target: FileSaveTarget, contents: string): void {
+      const session = sessions.get(fileSaveKey(target));
+      if (!session?.conflict) return;
+      updateConflict(session, null);
+      deps.publish(target, contents, session.base);
+      session.coordinator.change(contents);
+      session.flushingOnRelease = session.leases === 0;
+      session.coordinator.flush();
+    },
     /** Writes drafts at or under the absolute `paths` before they move, and resolves once written. */
     flushUnder(environmentId: EnvironmentId, paths: readonly string[]): Promise<void> {
       return Promise.all(
@@ -177,14 +262,22 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
     /** Forgets drafts at or under the absolute `paths`, which no longer exist. */
     discardUnder(environmentId: EnvironmentId, paths: readonly string[]): void {
       for (const session of sessionsUnder(environmentId, paths)) {
+        updateConflict(session, null);
         session.coordinator.discard();
+        if (!session.leases) {
+          sessions.delete(fileSaveKey(session.target));
+          session.unsubscribeWritable();
+        }
         deps.discardUnsaved(session.target);
       }
     },
     /** Edits for a file nobody holds open are dropped, so retired editors stay inert. */
     change(target: FileSaveTarget, contents: string): void {
       const session = sessions.get(fileSaveKey(target));
-      if (session && session.leases > 0) session.coordinator.change(contents);
+      if (!session || !session.leases) return;
+      if (session.coordinator.unconfirmedContents === null) session.base = deps.readBase(target);
+      if (session.conflict) updateConflict(session, { ...session.conflict, local: contents });
+      session.coordinator.change(contents);
     },
   };
 }
@@ -193,6 +286,7 @@ function fileSaveKey({ environmentId, cwd, relativePath }: FileSaveTarget): stri
   return `${environmentId}\u0000${cwd}\u0000${relativePath}`;
 }
 
+const isWriteConflict = Schema.is(ProjectWriteFileConflictError);
 const isProjectWriteFileError = Schema.is(ProjectWriteFileError);
 const missingFileNotices = new Set<string>();
 
@@ -233,23 +327,39 @@ const fileSaveSessions = createFileSaveSessions({
       },
     );
   },
-  persist: async (target, contents) => {
+  persist: async (target, contents, expectedRevision) => {
     const { environmentId, cwd, relativePath } = target;
     const result = await runAtomCommand(appAtomRegistry, projectEnvironment.writeFile, {
       environmentId,
-      input: { cwd, relativePath, contents, createIfMissing: knownMissing(target) },
+      input: {
+        cwd,
+        relativePath,
+        contents,
+        expectedRevision,
+        createIfMissing: knownMissing(target),
+      },
     });
     reportMissingFile(target, result);
     return result;
   },
-  confirm: ({ environmentId, cwd, relativePath }, contents) =>
-    confirmProjectFileQueryData(environmentId, cwd, relativePath, contents),
+  readBase: ({ environmentId, cwd, relativePath }) =>
+    getProjectFileBase(environmentId, cwd, relativePath),
+  publish: ({ environmentId, cwd, relativePath }, contents, base) =>
+    setProjectFileQueryData(environmentId, cwd, relativePath, contents, base),
+  reportConflict: (_target, description) =>
+    toastManager.add({ type: "warning", title: "Edits not saved", description }),
+  confirm: ({ environmentId, cwd, relativePath }, contents, revision) =>
+    confirmProjectFileQueryData(environmentId, cwd, relativePath, contents, revision),
   readUnsaved: ({ environmentId, cwd, relativePath }) =>
     getUnsavedProjectFileQueryData(environmentId, cwd, relativePath)?.contents ?? null,
   discardUnsaved: ({ environmentId, cwd, relativePath }) =>
     clearProjectFileQueryData(environmentId, cwd, relativePath),
 });
 
+/** @public */
+export const subscribeFileSaveConflict = fileSaveSessions.subscribeConflict;
+/** @public */
+export const resolveFileSaveConflict = fileSaveSessions.resolveConflict;
 export const flushFileSaveSessionsUnder = fileSaveSessions.flushUnder;
 export const discardFileSaveSessionsUnder = fileSaveSessions.discardUnder;
 export const unsavedFileSaveSessionsUnder = fileSaveSessions.unsavedUnder;

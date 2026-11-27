@@ -6,7 +6,7 @@ export interface FileSaveCoordinatorOptions<A, E> {
   readonly persist: (contents: string) => Promise<AtomCommandResult<A, E>>;
   readonly onPendingChange: (pending: boolean) => void;
   /** Return false when another editor has newer unsaved contents. */
-  readonly onConfirmed: (contents: string) => boolean | void;
+  readonly onConfirmed: (contents: string, result: A) => boolean | void;
   /** Called when a write pass ends with nothing further scheduled. */
   readonly onSettled?: () => void;
 }
@@ -87,7 +87,7 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
     let confirmed = false;
     if (succeeded) {
       this.confirmedRevision = Math.max(this.confirmedRevision, revision);
-      confirmed = this.options.onConfirmed(contents) !== false;
+      confirmed = this.options.onConfirmed(contents, result.value) !== false;
     }
 
     this.saving = false;

@@ -1,7 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 
+import { ProjectWriteFileConflictError } from "@t3tools/contracts";
 import type {
   FilesystemEntryMetadata,
   FilesystemGetMetadataInput,
@@ -20,6 +22,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as RcMap from "effect/RcMap";
+import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
@@ -110,6 +114,10 @@ export class WorkspaceFileMissingError extends Schema.TaggedError<WorkspaceFileM
   }
 }
 
+const isConditionalWriteError = Schema.is(
+  Schema.Union([ProjectWriteFileConflictError, WorkspacePathNotFileError]),
+);
+
 const isMissingPathCause = (cause: unknown) =>
   (cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 
@@ -142,12 +150,53 @@ export class WorkspaceFileSystem extends Context.Service<
       ProjectWriteFileResult,
       | WorkspaceFileSystemError
       | WorkspacePaths.WorkspacePathOutsideRootError
+      | ProjectWriteFileConflictError
       | KnownWorkspaces.UnknownWorkspaceError
     >;
   }
 >()("t3/workspace/WorkspaceFileSystem") {}
 
 const UTF8_BOM = "\uFEFF";
+
+async function readPrefix(handle: NodeFSP.FileHandle, length: number) {
+  const buffer = Buffer.alloc(length);
+  let offset = 0;
+  while (offset < length) {
+    const { bytesRead } = await handle.read(buffer, offset, length - offset, offset);
+    if (!bytesRead) break;
+    offset += bytesRead;
+  }
+  return buffer.subarray(0, offset);
+}
+
+async function fileRevision(handle: NodeFSP.FileHandle, prefix: Buffer, size: number) {
+  const hash = NodeCrypto.createHash("sha256").update(prefix);
+  if (size > prefix.length) {
+    const chunk = Buffer.alloc(64 * 1024);
+    let offset = prefix.length;
+    while (offset < size) {
+      const { bytesRead } = await handle.read(
+        chunk,
+        0,
+        Math.min(chunk.length, size - offset),
+        offset,
+      );
+      if (!bytesRead) break;
+      hash.update(chunk.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+  }
+  return hash.digest("hex");
+}
+
+function decodeText(bytes: Uint8Array, truncated: boolean) {
+  if (bytes.includes(0)) return undefined;
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: truncated });
+  } catch {
+    return undefined;
+  }
+}
 
 async function startsWithUtf8Bom(filePath: string): Promise<boolean> {
   const handle = await NodeFSP.open(
@@ -159,8 +208,7 @@ async function startsWithUtf8Bom(filePath: string): Promise<boolean> {
   ).catch(() => null);
   if (!handle) return false;
   try {
-    const { bytesRead, buffer } = await handle.read(Buffer.alloc(3), 0, 3, 0);
-    return bytesRead === 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf;
+    return (await readPrefix(handle, 3)).equals(Buffer.from(UTF8_BOM));
   } catch {
     return false;
   } finally {
@@ -428,42 +476,38 @@ export const make = Effect.gen(function* () {
             });
           }
 
-          const bytesToRead = Math.min(stat.size, PROJECT_READ_FILE_MAX_BYTES);
-          const buffer = Buffer.alloc(bytesToRead);
-          let offset = 0;
-          while (offset < bytesToRead) {
-            const { bytesRead } = yield* Effect.tryPromise({
-              try: () => handle.read(buffer, offset, bytesToRead - offset, offset),
-              catch: (cause) =>
-                new WorkspaceFileSystemOperationError({
-                  workspaceRoot: input.cwd,
-                  relativePath: input.relativePath,
-                  resolvedPath: realTargetPath,
-                  operationPath: realTargetPath,
-                  operation: "read",
-                  cause,
-                }),
+          const readError = (cause: unknown) =>
+            new WorkspaceFileSystemOperationError({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: realTargetPath,
+              operationPath: realTargetPath,
+              operation: "read",
+              cause,
             });
-            if (bytesRead <= 0) break;
-            offset += bytesRead;
-          }
-          const fileBytes = buffer.subarray(0, offset);
+          const bytes = yield* Effect.tryPromise({
+            try: () => readPrefix(handle, Math.min(stat.size, PROJECT_READ_FILE_MAX_BYTES)),
+            catch: readError,
+          });
           const truncated = stat.size > PROJECT_READ_FILE_MAX_BYTES;
-          const binaryFileError = () =>
-            new WorkspaceBinaryFileError({
+          const contents = decodeText(bytes, truncated);
+          if (contents === undefined)
+            return yield* new WorkspaceBinaryFileError({
               workspaceRoot: input.cwd,
               relativePath: input.relativePath,
               resolvedPath: realTargetPath,
             });
-          if (fileBytes.includes(0)) return yield* binaryFileError();
-          // Fatal decoding rejects invalid UTF-8, since U+FFFD contents would corrupt the file on save.
-          // Streaming decode drops a character the byte limit split, instead of rejecting it.
-          const contents = yield* Effect.try({
-            try: () =>
-              new TextDecoder("utf-8", { fatal: true }).decode(fileBytes, { stream: truncated }),
-            catch: binaryFileError,
+          const revision = yield* Effect.tryPromise({
+            try: () => fileRevision(handle, bytes, stat.size),
+            catch: readError,
           });
-          return { relativePath: target.relativePath, contents, byteLength: stat.size, truncated };
+          return {
+            relativePath: target.relativePath,
+            contents,
+            revision,
+            byteLength: stat.size,
+            truncated,
+          };
         }),
       (handle) =>
         handle === null
@@ -565,25 +609,26 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath, realTargetPath };
   });
 
-  const writeFile: WorkspaceFileSystem["Service"]["writeFile"] = Effect.fn(
-    "WorkspaceFileSystem.writeFile",
-  )(function* (input) {
-    yield* knownWorkspaces.assertContains(input.cwd);
-    const target = yield* resolveWriteTarget(input);
-    const realTargetPath = target.realTargetPath;
+  const writeLocks = yield* RcMap.make({ lookup: (_path: string) => Semaphore.make(1) });
+  const writeTarget = Effect.fn("WorkspaceFileSystem.writeTarget")(function* (
+    input: ProjectWriteFileInput,
+    target: { relativePath: string; realTargetPath: string },
+  ) {
+    const { realTargetPath } = target;
+    if (input.expectedRevision !== undefined && (yield* isServerInternalPath(realTargetPath))) {
+      return yield* new WorkspacePaths.WorkspacePathOutsideRootError({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+      });
+    }
     const replacesFile = yield* fileSystem
       .exists(realTargetPath)
       .pipe(Effect.orElseSucceed(() => false));
-    // readFile decodes the BOM away, so an editor save would otherwise drop it from the file.
-    const keepsBom =
-      input.encoding !== "base64" &&
-      replacesFile &&
-      !input.contents.startsWith(UTF8_BOM) &&
-      (yield* Effect.promise(() => startsWithUtf8Bom(realTargetPath)));
-    const contents =
+    const preservingBom = input.encoding !== "base64" && !input.contents.startsWith(UTF8_BOM);
+    const writeContents = (hasBom: boolean) =>
       input.encoding === "base64"
         ? Buffer.from(input.contents, "base64")
-        : keepsBom
+        : preservingBom && hasBom
           ? UTF8_BOM + input.contents
           : input.contents;
     const createIfMissing = input.createIfMissing !== false;
@@ -593,6 +638,13 @@ export const make = Effect.gen(function* () {
         relativePath: input.relativePath,
         resolvedPath: realTargetPath,
       });
+    const conflict = (currentRevision: string, currentContents?: string) =>
+      new ProjectWriteFileConflictError({
+        relativePath: target.relativePath,
+        currentRevision,
+        currentContents,
+      });
+    if (!replacesFile && input.expectedRevision !== undefined) return yield* conflict("missing");
     if (!createIfMissing && !replacesFile) return yield* missingError();
 
     yield* fileSystem.makeDirectory(path.dirname(realTargetPath), { recursive: true }).pipe(
@@ -608,27 +660,70 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    yield* Effect.tryPromise({
+    const written = yield* Effect.tryPromise({
       // A symlink swapped in after the check is not followed. Windows lacks O_NOFOLLOW.
-      try: () =>
-        NodeFSP.writeFile(realTargetPath, contents, {
+      try: async () => {
+        if (input.expectedRevision !== undefined) {
+          const handle = await NodeFSP.open(
+            realTargetPath,
+            NodeFS.constants.O_RDWR |
+              (NodeFS.constants.O_NOFOLLOW ?? 0) |
+              (NodeFS.constants.O_NONBLOCK ?? 0),
+          );
+          try {
+            const stat = await handle.stat();
+            if (!stat.isFile())
+              throw new WorkspacePathNotFileError({
+                workspaceRoot: input.cwd,
+                relativePath: input.relativePath,
+                resolvedPath: realTargetPath,
+              });
+            const prefix = await readPrefix(
+              handle,
+              Math.min(stat.size, PROJECT_READ_FILE_MAX_BYTES),
+            );
+            const revision = await fileRevision(handle, prefix, stat.size);
+            if (revision !== input.expectedRevision) {
+              throw conflict(
+                revision,
+                stat.size > prefix.length ? undefined : decodeText(prefix, false),
+              );
+            }
+            const contents = writeContents(prefix.subarray(0, 3).equals(Buffer.from(UTF8_BOM)));
+            await handle.truncate(0);
+            await handle.writeFile(contents);
+            return contents;
+          } finally {
+            await handle.close();
+          }
+        }
+        const contents = writeContents(
+          preservingBom && replacesFile && (await startsWithUtf8Bom(realTargetPath)),
+        );
+        await NodeFSP.writeFile(realTargetPath, contents, {
           flag:
             NodeFS.constants.O_WRONLY |
             (createIfMissing ? NodeFS.constants.O_CREAT : 0) |
             NodeFS.constants.O_TRUNC |
             (NodeFS.constants.O_NOFOLLOW ?? 0),
-        }),
-      catch: (cause) =>
-        !createIfMissing && (cause as NodeJS.ErrnoException).code === "ENOENT"
-          ? missingError()
-          : new WorkspaceFileSystemOperationError({
-              workspaceRoot: input.cwd,
-              relativePath: input.relativePath,
-              resolvedPath: realTargetPath,
-              operationPath: realTargetPath,
-              operation: "write-file",
-              cause,
-            }),
+        });
+        return contents;
+      },
+      catch: (cause) => {
+        if (isConditionalWriteError(cause)) return cause;
+        if (isMissingPathCause(cause)) {
+          if (input.expectedRevision !== undefined) return conflict("missing");
+          if (!createIfMissing) return missingError();
+        }
+        return new WorkspaceFileSystemOperationError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedPath: realTargetPath,
+          operationPath: realTargetPath,
+          operation: "write-file",
+          cause,
+        });
+      },
     });
     // Editor autosave overwrites existing files, which leaves the indexed paths unchanged, and
     // fff's watcher applies the new contents on its own. A forced rescan re-walks the whole
@@ -636,8 +731,20 @@ export const make = Effect.gen(function* () {
     if (!replacesFile) {
       yield* workspaceEntries.refresh(input.cwd);
     }
-    return { relativePath: target.relativePath };
+    return {
+      relativePath: target.relativePath,
+      revision: NodeCrypto.createHash("sha256").update(written).digest("hex"),
+    };
   });
+
+  const writeFile: WorkspaceFileSystem["Service"]["writeFile"] = Effect.fn(
+    "WorkspaceFileSystem.writeFile",
+  )(function* (input) {
+    yield* knownWorkspaces.assertContains(input.cwd);
+    const target = yield* resolveWriteTarget(input);
+    const lock = yield* RcMap.get(writeLocks, target.realTargetPath);
+    return yield* lock.withPermit(writeTarget(input, target));
+  }, Effect.scoped);
 
   return WorkspaceFileSystem.of({ getMetadata, readFile, writeFile });
 });

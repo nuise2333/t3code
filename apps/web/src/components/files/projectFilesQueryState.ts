@@ -85,11 +85,25 @@ export function getProjectFileQueryAtom(
   });
 }
 
+export type ProjectFileBase = Pick<ProjectReadFileResult, "contents" | "revision">;
+
+export function getProjectFileBase(
+  environmentId: EnvironmentId,
+  cwd: string,
+  relativePath: string,
+): ProjectFileBase | undefined {
+  const overlay = appAtomRegistry.get(optimisticFileAtom(environmentId, cwd, relativePath));
+  if (overlay) return overlay.saved ? overlay.data : overlay.base;
+  const query = appAtomRegistry.get(getProjectFileQueryAtom(environmentId, cwd, relativePath));
+  return Option.getOrUndefined(AsyncResult.value(query));
+}
+
 export function setProjectFileQueryData(
   environmentId: EnvironmentId,
   cwd: string,
   relativePath: string,
   contents: string,
+  base = getProjectFileBase(environmentId, cwd, relativePath),
 ): void {
   const atom = optimisticFileAtom(environmentId, cwd, relativePath);
   if (!unsavedFileMounts.has(atom)) {
@@ -97,8 +111,10 @@ export function setProjectFileQueryData(
   }
   appAtomRegistry.set(atom, {
     saved: false,
+    base,
     data: {
       relativePath,
+      revision: base?.revision,
       contents,
       byteLength: new TextEncoder().encode(contents).byteLength,
       truncated: false,
@@ -140,14 +156,24 @@ export function confirmProjectFileQueryData(
   cwd: string,
   relativePath: string,
   contents: string,
+  revision?: string,
 ): boolean {
   const atom = optimisticFileAtom(environmentId, cwd, relativePath);
   const optimisticFile = appAtomRegistry.get(atom);
-  if (optimisticFile?.data.contents !== contents) return false;
+  if (!optimisticFile) return false;
+  if (optimisticFile.data.contents !== contents) {
+    if (!optimisticFile.saved)
+      appAtomRegistry.set(atom, {
+        ...optimisticFile,
+        base: { contents, revision },
+        data: { ...optimisticFile.data, revision },
+      });
+    return false;
+  }
 
   const queryAtom = getProjectFileQueryAtom(environmentId, cwd, relativePath);
   appAtomRegistry.set(atom, {
-    ...optimisticFile,
+    data: { ...optimisticFile.data, revision },
     saved: true,
     confirmingQuery: queryAtom,
   });

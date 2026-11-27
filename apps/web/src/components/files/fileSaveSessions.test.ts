@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectWriteFileConflictError } from "@t3tools/contracts";
 import { Cause } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -22,10 +22,14 @@ function setup() {
     unsaved: null as string | null,
     onWritable: [] as Array<() => void>,
   };
-  const persist = vi.fn<FileSaveSessionDeps["persist"]>(async () => AsyncResult.success(undefined));
+  const persist = vi.fn<FileSaveSessionDeps["persist"]>(async () =>
+    AsyncResult.success({ relativePath: target.relativePath, revision: "written" }),
+  );
   const confirm = vi.fn((_target: FileSaveTarget, _contents: string) => true);
   const onPendingChange = vi.fn();
   const discardUnsaved = vi.fn();
+  const publish = vi.fn();
+  const reportConflict = vi.fn();
   const sessions = createFileSaveSessions({
     debounceMs: 500,
     canPersist: () => state.writable,
@@ -36,6 +40,9 @@ function setup() {
       };
     },
     persist,
+    readBase: () => ({ contents: "one\ntwo\nthree\n", revision: "original" }),
+    publish,
+    reportConflict,
     confirm,
     readUnsaved: () => state.unsaved,
     discardUnsaved,
@@ -49,6 +56,8 @@ function setup() {
     onPendingChange,
     discardUnsaved,
     writes,
+    reportConflict,
+    publish,
     [Symbol.dispose]: () => vi.useRealTimers(),
   };
 }
@@ -110,7 +119,7 @@ describe("file save sessions", () => {
     h.persist.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          finishWrite = () => resolve(AsyncResult.success(undefined));
+          finishWrite = () => resolve(AsyncResult.success({ relativePath: target.relativePath }));
         }),
     );
     const release = h.sessions.acquire(target, h.onPendingChange);
@@ -130,7 +139,7 @@ describe("file save sessions", () => {
     h.persist.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          finishWrite = () => resolve(AsyncResult.success(undefined));
+          finishWrite = () => resolve(AsyncResult.success({ relativePath: target.relativePath }));
         }),
     );
     const release = h.sessions.acquire(target, h.onPendingChange);
@@ -176,7 +185,7 @@ describe("file save sessions", () => {
     h.persist.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          finishWrite = () => resolve(AsyncResult.success(undefined));
+          finishWrite = () => resolve(AsyncResult.success({ relativePath: target.relativePath }));
         }),
     );
     const release = h.sessions.acquire(target, h.onPendingChange);
@@ -293,4 +302,73 @@ describe("file save sessions", () => {
     await vi.runAllTimersAsync();
     expect(h.persist).not.toHaveBeenCalled();
   });
+});
+
+function diskConflict(contents?: string): Awaited<ReturnType<FileSaveSessionDeps["persist"]>> {
+  return AsyncResult.failure(
+    Cause.fail(
+      new ProjectWriteFileConflictError({
+        relativePath: target.relativePath,
+        currentRevision: "disk",
+        currentContents: contents,
+      }),
+    ),
+  );
+}
+
+it("retries independent edits against the disk revision and publishes the merge", async () => {
+  using h = setup();
+  h.sessions.acquire(target, h.onPendingChange);
+  const local = "ONE\ntwo\nthree\n";
+  const merged = "ONE\ntwo\nTHREE\n";
+  h.persist.mockResolvedValueOnce(diskConflict("one\ntwo\nTHREE\n"));
+  h.sessions.change(target, local);
+  await vi.runAllTimersAsync();
+  expect(h.persist.mock.calls).toEqual([
+    [target, local, "original"],
+    [target, merged, "disk"],
+  ]);
+  expect(h.publish).toHaveBeenCalledWith(target, merged, {
+    contents: "one\ntwo\nTHREE\n",
+    revision: "disk",
+  });
+  expect(h.onPendingChange).toHaveBeenLastCalledWith("file.txt", false);
+});
+
+it("keeps overlapping edits across release and resolves against the disk revision", async () => {
+  using h = setup();
+  const release = h.sessions.acquire(target, h.onPendingChange);
+  const listener = vi.fn();
+  h.sessions.subscribeConflict(target, listener);
+  h.persist.mockResolvedValueOnce(diskConflict("disk"));
+  h.sessions.change(target, "local");
+  await vi.runAllTimersAsync();
+  release();
+  h.sessions.acquire(target, h.onPendingChange);
+  await h.sessions.flushUnder(target.environmentId, ["/workspace"]);
+  expect(h.persist).toHaveBeenCalledTimes(1);
+  expect(listener).toHaveBeenLastCalledWith({
+    base: "one\ntwo\nthree\n",
+    local: "local",
+    disk: "disk",
+  });
+  h.sessions.resolveConflict(target, "resolved");
+  await vi.runAllTimersAsync();
+  expect(h.persist.mock.calls[1]).toEqual([target, "resolved", "disk"]);
+  expect(listener).toHaveBeenLastCalledWith(null);
+});
+
+it("retains the draft when the server cannot return mergeable text", async () => {
+  using h = setup();
+  h.sessions.acquire(target, h.onPendingChange);
+  h.persist.mockResolvedValueOnce(diskConflict());
+  h.sessions.change(target, "local");
+  await vi.runAllTimersAsync();
+  expect(h.persist).toHaveBeenCalledTimes(1);
+  expect(h.publish).not.toHaveBeenCalled();
+  expect(h.sessions.unsavedUnder(target.environmentId, ["/workspace"])).toEqual(["file.txt"]);
+  expect(h.reportConflict).toHaveBeenCalledWith(
+    target,
+    "The file changed on disk since it was opened.",
+  );
 });
