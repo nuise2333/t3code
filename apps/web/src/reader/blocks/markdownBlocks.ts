@@ -1,6 +1,6 @@
 import { markdownFrontmatterEnd } from "@t3tools/shared/markdownFrontmatter";
 
-import { parseMarkdownSyntax, type MarkdownSyntaxOptions } from "../editor/markdownFileSyntax";
+import { parseMarkdownSyntax, type MarkdownSyntaxOptions } from "./markdownSyntax";
 
 export interface MarkdownBlock {
   readonly from: number;

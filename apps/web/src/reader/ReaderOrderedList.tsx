@@ -22,7 +22,7 @@ export interface OrderedListMarkerSlot {
 }
 
 /** The number column of an ordered list set in `font`; null without a canvas to measure with. */
-export function orderedListMarkerSlot(
+function orderedListMarkerSlot(
   labels: ReadonlyArray<string>,
   font: string,
 ): OrderedListMarkerSlot | null {
@@ -37,7 +37,7 @@ export function orderedListMarkerSlot(
 }
 
 /** The custom properties reader.css reads the number column from. */
-export const orderedListSlotStyle = (marker: OrderedListMarkerSlot) => ({
+const orderedListSlotStyle = (marker: OrderedListMarkerSlot) => ({
   "--reader-ol-slot": `${marker.slot}px`,
   "--reader-ol-trim": `${marker.trim}px`,
 });

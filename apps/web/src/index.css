@@ -2,7 +2,7 @@
 @layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
 @import "./reader/reader.css";
-@import "./reader/editor/readerEditor.css";
+@import "./reader/blocks/markdownBlockEditor.css";
 @import "./optical/optical.css";
 
 @custom-variant dark (&:is(.dark, .dark *));

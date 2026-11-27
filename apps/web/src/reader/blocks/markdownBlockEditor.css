@@ -1,0 +1,35 @@
+/* The Markdown file editor (MarkdownBlockEditor.tsx): the reading view, one block open as source. */
+
+@media screen {
+  :root .chat-markdown.markdown-reader[data-markdown-block-editor] {
+    outline: none;
+
+    & .reader-raw-muted {
+      margin: 0 0 var(--reader-gap);
+      color: var(--reader-secondary);
+      font-family: var(--reader-font-mono);
+      font-size: var(--reader-code-size);
+      white-space: pre-wrap;
+    }
+
+    & .reader-md-footnote-label {
+      color: var(--reader-secondary);
+      font-size: round(nearest, calc(var(--reader-base) * 0.7), 1px);
+      vertical-align: super;
+    }
+
+    & .reader-raw-footnote {
+      display: flex;
+      gap: 0.4em;
+    }
+
+    /* The open block's source, set in the reader's code face so it lines up with code blocks. */
+    & textarea[data-reader-editor] {
+      margin: 0 0 var(--reader-gap);
+      font-family: var(--reader-font-mono);
+      font-size: var(--reader-code-size);
+      line-height: var(--reader-line);
+      caret-color: var(--reader-text);
+    }
+  }
+}

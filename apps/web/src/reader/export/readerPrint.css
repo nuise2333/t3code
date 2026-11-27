@@ -112,26 +112,10 @@
       content: none;
     }
 
-    /* The file editor prints as the reading view: its source markers and raw blocks' source
-       stay off paper, and its text is set by the browser like the reader's. */
-    &[data-reader-editor] {
-      white-space: normal !important;
-
-      & :is(.reader-md-marker, .reader-md-gutter, [data-md-raw-source], .reader-md-indent) {
-        display: none !important;
-      }
-
-      & .reader-raw > .reader-raw-preview {
-        display: block !important;
-      }
-
-      & hr[data-md-gutter]::before {
-        content: none;
-      }
-
-      & .reader-ws-gone {
-        display: none !important;
-      }
+    /* The file editor prints as the reading view: the open block's source and the space for a
+       new block stay off paper. */
+    &[data-markdown-block-editor] :is(textarea, [data-markdown-block-append]) {
+      display: none !important;
     }
   }
 

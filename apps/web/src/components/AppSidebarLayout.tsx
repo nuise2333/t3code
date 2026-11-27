@@ -339,8 +339,13 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
         return;
       }
       if (
-        isRichTextBoldShortcut(event, window.getSelection()) &&
         event.target instanceof HTMLElement &&
+        isRichTextBoldShortcut(
+          event,
+          event.target instanceof HTMLTextAreaElement
+            ? { isCollapsed: event.target.selectionStart === event.target.selectionEnd }
+            : window.getSelection(),
+        ) &&
         event.target.closest('[data-composer-rich-text="true"], [data-reader-editor]')
       ) {
         // The rich-text composer and the Markdown file editor claim Mod+B only to bold

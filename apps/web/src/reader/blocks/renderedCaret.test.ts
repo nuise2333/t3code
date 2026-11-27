@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { renderedHitOffset } from "./rawBlockCaret";
+import { renderedHitOffset } from "./renderedCaret";
 
 const TABLE = "| Name | Value |\n| --- | :-: |\n| a \\| b | two words |\n| 1 | 1 |\n";
 

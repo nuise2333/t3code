@@ -438,11 +438,11 @@ describe("rendered Markdown editing", () => {
     localStorage.removeItem("t3code.renderMarkdownEditable");
     await using screen = await render(markdownPreview(false));
     await vi.waitFor(() =>
-      expect(screen.container.querySelector("[data-reader-editor]")).not.toBeNull(),
+      expect(screen.container.querySelector("[data-markdown-block-editor]")).not.toBeNull(),
     );
     await screen.rerender(markdownPreview(true));
     await vi.waitFor(() =>
-      expect(screen.container.querySelector("[data-reader-editor]")).toBeNull(),
+      expect(screen.container.querySelector("[data-markdown-block-editor]")).toBeNull(),
     );
     expect(screen.container.querySelector(".markdown-reader")).not.toBeNull();
   });
@@ -451,7 +451,7 @@ describe("rendered Markdown editing", () => {
     using _settings = setup();
     const screen = await render(markdownPreview(false, "Body text.\n"));
     await vi.waitFor(() =>
-      expect(screen.container.querySelector("[data-reader-editor]")).not.toBeNull(),
+      expect(screen.container.querySelector("[data-markdown-block-editor]")).not.toBeNull(),
     );
     await userEvent.click(screen.getByText("Body text."));
     await userEvent.keyboard("{End}!");
@@ -489,7 +489,9 @@ describe("rendered Markdown select all", () => {
       expect(selection).not.toContain("Transcript text from the chat thread.");
     };
 
+    // A pressed block opens as source; Escape closes it and leaves focus in the file.
     await userEvent.click(screen.getByText("Rendered file body."));
+    await userEvent.keyboard("{Escape}");
     await expectFileOnlySelection();
     // A toggled checkbox keeps focus on an input inside the preview.
     await userEvent.click(screen.getByRole("checkbox"));

@@ -1,88 +1,77 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import type { EditorState } from "@tiptap/pm/state";
-import type { EditorView } from "@tiptap/pm/view";
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
+import { Button } from "~/components/ui/button";
+import { toastManager } from "~/components/ui/toast";
 import { useClientSettings } from "~/hooks/useSettings";
 import { readLocalApi } from "~/localApi";
+import type { MarkdownBlock } from "~/reader/blocks/markdownBlocks";
+import { MarkdownBlockEditor } from "~/reader/blocks/MarkdownBlockEditor";
 import {
-  buildMarkdownFileDoc,
-  type MarkdownFileParse,
-  parseMarkdownFile,
-} from "~/reader/editor/markdownFileParse";
-import {
-  MARKDOWN_PARSE_WORKER_MIN_LENGTH,
-  type MarkdownParseRequest,
-  type MarkdownParseResponse,
-} from "~/reader/editor/markdownFileParseProtocol";
-import { serializeMarkdownFile } from "~/reader/editor/markdownFileSerialize";
-import { ReaderEditor, type ReaderEditorHandle } from "~/reader/editor/ReaderEditor";
+  BlockPreview,
+  BlockPreviewContext,
+  type BlockPreviewKind,
+} from "~/reader/blocks/BlockPreview";
 import { readerFileSurfaceKey } from "~/reader/navigation/readerOutlineStore";
 import { ReaderSurface } from "~/reader/navigation/ReaderSurface";
 import { useRightPanelStore } from "~/rightPanelStore";
+import { projectEnvironment } from "~/state/projects";
+import { useAtomCommand } from "~/state/use-atom-command";
 
 import { decideIncomingContents } from "./fileMarkdownPublish";
 import { FileMarkdownPreview, markdownFileBaseDir } from "./FileMarkdownPreview";
 import { changeFileSaveSession, type FileSaveTarget } from "./fileSaveSessions";
-import { FileSurfaceLoading } from "./fileSurfaceChrome";
+import { mergeThreeWay } from "./markdownConflict";
 import { setProjectFileQueryData } from "./projectFilesQueryState";
 
 // Keystrokes are published after a pause, and at once on blur, page hide and unmount.
 const PUBLISH_DELAY_MS = 150;
+// Blocks are parsed on the main thread; a file this long opens in source view instead.
+const LARGEST_BLOCK_EDIT = 512 * 1024;
 
-type Loaded =
-  | { readonly kind: "ready"; readonly doc: ProseMirrorNode; readonly source: string }
-  | { readonly kind: "failed"; readonly source: string };
-
-/** The document, or `failed` when it would not write the file back byte for byte. */
-function build(parse: MarkdownFileParse, source: string): Loaded {
-  try {
-    const doc = buildMarkdownFileDoc(parse);
-    if (serializeMarkdownFile(doc) === source) return { kind: "ready", doc, source };
-  } catch {
-    // Reported below as a file the rendered view cannot edit.
-  }
-  return { kind: "failed", source };
+export interface MarkdownEditorHandle {
+  readonly focus: () => void;
 }
 
-function parseNow(source: string, math: boolean): Loaded {
-  try {
-    return build(parseMarkdownFile(source, { math }), source);
-  } catch {
-    return { kind: "failed", source };
-  }
+const RAW_KINDS: Readonly<Record<string, BlockPreviewKind>> = {
+  yaml: "frontmatter",
+  toml: "frontmatter",
+  definition: "definition",
+  footnoteDefinition: "footnote",
+  html: "html",
+};
+
+function renderBlock(
+  block: MarkdownBlock,
+  text: string,
+  onTaskToggle: (markerOffset: number, checked: boolean) => void,
+) {
+  return (
+    <BlockPreview
+      kind={RAW_KINDS[block.kind] ?? "other"}
+      text={text}
+      onTaskListChange={({ markerOffset, checked }) => onTaskToggle(markerOffset, checked)}
+    />
+  );
 }
 
-let parseWorker: Worker | null = null;
-let nextParseId = 0;
-const parseRequests = new Map<number, (response: MarkdownParseResponse) => void>();
+function imageExtension(file: File) {
+  const fromName = /\.([a-z0-9]{1,5})$/i.exec(file.name)?.[1];
+  return (fromName ?? file.type.split("/")[1] ?? "png").toLowerCase().replace("jpeg", "jpg");
+}
 
-function parseOffThread(source: string, math: boolean): Promise<MarkdownParseResponse> {
-  if (!parseWorker) {
-    parseWorker = new Worker(
-      new URL("../../reader/editor/markdownFileParse.worker.ts", import.meta.url),
-      { type: "module" },
-    );
-    parseWorker.addEventListener("message", (event: MessageEvent<MarkdownParseResponse>) => {
-      parseRequests.get(event.data.id)?.(event.data);
-      parseRequests.delete(event.data.id);
-    });
-    // A worker that fails to load answers nothing; its requests fall back to the main thread.
-    parseWorker.addEventListener("error", () => {
-      for (const [id, resolve] of parseRequests) resolve({ id, ok: false, message: "worker" });
-      parseRequests.clear();
-      parseWorker = null;
-    });
-  }
-  nextParseId += 1;
-  const request: MarkdownParseRequest = { id: nextParseId, source, math };
-  const worker = parseWorker;
-  return new Promise((resolve) => {
-    parseRequests.set(request.id, resolve);
-    worker.postMessage(request, []);
-  });
+function pastedImageName(file: File, now: Date) {
+  const stamp = now.toISOString().replace(/\D/g, "").slice(0, 14);
+  return `image-${stamp}.${imageExtension(file)}`;
+}
+
+async function fileBase64(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  return btoa(binary);
 }
 
 /** A link's target: an external URL, or a path from the file's folder opened in the panel. */
@@ -109,9 +98,10 @@ function openFileLink(threadRef: ScopedThreadRef, cwd: string, relativePath: str
 }
 
 /**
- * A workspace Markdown file, edited in place in the reading view. It owns publishing to the
- * file's save session: keystrokes become the file's contents after a short pause, and new
- * contents from elsewhere are taken in unless unpublished keystrokes are newer.
+ * A workspace Markdown file, edited as ElyMark edits it: the file's text is the document, its
+ * blocks drawn as the reading view draws them, the pressed one open as source. Keystrokes become
+ * the file's contents after a pause; a change made elsewhere is taken in, merged with unpublished
+ * keystrokes when they don't overlap, and otherwise offered side by side.
  */
 export function FileMarkdownEditor(props: {
   readonly environmentId: EnvironmentId;
@@ -120,83 +110,87 @@ export function FileMarkdownEditor(props: {
   readonly contents: string;
   readonly threadRef: ScopedThreadRef;
   readonly workspaceMutationId: string | null;
-  readonly onViewChange?: ((view: EditorView | null) => void) | undefined;
+  readonly onViewChange?: ((handle: MarkdownEditorHandle | null) => void) | undefined;
 }) {
+  const { environmentId, cwd, relativePath, contents, threadRef } = props;
   const math = useClientSettings((settings) => settings.mathRenderingEnabled);
-  // Changing math rendering changes the grammar, so the document is built again.
-  return <FileMarkdownEditorBody key={String(math)} {...props} math={math} />;
-}
-
-function FileMarkdownEditorBody(props: {
-  readonly environmentId: EnvironmentId;
-  readonly cwd: string;
-  readonly relativePath: string;
-  readonly contents: string;
-  readonly threadRef: ScopedThreadRef;
-  readonly workspaceMutationId: string | null;
-  readonly onViewChange?: ((view: EditorView | null) => void) | undefined;
-  readonly math: boolean;
-}) {
-  const { environmentId, cwd, relativePath, contents, threadRef, math } = props;
-  const [initial] = useState(contents);
-  const isLarge = initial.length >= MARKDOWN_PARSE_WORKER_MIN_LENGTH;
-  const [loaded, setLoaded] = useState<Loaded | null>(() =>
-    isLarge ? null : parseNow(initial, math),
+  const [text, setText] = useState(contents);
+  const [externalRevision, setExternalRevision] = useState(0);
+  const [conflict, setConflict] = useState<{ readonly disk: string; readonly base: string } | null>(
+    null,
   );
-  const handleRef = useRef<ReaderEditorHandle | null>(null);
-  // The worker parses the first contents, so those are what the editor starts from either way.
+  const root = useRef<HTMLDivElement>(null);
   const status = useRef({
-    published: initial,
+    published: contents,
+    latest: contents,
     dirty: false,
+    conflicted: false,
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
   });
   const saveTarget: FileSaveTarget = { environmentId, cwd, relativePath };
+  const writeFile = useAtomCommand(projectEnvironment.writeFile, { reportFailure: false });
 
   const publish = useEffectEvent(() => {
     const current = status.current;
     clearTimeout(current.timer);
     current.timer = undefined;
-    const view = handleRef.current?.view;
-    if (!current.dirty || !view) return;
+    // Nothing is written over the disk's version until the conflict is settled.
+    if (!current.dirty || current.conflicted) return;
     current.dirty = false;
-    const next = serializeMarkdownFile(view.state.doc);
+    const next = current.latest;
     if (next === current.published) return;
     current.published = next;
     setProjectFileQueryData(environmentId, cwd, relativePath, next);
     changeFileSaveSession(saveTarget, next);
   });
 
-  const onChange = (_state: EditorState, external: boolean) => {
-    if (external) return;
+  const onTextChange = (next: string) => {
     const current = status.current;
+    setText(next);
+    current.latest = next;
     current.dirty = true;
     clearTimeout(current.timer);
     current.timer = setTimeout(publish, PUBLISH_DELAY_MS);
   };
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a large file parses in a worker, an external process whose answer arrives after mount
-  useEffect(() => {
-    if (!isLarge) return;
-    let isCurrent = true;
-    void parseOffThread(initial, math).then((response) => {
-      if (!isCurrent) return;
-      setLoaded(response.ok ? build(response.parse, initial) : parseNow(initial, math));
-    });
-    return () => {
-      isCurrent = false;
-    };
-  }, [initial, isLarge, math]);
+  const settle = () => {
+    setConflict(null);
+    status.current.conflicted = false;
+  };
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- new file contents from the panel (a save echo or a change elsewhere) are dispatched into the ProseMirror view, which lives outside React
+  const takeIn = (next: string) => {
+    setText(next);
+    status.current.latest = next;
+    status.current.published = next;
+    setExternalRevision((revision) => revision + 1);
+  };
+
+  const reconcile = useEffectEvent((contents: string) => {
+    const current = status.current;
+    const decision = decideIncomingContents(contents, current);
+    if (decision === "ignore") return;
+    if (decision === "apply") {
+      takeIn(contents);
+      return;
+    }
+    // Written elsewhere while keystrokes wait: merge them, or show both when they overlap.
+    const merged = mergeThreeWay(current.published, current.latest, contents);
+    if (merged.conflicts === 0) {
+      current.published = contents;
+      takeIn(merged.merged);
+      current.latest = merged.merged;
+      current.dirty = merged.merged !== contents;
+      if (current.dirty) publish();
+      return;
+    }
+    clearTimeout(current.timer);
+    current.conflicted = true;
+    setConflict({ disk: contents, base: current.published });
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- new file contents from the panel (a save echo or a change elsewhere) are reconciled with keystrokes not yet published, which live in a ref outside React
   useLayoutEffect(() => {
-    const editor = handleRef.current;
-    if (loaded?.kind !== "ready" || !editor) return;
-    const decision = decideIncomingContents(contents, status.current);
-    if (decision === "publish") publish();
-    if (decision !== "apply") return;
-    editor.applyExternal(contents);
-    status.current.published = contents;
-  }, [contents, loaded]);
+    reconcile(contents);
+  }, [contents]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the last keystrokes reach the save session before the page is hidden, and before the session's lease is released on unmount: layout cleanups run ahead of passive ones
   useLayoutEffect(() => {
@@ -208,17 +202,48 @@ function FileMarkdownEditorBody(props: {
     };
   }, []);
 
-  if (loaded === null) return <FileSurfaceLoading />;
-  if (loaded.kind === "failed") {
+  const onViewChange = useEffectEvent((handle: MarkdownEditorHandle | null) =>
+    props.onViewChange?.(handle),
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the panel focuses the editor from outside React (tree clicks, keyboard), through this handle
+  useLayoutEffect(() => {
+    onViewChange({
+      focus: () =>
+        root.current?.querySelector<HTMLElement>("[data-markdown-block-editor]")?.focus(),
+    });
+    return () => onViewChange(null);
+  }, []);
+
+  const pasteImage = async (file: File) => {
+    const folder = relativePath.includes("/")
+      ? relativePath.slice(0, relativePath.lastIndexOf("/") + 1)
+      : "";
+    const name = pastedImageName(file, new Date());
+    const result = await writeFile({
+      environmentId,
+      input: {
+        cwd,
+        relativePath: `${folder}assets/${name}`,
+        contents: await fileBase64(file),
+        encoding: "base64",
+        createIfMissing: true,
+      },
+    });
+    if (result._tag === "Success") return `assets/${name}`;
+    toastManager.add({ type: "error", title: "Could not save the pasted image" });
+    return null;
+  };
+
+  if (text.length > LARGEST_BLOCK_EDIT) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <p className="shrink-0 border-b px-3 py-1.5 text-2xs text-muted-foreground">
-          This file can't be edited in the rendered view; use source view.
+          This file is too long to edit by block; use source view to edit it.
         </p>
         <FileMarkdownPreview
           cwd={cwd}
           relativePath={relativePath}
-          text={contents}
+          text={text}
           threadRef={threadRef}
           workspaceMutationId={props.workspaceMutationId}
         />
@@ -226,22 +251,72 @@ function FileMarkdownEditorBody(props: {
     );
   }
   return (
-    <ReaderSurface surfaceKey={readerFileSurfaceKey(cwd, relativePath)}>
-      <ReaderEditor
-        doc={loaded.doc}
-        math={math}
-        preview={{
-          cwd,
-          imageBaseDir: markdownFileBaseDir(cwd, relativePath),
-          threadRef,
-          workspaceMutationId: props.workspaceMutationId,
-        }}
-        handleRef={handleRef}
-        onChange={onChange}
-        onBlur={publish}
-        onOpenLink={(href) => openFileLink(threadRef, cwd, relativePath, href)}
-        onViewChange={props.onViewChange}
-      />
-    </ReaderSurface>
+    <div ref={root} className="flex min-h-0 flex-1 flex-col">
+      {conflict ? (
+        <div
+          role="alert"
+          className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-warning/10 px-3 py-1.5 text-xs"
+        >
+          <span className="mr-auto">This file changed on disk while you were editing it.</span>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => {
+              settle();
+              status.current.published = conflict.disk;
+              status.current.dirty = true;
+              publish();
+            }}
+          >
+            Keep mine
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => {
+              settle();
+              status.current.dirty = false;
+              takeIn(conflict.disk);
+            }}
+          >
+            Use disk version
+          </Button>
+          <Button
+            size="xs"
+            onClick={() => {
+              const merged = mergeThreeWay(conflict.base, status.current.latest, conflict.disk);
+              settle();
+              takeIn(merged.merged);
+              status.current.published = conflict.disk;
+              status.current.latest = merged.merged;
+              status.current.dirty = true;
+              publish();
+            }}
+          >
+            Merge with markers
+          </Button>
+        </div>
+      ) : null}
+      <ReaderSurface surfaceKey={readerFileSurfaceKey(cwd, relativePath)}>
+        <BlockPreviewContext
+          value={{
+            cwd,
+            imageBaseDir: markdownFileBaseDir(cwd, relativePath),
+            threadRef,
+            workspaceMutationId: props.workspaceMutationId,
+          }}
+        >
+          <MarkdownBlockEditor
+            text={text}
+            math={math}
+            externalRevision={externalRevision}
+            onTextChange={onTextChange}
+            renderBlock={renderBlock}
+            onPasteImage={pasteImage}
+            onOpenLink={(href) => openFileLink(threadRef, cwd, relativePath, href)}
+          />
+        </BlockPreviewContext>
+      </ReaderSurface>
+    </div>
   );
 }

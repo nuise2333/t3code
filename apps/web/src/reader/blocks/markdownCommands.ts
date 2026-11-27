@@ -1,5 +1,5 @@
 import type { Nodes } from "mdast";
-import { parseMarkdownSyntax } from "../editor/markdownFileSyntax";
+import { parseMarkdownSyntax } from "./markdownSyntax";
 
 export { tableEdit, type TableOperation } from "./markdownTable";
 

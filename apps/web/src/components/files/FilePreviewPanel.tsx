@@ -46,6 +46,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import {
+  BookOpenIcon,
   FileDownIcon,
   FolderTree,
   Globe2,
@@ -116,9 +117,8 @@ import {
   retainedBreadcrumbTrail,
   trailChildOf,
 } from "./filePath";
-import type { EditorView } from "@tiptap/pm/view";
 
-import { FileMarkdownEditor } from "./FileMarkdownEditor";
+import { FileMarkdownEditor, type MarkdownEditorHandle } from "./FileMarkdownEditor";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { ReaderFindScope, type ReaderFindHandle } from "~/reader/find/ReaderFindScope";
 import {
@@ -206,6 +206,7 @@ const MermaidFilePreview = lazy(() =>
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
 // The rendered view became the editor; everyone starts there once under the new key.
 const RENDER_MARKDOWN_STORAGE_KEY = "t3code.renderMarkdownEditable";
+const MARKDOWN_READ_ONLY_STORAGE_KEY = "t3code.markdownReadOnly";
 const RENDER_BROWSER_FILE_STORAGE_KEY = "t3code.renderBrowserFile";
 const RENDER_TABLE_STORAGE_KEY = "t3code.renderTable";
 type FilePostRender = <LAnnotation>(
@@ -1084,7 +1085,7 @@ function RenderedMarkdownSurface({
   readOnly: boolean;
   workspaceMutationId: string | null;
   findRef: Ref<ReaderFindHandle>;
-  onEditorViewChange: (view: EditorView | null) => void;
+  onEditorViewChange: (handle: MarkdownEditorHandle | null) => void;
 }) {
   const saveTarget = { environmentId, cwd, relativePath };
   useFileSaveSession(saveTarget, onPendingChange);
@@ -1270,6 +1271,11 @@ export default function FilePreviewPanel({
     true,
     Schema.Boolean,
   );
+  const [markdownReadOnly, setMarkdownReadOnly] = useLocalStorage(
+    MARKDOWN_READ_ONLY_STORAGE_KEY,
+    false,
+    Schema.Boolean,
+  );
   const [renderBrowserFilePreferred, setRenderBrowserFilePreferred] = useLocalStorage(
     RENDER_BROWSER_FILE_STORAGE_KEY,
     true,
@@ -1342,7 +1348,7 @@ export default function FilePreviewPanel({
     file.data !== null &&
     !file.data.truncated;
   const contentFocusRef = useRef<HTMLDivElement>(null);
-  const markdownEditorRef = useRef<EditorView | null>(null);
+  const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
   const readerFindRef = useRef<ReaderFindHandle>(null);
   const readerOutline = useReaderOutlineToggle(readerFileSurfaceKey(cwd, relativePath ?? ""));
   const fileEditorRef = useRef<FileEditor | null>(null);
@@ -1368,8 +1374,8 @@ export default function FilePreviewPanel({
     focusEditorFromContent();
   };
   const handleEditorChangeStable = useStableCallback(handleEditorChange);
-  const handleMarkdownEditorChange = useStableCallback((view: EditorView | null) => {
-    markdownEditorRef.current = view;
+  const handleMarkdownEditorChange = useStableCallback((handle: MarkdownEditorHandle | null) => {
+    markdownEditorRef.current = handle;
     focusEditorFromContent();
   });
   const focusEditorOnTreeRowClickOrEnter = (event: {
@@ -1639,6 +1645,19 @@ export default function FilePreviewPanel({
               )}
             </FileSurfaceAction>
           ) : null}
+          {renderMarkdown &&
+          file.data !== null &&
+          !file.data.truncated &&
+          !isHostFile &&
+          canWriteFiles ? (
+            <FileSurfaceAction
+              label={markdownReadOnly ? "Edit document" : "Read only"}
+              pressed={markdownReadOnly}
+              onPress={() => setMarkdownReadOnly(!markdownReadOnly)}
+            >
+              <BookOpenIcon className="size-3.5" />
+            </FileSurfaceAction>
+          ) : null}
           {renderMarkdown && file.data !== null ? (
             <FileSurfaceAction
               label="Find in document"
@@ -1863,7 +1882,7 @@ export default function FilePreviewPanel({
                 threadRef={threadRef}
                 contents={file.data.contents}
                 workspaceMutationId={workspaceMutationId}
-                readOnly={file.data.truncated || isHostFile || !canWriteFiles}
+                readOnly={file.data.truncated || isHostFile || !canWriteFiles || markdownReadOnly}
                 onPendingChange={onPendingChange}
                 findRef={readerFindRef}
                 onEditorViewChange={handleMarkdownEditorChange}

@@ -92,7 +92,7 @@ const BLANK = /^[ \t\n\r\f]*$/u;
 export const ATOM_TEXT = "\ufffc";
 
 /** The engine sets left to right only; text with any right-to-left character stays with the browser. */
-export const hasRightToLeftText = (text: string) => RIGHT_TO_LEFT.test(text);
+const hasRightToLeftText = (text: string) => RIGHT_TO_LEFT.test(text);
 
 function hasMedia(node: ElementContent): boolean {
   if (node.type !== "element") return false;

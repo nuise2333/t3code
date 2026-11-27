@@ -127,8 +127,12 @@ export function ReaderSurface(props: {
           if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) {
             return;
           }
-          // The editor selects within itself.
-          if (event.target instanceof HTMLElement && event.target.isContentEditable) return;
+          // A field, such as the file editor's open block, selects within itself.
+          if (
+            event.target instanceof HTMLElement &&
+            (event.target.isContentEditable || event.target instanceof HTMLTextAreaElement)
+          )
+            return;
           event.preventDefault();
           event.stopPropagation();
           window.getSelection()?.selectAllChildren(content);
