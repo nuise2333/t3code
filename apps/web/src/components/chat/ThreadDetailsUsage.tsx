@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import type {
   ProviderInstanceId,
   ServerProvider,
@@ -28,12 +29,6 @@ import { deriveContextLayerRatios, deriveWindowQuotaStatus } from "./composerTel
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { OpticalContextVial } from "../../optical/OpticalContextVial";
 import { useOpticalConfig } from "../../optical/config";
-
-const PACE_LABEL: Record<LimitPace, string> = {
-  ahead: "Ahead of pace",
-  on: "On pace",
-  under: "Under pace",
-};
 
 export interface ThreadDetailsUsageInput {
   readonly providerInstanceId: ProviderInstanceId | null;
@@ -76,15 +71,16 @@ export function ProviderUsageLimitRows({
   readonly tooltipSide?: "top" | "bottom" | "left" | "right";
   readonly compactPadding?: boolean;
 }) {
+  const gt = useGT();
   const notice = limitsNotice(limits);
   return (
     <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
       {notice ? (
         <UsageRow
-          label="Limits"
+          label={gt("Limits")}
           fill={null}
           tone={null}
-          value="Unavailable"
+          value={gt("Unavailable")}
           tooltipSide={tooltipSide}
           compactPadding={compactPadding}
           tooltip={<span className="text-foreground">{notice}</span>}
@@ -104,7 +100,7 @@ export function ProviderUsageLimitRows({
           {(limits.balances ?? []).map((balance) => (
             <UsageRow
               key={`balance:${balance.currency}`}
-              label="Balance"
+              label={gt("Balance")}
               fill={null}
               tone={null}
               value={formatUsageBalance(balance)}
@@ -112,10 +108,11 @@ export function ProviderUsageLimitRows({
               compactPadding={compactPadding}
               tooltip={
                 <span className="text-foreground">
-                  Prepaid balance
                   {balance.granted
-                    ? `, ${formatUsageBalance({ ...balance, total: balance.granted })} granted`
-                    : ""}
+                    ? gt("Prepaid balance, {granted} granted", {
+                        granted: formatUsageBalance({ ...balance, total: balance.granted }),
+                      })
+                    : gt("Prepaid balance")}
                 </span>
               }
             />
@@ -246,6 +243,12 @@ function LimitRow({
   readonly tooltipSide?: "top" | "bottom" | "left" | "right";
   readonly compactPadding?: boolean;
 }) {
+  const gt = useGT();
+  const paceLabel: Record<LimitPace, string> = {
+    ahead: gt("Ahead of pace"),
+    on: gt("On pace"),
+    under: gt("Under pace"),
+  };
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const left = remainingPercent(window);
   const status = deriveWindowQuotaStatus(window);
@@ -259,21 +262,21 @@ function LimitRow({
       fill={left}
       tone={status === "low" ? "error" : status === "tight" ? "warning" : null}
       value={resetCountdown ? `${left}% · ${resetCountdown}` : `${left}%`}
-      ariaValue={`${left}% left`}
+      ariaValue={gt("{percent}% left", { percent: left })}
       tooltipSide={tooltipSide}
       compactPadding={compactPadding}
       tooltip={
         <>
           <span className="text-foreground">
-            {window.label}: {left}% left
+            {window.label}: {gt("{percent}% left", { percent: left })}
           </span>
           {window.resetsAt && resetsAt > now ? (
             <span className="text-muted-foreground">
-              Resets in {formatDuration(resetsAt - now)} ·{" "}
+              {gt("Resets in {duration}", { duration: formatDuration(resetsAt - now) })} ·{" "}
               {formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)}
             </span>
           ) : null}
-          {pace ? <span className="text-muted-foreground">{PACE_LABEL[pace]}</span> : null}
+          {pace ? <span className="text-muted-foreground">{paceLabel[pace]}</span> : null}
         </>
       }
     />

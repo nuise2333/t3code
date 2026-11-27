@@ -5,6 +5,7 @@ import {
   TOKEN_SAVER_PACKS,
   tokenSaverEstimate,
 } from "@t3tools/shared/tokenSaver";
+import { useGT } from "gt-react";
 import { InfoIcon, LeafIcon } from "lucide-react";
 import { memo, useId, useState } from "react";
 
@@ -37,6 +38,7 @@ export const ComposerTokenSaverControl = memo(function ComposerTokenSaverControl
   readonly onChange: (saver: TokenSaverSettings) => void;
   readonly onDefaultChange: (saver: TokenSaverSettings | null) => void;
 }) {
+  const gt = useGT();
   const size = props.size ?? "sm";
   const floatingProps = useComposerMenuProps();
   const [open, setOpen] = useState(false);
@@ -45,8 +47,48 @@ export const ComposerTokenSaverControl = memo(function ComposerTokenSaverControl
   const estimate = tokenSaverEstimate(props.saver, available);
   const label =
     active.length > 0
-      ? `Token saver: ${active.length} on, about ${estimate}% fewer tokens`
-      : "Token saver: off";
+      ? gt("Token saver: {count} on, about {estimate}% fewer tokens", {
+          count: active.length,
+          estimate,
+        })
+      : gt("Token saver: off");
+  const packCopy: Record<TokenSaverPack, { readonly title: string; readonly about: string }> = {
+    caveman: {
+      title: gt("Caveman"),
+      about: gt(
+        "Terse replies: answer first, no filler, every technical fact kept. Saves 15–65% of replies.",
+      ),
+    },
+    "lean-code": {
+      title: gt("Lean code"),
+      about: gt(
+        "Least code that works: reuse what exists, no speculative extras, diffs not whole files. Saves ~20–40% of code output (est.).",
+      ),
+    },
+    "quiet-tools": {
+      title: gt("Quiet tools"),
+      about: gt(
+        "Targeted searches, line ranges, quiet flags, no re-reading files. Saves ~20–50% of tool input (est.).",
+      ),
+    },
+    rtk: {
+      title: gt("RTK compression"),
+      about: gt(
+        "Runs commands through rtk, which compresses their output before the agent reads it. Saves 60–90% of command output.",
+      ),
+    },
+    economizer: {
+      title: gt("TokenEconomizer"),
+      about: gt(
+        "Learns from past sessions: keeps confirmed one-line repo notes, loads only tools it needs, and changes approach instead of repeating a failure. Saves ~18–31% per task (SWE-Bench).",
+      ),
+    },
+  };
+  const levelCopy: Record<TokenSaverLevel, { readonly label: string; readonly hint: string }> = {
+    lite: { label: gt("Lite"), hint: gt("Brief, normal grammar") },
+    full: { label: gt("Full"), hint: gt("Caveman voice") },
+    ultra: { label: gt("Ultra"), hint: gt("Telegraphic") },
+  };
   const isDefault = props.defaultSaver !== null && sameSaver(props.saver, props.defaultSaver);
   const levelId = useId();
   const toggle = (pack: TokenSaverPack, on: boolean) => {
@@ -91,29 +133,30 @@ export const ComposerTokenSaverControl = memo(function ComposerTokenSaverControl
         align="start"
         padding="compact"
         className="w-80"
-        aria-label="Token saver"
+        aria-label={gt("Token saver")}
         {...floatingProps}
       >
         <div className="grid gap-1" data-composer-token-saver-panel>
           <div className="flex items-baseline justify-between px-1 pb-1">
-            <span className="font-medium text-sm">Token saver</span>
+            <span className="font-medium text-sm">{gt("Token saver")}</span>
             <span className="text-muted-foreground text-xs tabular-nums">
-              {active.length > 0 ? `~${estimate}% fewer tokens` : "Off"}
+              {active.length > 0 ? gt("~{estimate}% fewer tokens", { estimate }) : gt("Off")}
             </span>
           </div>
           {TOKEN_SAVER_PACKS.map((pack) => {
             const on = props.saver.packs.includes(pack.id);
             const missing = pack.needs === "rtk" && !props.rtk;
+            const { title, about } = packCopy[pack.id];
             return (
               <div key={pack.id} className="grid gap-1.5 rounded-md px-1 py-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm">{pack.title}</span>
+                  <span className="text-sm">{title}</span>
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <button
                           type="button"
-                          aria-label={`About ${pack.title}`}
+                          aria-label={gt("About {title}", { title })}
                           className="inline-flex text-muted-foreground"
                         />
                       }
@@ -121,8 +164,10 @@ export const ComposerTokenSaverControl = memo(function ComposerTokenSaverControl
                       <InfoIcon className="size-3.5" />
                     </TooltipTrigger>
                     <TooltipPopup side="top" className="max-w-64">
-                      {pack.summary} Saves {pack.saves}.
-                      {missing ? " Install rtk (brew install rtk), then restart T3 Code." : ""}
+                      {about}
+                      {missing
+                        ? ` ${gt("Install rtk (brew install rtk), then restart T3 Code.")}`
+                        : ""}
                     </TooltipPopup>
                   </Tooltip>
                   <Switch
@@ -130,7 +175,7 @@ export const ComposerTokenSaverControl = memo(function ComposerTokenSaverControl
                     size="sm"
                     checked={on && !missing}
                     disabled={missing}
-                    aria-label={pack.title}
+                    aria-label={title}
                     onCheckedChange={(checked) => toggle(pack.id, checked)}
                   />
                 </div>
@@ -147,16 +192,16 @@ export const ComposerTokenSaverControl = memo(function ComposerTokenSaverControl
                     }}
                   >
                     <span id={levelId} className="sr-only">
-                      Caveman level
+                      {gt("Caveman level")}
                     </span>
-                    {TOKEN_SAVER_LEVELS.map((level) => (
+                    {TOKEN_SAVER_LEVELS.map(({ id }) => (
                       <ToggleGroupItem
-                        key={level.id}
-                        value={level.id}
+                        key={id}
+                        value={id}
                         className="flex-1"
-                        aria-label={`${level.label}: ${level.hint}`}
+                        aria-label={`${levelCopy[id].label}: ${levelCopy[id].hint}`}
                       >
-                        {level.label}
+                        {levelCopy[id].label}
                       </ToggleGroupItem>
                     ))}
                   </ToggleGroup>
@@ -170,7 +215,7 @@ export const ComposerTokenSaverControl = memo(function ComposerTokenSaverControl
                 checked={isDefault}
                 onCheckedChange={(checked) => props.onDefaultChange(checked ? props.saver : null)}
               />
-              <span className="truncate">Start new threads like this</span>
+              <span className="truncate">{gt("Start new threads like this")}</span>
             </label>
             <Button
               size="xs"
@@ -178,7 +223,7 @@ export const ComposerTokenSaverControl = memo(function ComposerTokenSaverControl
               disabled={props.saver.packs.length === 0}
               onClick={() => props.onChange({ ...props.saver, packs: [] })}
             >
-              Turn all off
+              {gt("Turn all off")}
             </Button>
           </div>
         </div>

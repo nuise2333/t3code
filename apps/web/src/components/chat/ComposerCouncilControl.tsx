@@ -5,6 +5,7 @@ import {
   type CouncilSettings,
 } from "@t3tools/contracts";
 import { formatCouncilScore } from "@t3tools/shared/council";
+import { useGT } from "gt-react";
 import { ScaleIcon } from "lucide-react";
 import { memo, useId, useState, type ReactNode } from "react";
 
@@ -66,13 +67,16 @@ export const ComposerCouncilControl = memo(function ComposerCouncilControl(props
   readonly onSettingsChange: (settings: CouncilSettings) => void;
   readonly onNewThreadsChange: (on: boolean) => void;
 }) {
+  const gt = useGT();
   const size = props.size ?? "sm";
   const floatingProps = useComposerMenuProps();
   const [open, setOpen] = useState(false);
   const { settings } = props;
   const label = props.on
-    ? `Council: on, every reviewer must reach ${formatCouncilScore(settings.target)}`
-    : "Council: off";
+    ? gt("Council: on, every reviewer must reach {target}", {
+        target: formatCouncilScore(settings.target),
+      })
+    : gt("Council: off");
   const change = (patch: Partial<CouncilSettings>) =>
     props.onSettingsChange({ ...settings, ...patch });
   return (
@@ -111,22 +115,28 @@ export const ComposerCouncilControl = memo(function ComposerCouncilControl(props
         align="start"
         padding="compact"
         className="w-80"
-        aria-label="Council"
+        aria-label={gt("Council")}
         {...floatingProps}
       >
         <div className="grid gap-3 px-1" data-composer-council-panel>
           <div className="grid gap-1">
             <div className="flex items-center justify-between gap-2">
-              <span className="font-medium text-sm">Council</span>
-              <Switch checked={props.on} aria-label="Council" onCheckedChange={props.onToggle} />
+              <span className="font-medium text-sm">{gt("Council")}</span>
+              <Switch
+                checked={props.on}
+                aria-label={gt("Council")}
+                onCheckedChange={props.onToggle}
+              />
             </div>
             <p className="text-muted-foreground text-xs">
               {props.note ??
-                "Reviewers score the work until all reach your target. The lead convenes them and fixes what they find; these become your defaults."}
+                gt(
+                  "Reviewers score the work until all reach your target. The lead convenes them and fixes what they find; these become your defaults.",
+                )}
             </p>
           </div>
           <Segments
-            label="Target score"
+            label={gt("Target score")}
             value={settings.target}
             options={COUNCIL_TARGETS.map((target) => ({
               value: target,
@@ -135,7 +145,7 @@ export const ComposerCouncilControl = memo(function ComposerCouncilControl(props
             onChange={(target) => change({ target })}
           />
           <Segments
-            label="Max rounds"
+            label={gt("Max rounds")}
             value={settings.maxRounds}
             options={COUNCIL_MAX_ROUNDS.map((rounds) => ({
               value: rounds,
@@ -144,10 +154,10 @@ export const ComposerCouncilControl = memo(function ComposerCouncilControl(props
             onChange={(maxRounds) => change({ maxRounds })}
           />
           <Segments<"auto" | number>
-            label="Reviewers"
+            label={gt("Reviewers")}
             value={settings.reviewers}
             options={[
-              { value: "auto", label: "Auto" },
+              { value: "auto", label: gt("Auto") },
               ...COUNCIL_REVIEWER_COUNTS.map((count) => ({ value: count, label: String(count) })),
             ]}
             onChange={(reviewers) => change({ reviewers })}
@@ -157,7 +167,7 @@ export const ComposerCouncilControl = memo(function ComposerCouncilControl(props
               checked={props.newThreadsOn}
               onCheckedChange={(checked) => props.onNewThreadsChange(checked === true)}
             />
-            Start new threads with Council on
+            {gt("Start new threads with Council on")}
           </label>
         </div>
       </PopoverPopup>

@@ -9,6 +9,7 @@ import type {
 import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
 import type { ThreadStructureVisibleTurnItem } from "@t3tools/client-runtime/state/models";
 import { limitsNotice } from "@t3tools/shared/usageLimits";
+import { useGT } from "gt-react";
 import { Minimize2Icon } from "lucide-react";
 import { memo, useState } from "react";
 
@@ -21,7 +22,6 @@ import { providerClients } from "../settings/providerDriverMeta";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import {
   deriveComposerTelemetry,
@@ -34,11 +34,7 @@ import { ProviderUsageLimitRows, resolveProviderInstanceLimits } from "./ThreadD
 
 const RING_RADIUS = 5.5;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-const SLICE_META = [
-  { label: "System", fullLabel: "System & Rules", colorClass: "bg-primary/55" },
-  { label: "Messages", fullLabel: "Messages", colorClass: "bg-primary" },
-  { label: "Tools", fullLabel: "Tool Output", colorClass: "bg-info" },
-] as const;
+const SLICE_COLORS = ["bg-primary/55", "bg-primary", "bg-info"] as const;
 
 const QUOTA_BADGE_CLASS: Record<QuotaStatusKind, string> = {
   low: "bg-error-surface text-error-foreground",
@@ -125,6 +121,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
   compactDisabled,
   onCompactContext,
 }: ComposerTelemetryVialProps) {
+  const gt = useGT();
   const [open, setOpen] = useState(false);
   const [hoveredSlice, setHoveredSlice] = useState<number>(-1);
   const [pickedQuotaInstance, setPickedQuotaInstance] = useState<string | null>(null);
@@ -142,6 +139,17 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
 
   if (!telemetry || !contextWindow) return null;
 
+  const sliceMeta = [
+    { label: gt("System"), fullLabel: gt("System & Rules"), colorClass: SLICE_COLORS[0] },
+    { label: gt("Messages"), fullLabel: gt("Messages"), colorClass: SLICE_COLORS[1] },
+    { label: gt("Tools"), fullLabel: gt("Tool Output"), colorClass: SLICE_COLORS[2] },
+  ];
+  const quotaLabel: Record<QuotaStatusKind, string> = {
+    low: gt("Low quota"),
+    tight: gt("Tight"),
+    ok: gt("Healthy"),
+  };
+
   const sources = usageLimitSources ?? serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES;
   // Every enabled agent that reports limits gets a tab, like Antigravity's; the thread's own one leads.
   const quotaProviders = providers
@@ -155,7 +163,9 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
       });
       if (!providerLimits) return [];
       const name =
-        provider.displayName?.trim() || providerClients.get(provider.driver)?.label || "Provider";
+        provider.displayName?.trim() ||
+        providerClients.get(provider.driver)?.label ||
+        gt("Provider");
       return [{ instanceId: provider.instanceId, name, limits: providerLimits }];
     })
     .toSorted(
@@ -168,7 +178,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
     quotaProviders[0] ??
     null;
   const limits = shownQuota?.limits ?? null;
-  const providerDisplayName = shownQuota?.name ?? "Provider";
+  const providerDisplayName = shownQuota?.name ?? gt("Provider");
   const quotaStatus =
     limits && limitsNotice(limits) === null ? deriveQuotaStatus(limits.windows) : null;
 
@@ -190,15 +200,15 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
 
   const ariaSummary = [
     telemetry.usedPercent !== null
-      ? `Context window ${telemetry.usedPercent}% used`
-      : `Context window ${usedTokensText} tokens used`,
+      ? gt("Context window {percent}% used", { percent: telemetry.usedPercent })
+      : gt("Context window {tokens} tokens used", { tokens: usedTokensText }),
     tpsText,
-    cacheText ? `cache ${cacheText}` : null,
+    cacheText ? gt("cache {rate}", { rate: cacheText }) : null,
   ]
     .filter(Boolean)
     .join(", ");
 
-  const activeSliceMeta = hoveredSlice >= 0 ? SLICE_META[hoveredSlice] : null;
+  const activeSliceMeta = hoveredSlice >= 0 ? sliceMeta[hoveredSlice] : null;
   const activeSliceRatio = hoveredSlice >= 0 ? (telemetry.ratios[hoveredSlice] ?? 0) : 0;
   const activeSliceTokens =
     telemetry.maxTokens !== null
@@ -259,7 +269,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
             data-composer-telemetry-cache="true"
             className="hidden items-baseline gap-1 whitespace-nowrap @xl/composer-surface:inline-flex"
           >
-            <span className="text-2xs text-muted-foreground">cache</span>
+            <span className="text-2xs text-muted-foreground">{gt("cache")}</span>
             <span className="font-medium text-foreground/85">{cacheText}</span>
           </span>
         ) : null}
@@ -308,7 +318,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
           <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
             <div className="flex flex-col items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-1.5 py-2">
               <div className="flex w-full items-baseline justify-between px-0.5 text-2xs tabular-nums">
-                <span className="font-medium tracking-wide text-muted-foreground">CTX</span>
+                <span className="font-medium tracking-wide text-muted-foreground">{gt("CTX")}</span>
                 <span
                   className={cn(
                     "font-semibold",
@@ -334,13 +344,13 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                 className="h-36 w-20 shrink-0"
               />
               <span className="max-w-full truncate text-2xs text-muted-foreground tabular-nums">
-                {tpsText ?? (isStreaming ? "Streaming" : "Idle")}
+                {tpsText ?? (isStreaming ? gt("Streaming") : gt("Idle"))}
               </span>
             </div>
 
             <div className="flex min-w-0 flex-col justify-between gap-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-foreground">Context window</span>
+                <span className="text-xs font-medium text-foreground">{gt("Context window")}</span>
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -352,15 +362,15 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                           onClick={handleCompactClick}
                         >
                           <Minimize2Icon className="size-3" aria-hidden="true" />
-                          Compact
+                          {gt("Compact")}
                         </Button>
                       </span>
                     }
                   />
                   <TooltipPopup side="top">
                     {compactDisabled
-                      ? "Compaction is unavailable right now"
-                      : "Summarize conversation history (/compact)"}
+                      ? gt("Compaction is unavailable right now")
+                      : gt("Summarize conversation history (/compact)")}
                   </TooltipPopup>
                 </Tooltip>
               </div>
@@ -369,23 +379,25 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-sm font-semibold text-foreground">
                     {telemetry.usedPercent !== null
-                      ? `${telemetry.usedPercent}% used`
-                      : `${usedTokensText} used`}
+                      ? gt("{percent}% used", { percent: telemetry.usedPercent })
+                      : gt("{tokens} used", { tokens: usedTokensText })}
                   </span>
                   {telemetry.remainingPercent !== null ? (
                     <span className="text-xs text-muted-foreground">
-                      · {telemetry.remainingPercent}% left
+                      · {gt("{percent}% left", { percent: telemetry.remainingPercent })}
                     </span>
                   ) : null}
                 </div>
                 <span className="text-xs text-muted-foreground">
                   {maxTokensText
-                    ? `${usedTokensText} / ${maxTokensText} tokens`
-                    : `${usedTokensText} tokens`}
+                    ? gt("{used} / {max} tokens", { used: usedTokensText, max: maxTokensText })
+                    : gt("{tokens} tokens", { tokens: usedTokensText })}
                 </span>
                 {autoCompactThreshold !== null && autoCompactThreshold > 0 ? (
                   <span className="text-2xs text-muted-foreground">
-                    {formatContextWindowCompactionMessage(autoCompactThreshold)}
+                    {gt("Compacts automatically at about {tokens} tokens.", {
+                      tokens: autoCompactThreshold.toLocaleString("en-US"),
+                    })}
                   </span>
                 ) : null}
               </div>
@@ -393,10 +405,10 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
               <div className="flex flex-col gap-1.5">
                 <div
                   role="group"
-                  aria-label="Estimated context breakdown"
+                  aria-label={gt("Estimated context breakdown")}
                   className="relative flex h-2 w-full overflow-hidden rounded-full bg-muted"
                 >
-                  {SLICE_META.map((slice, index) => {
+                  {sliceMeta.map((slice, index) => {
                     const ratio = telemetry.ratios[index] ?? 0;
                     if (ratio <= 0.001) return null;
                     return (
@@ -425,7 +437,7 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1">
-                  {SLICE_META.map((slice, index) => {
+                  {sliceMeta.map((slice, index) => {
                     const ratio = telemetry.ratios[index] ?? 0;
                     const isActive = hoveredSlice === index;
                     return (
@@ -465,16 +477,16 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                     </span>
                   ) : (
                     <span>
-                      {[tpsText, cacheText ? `Cache ${cacheText}` : null]
+                      {[tpsText, cacheText ? gt("Cache {rate}", { rate: cacheText }) : null]
                         .filter(Boolean)
-                        .join(" · ") || "Estimated layer breakdown"}
+                        .join(" · ") || gt("Estimated layer breakdown")}
                     </span>
                   )}
                 </div>
               </div>
 
               <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-1.5 text-2xs">
-                <span className="shrink-0 text-muted-foreground">Model</span>
+                <span className="shrink-0 text-muted-foreground">{gt("Model")}</span>
                 <span className="truncate font-medium text-foreground">{modelLabel}</span>
               </div>
             </div>
@@ -497,12 +509,16 @@ export const ComposerTelemetryVial = memo(function ComposerTelemetryVial({
                       QUOTA_BADGE_CLASS[quotaStatus.status],
                     )}
                   >
-                    {quotaStatus.label}
+                    {quotaLabel[quotaStatus.status]}
                   </span>
                 ) : null}
               </div>
               {quotaProviders.length > 1 ? (
-                <div role="tablist" aria-label="Provider quotas" className="flex flex-wrap gap-1">
+                <div
+                  role="tablist"
+                  aria-label={gt("Provider quotas")}
+                  className="flex flex-wrap gap-1"
+                >
                   {quotaProviders.map((entry) => {
                     const selected = entry.instanceId === shownQuota.instanceId;
                     return (
