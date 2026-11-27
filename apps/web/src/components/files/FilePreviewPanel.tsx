@@ -1636,8 +1636,9 @@ export default function FilePreviewPanel({
               onPress={() =>
                 void defaultAppOpener.activate("open", {
                   environmentId,
-                  filePath: absolutePath,
-                  workspaceRoot: undefined,
+                  // The menu resolves a relative name against a root; split so host files resolve too.
+                  filePath: absolutePath.slice(absolutePath.search(/[^\\/]*$/)),
+                  workspaceRoot: absolutePath.slice(0, absolutePath.search(/[^\\/]*$/)),
                 })
               }
             >
