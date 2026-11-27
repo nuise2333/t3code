@@ -150,6 +150,7 @@ import type { useQueuedRunEdit } from "./useQueuedRunEdit";
 import type { useTimelineFollow } from "./useTimelineFollow";
 import type { useUsageLimitsPanel } from "./useUsageLimitsPanel";
 import type { useWorktreeSetup } from "./useWorktreeSetup";
+import { newThreadModelSelection } from "./agentTeamPick.logic";
 
 const ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE = 3;
 
@@ -1342,6 +1343,16 @@ export function useComposerSend(input: ComposerSendInput) {
       // A new thread starts with the token saver and Council picked on its draft, if any.
       const draftAssists =
         isLocalDraftThread && draftId ? appAtomRegistry.get(draftThreadAssistsAtom(draftId)) : {};
+      const launchModelSelection = isLocalDraftThread
+        ? newThreadModelSelection({
+            shown: ctxSelectedModelSelection,
+            draftTeam: draftAssists.agentTeam,
+            rememberedKind: launchServerConfig?.settings.agentTeamDefault,
+            leads: launchServerConfig?.settings.agentTeamLeads,
+            modelPicked: draftBeforePreparation?.modelSelectionExplicit === true,
+            routingGroupId: draftBeforePreparation?.routingGroupId,
+          })
+        : ctxSelectedModelSelection;
       const startPromise = startThreadTurn({
         environmentId,
         input: {
@@ -1357,7 +1368,7 @@ export function useComposerSend(input: ComposerSendInput) {
               ),
             }),
           },
-          modelSelection: ctxSelectedModelSelection,
+          modelSelection: launchModelSelection,
           titleSeed: title,
           runtimeMode,
           interactionMode: DEFAULT_INTERACTION_MODE,

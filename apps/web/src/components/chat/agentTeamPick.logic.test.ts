@@ -9,6 +9,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   agentTeamLeadPatch,
+  newThreadModelSelection,
+  leadReachable,
   AUTO_TEAM_TEXT,
   leadSelectionToApply,
   modelPickTeamExit,
@@ -97,5 +99,43 @@ describe("automatic team text", () => {
     const translate = (text: string) => `zh:${text}`;
     expect(teamDisplayName({ id: "auto-best", name: "Best team" }, translate)).toBe("zh:Best team");
     expect(teamDisplayName({ id: "content", name: "Best team" }, translate)).toBe("Best team");
+  });
+});
+
+describe("newThreadModelSelection", () => {
+  const shown = { instanceId: ProviderInstanceId.make("codex"), model: "shown" };
+  const lead = { instanceId: ProviderInstanceId.make("claude"), model: "lead", options: [] };
+  const base = {
+    shown,
+    draftTeam: undefined,
+    rememberedKind: "balanced" as const,
+    leads: { balanced: lead },
+    modelPicked: false,
+    routingGroupId: null,
+  };
+  it("starts a draft on the remembered automatic team on its lead", () => {
+    expect(newThreadModelSelection(base)).toStrictEqual(lead);
+  });
+  it("keeps what the user picked: a model, a routing group, a team choice, or no lead", () => {
+    expect(newThreadModelSelection({ ...base, modelPicked: true })).toStrictEqual(shown);
+    expect(newThreadModelSelection({ ...base, routingGroupId: "fast" })).toStrictEqual(shown);
+    expect(newThreadModelSelection({ ...base, draftTeam: null })).toStrictEqual(shown);
+    expect(newThreadModelSelection({ ...base, draftTeam: { id: "auto-best" } })).toStrictEqual(
+      shown,
+    );
+    expect(newThreadModelSelection({ ...base, leads: {} })).toStrictEqual(shown);
+    expect(newThreadModelSelection({ ...base, rememberedKind: null })).toStrictEqual(shown);
+  });
+});
+
+describe("leadReachable", () => {
+  const lead = { instanceId: ProviderInstanceId.make("claude"), model: "lead" };
+  const entry = { instanceId: "claude", driverKind: "claudeAgent", enabled: true, installed: true };
+  it("joins only when the thread can switch to the lead", () => {
+    expect(leadReachable(lead, [entry], null)).toBe(true);
+    expect(leadReachable(lead, [], null)).toBe(false);
+    expect(leadReachable(lead, [{ ...entry, enabled: false }], null)).toBe(false);
+    expect(leadReachable(lead, [entry], "codex")).toBe(false);
+    expect(leadReachable(lead, [entry], "claudeAgent")).toBe(true);
   });
 });

@@ -97,3 +97,43 @@ export function agentTeamLeadPatch(
     },
   };
 }
+
+/**
+ * The model a new thread starts on. A draft on the remembered automatic team, never given a
+ * model or a routing group by hand, starts on that team's lead; anything picked stays picked.
+ */
+export function newThreadModelSelection(input: {
+  readonly shown: ModelSelection;
+  /** The draft's own team choice: undefined until the user picks or leaves a team on it. */
+  readonly draftTeam: { readonly id: string } | null | undefined;
+  readonly rememberedKind: AutoTeamKind | null | undefined;
+  readonly leads: AgentTeamLeads | undefined;
+  readonly modelPicked: boolean;
+  readonly routingGroupId: string | null | undefined;
+}): ModelSelection {
+  if (input.draftTeam !== undefined || input.modelPicked || input.routingGroupId) {
+    return input.shown;
+  }
+  const kind = input.rememberedKind ?? null;
+  return (kind === null ? undefined : input.leads?.[kind]) ?? input.shown;
+}
+
+/** Whether a started thread can switch to the lead; one that cannot must not join the team. */
+export function leadReachable(
+  lead: ModelSelection,
+  entries: ReadonlyArray<{
+    readonly instanceId: string;
+    readonly driverKind: string;
+    readonly enabled: boolean;
+    readonly installed: boolean;
+  }>,
+  lockedProvider: string | null,
+): boolean {
+  const entry = entries.find((candidate) => candidate.instanceId === lead.instanceId);
+  return (
+    entry !== undefined &&
+    entry.enabled &&
+    entry.installed &&
+    (lockedProvider === null || entry.driverKind === lockedProvider)
+  );
+}

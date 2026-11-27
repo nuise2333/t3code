@@ -69,6 +69,7 @@ import type { useComposerProviderModel } from "./useComposerProviderModel";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 import {
   agentTeamLeadPatch,
+  leadReachable,
   leadSelectionToApply,
   modelPickTeamExit,
   teamDisplayName,
@@ -442,6 +443,8 @@ export function ComposerControlsBar(props: {
       onProviderModelSelect(...args);
     },
   );
+  const canRunOn = (lead: ModelSelection) =>
+    leadReachable(lead, providerInstanceEntries, lockedProvider);
   // The thread runs on its team's lead. Not a pick in the model list, so it leaves no team.
   const runOnLead = (lead: ModelSelection | null) => {
     if (lead === null) return;
@@ -471,6 +474,8 @@ export function ComposerControlsBar(props: {
     const team = AUTO_TEAMS.find((candidate) => candidate.kind === kind);
     if (!team) return;
     const ref = { id: team.id, name: team.name };
+    const lead = teamLeadSelection({ kind: "auto", auto: kind }, agentTeamLeads);
+    if (routeKind === "server" && lead !== null && !canRunOn(lead)) return;
     updateSettings({ agentTeamDefault: kind });
     if (routeKind !== "server") {
       if (pickedGroup?.team) clearPickedGroup();
@@ -478,7 +483,7 @@ export function ComposerControlsBar(props: {
     } else {
       setThreadTeam(ref);
     }
-    runOnLead(teamLeadSelection({ kind: "auto", auto: kind }, agentTeamLeads));
+    runOnLead(lead);
   });
   const setAutoTeamLead = useStableCallback((kind: AutoTeamKind, lead: ModelSelection) => {
     updateSettings(agentTeamLeadPatch(agentTeamLeads, kind, lead));
@@ -493,6 +498,7 @@ export function ComposerControlsBar(props: {
       setDraftTeam(ref);
       return;
     }
+    if (!canRunOn(lead)) return;
     runOnLead(lead);
     setThreadTeam(ref);
   };

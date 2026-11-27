@@ -3296,8 +3296,8 @@ describe("effort routing", () => {
     return Effect.gen(function* () {
       const { thread } = yield* launchedThread(planLaunch("assist-defaults"));
       assert.deepStrictEqual(thread.agentTeam, { id: "auto-balanced", name: "Balanced team" });
-      // The automatic team's thread runs on the lead the user set for it.
-      assert.deepStrictEqual(thread.modelSelection, balancedLead);
+      // The server keeps the launch's model: the client picks a team's lead, so a pick stays picked.
+      assert.deepStrictEqual(thread.modelSelection, modelSelection);
       assert.deepStrictEqual(thread.tokenSaver?.packs, ["caveman", "quiet-tools"]);
       assert.include(thread.council, { target: 8.5, maxRounds: 5, reviewers: 3 });
       // The launch's own choice wins, and null starts it off.
