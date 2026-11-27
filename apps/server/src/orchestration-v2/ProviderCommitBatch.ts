@@ -18,11 +18,11 @@ export const enabled = Config.Boolean("T3CODE_PROVIDER_COMMIT_BATCHING").pipe(
   Effect.orDie,
 );
 
-const isSnapshot = (event: { readonly type: string }) =>
+const isSnapshot = (event: { readonly type: string; readonly plan?: { readonly kind: string } }) =>
   event.type === "node.updated" ||
   event.type === "message.updated" ||
   event.type === "turn_item.updated" ||
-  event.type === "plan.updated";
+  (event.type === "plan.updated" && event.plan?.kind === "todo_list");
 
 export class CommitBatchError extends Schema.TaggedError<CommitBatchError>()("CommitBatchError", {
   cause: Schema.Defect(),

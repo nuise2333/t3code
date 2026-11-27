@@ -630,12 +630,15 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     }
 
     if (item.type === "proposed_plan") {
-      const plan = planById.get(item.planId);
+      const artifact = planById.get(item.planId);
+      const plan = artifact?.kind === "proposed_plan" ? artifact : undefined;
       const proposedPlan = {
         id: item.planId,
         runId: item.runId,
         planMarkdown: item.markdown,
-        status: plan?.kind === "proposed_plan" ? plan.status : ("active" as const),
+        status: plan?.status ?? ("active" as const),
+        ...(plan?.revision === undefined ? {} : { revision: plan.revision }),
+        ...(plan?.previousPlanId === undefined ? {} : { previousPlanId: plan.previousPlanId }),
         createdAt,
         updatedAt: DateTime.formatIso(item.updatedAt),
       };
@@ -906,7 +909,7 @@ function canRederiveInPlace(
   );
 }
 
-/** Entries read only each plan's status; streaming plans rebuild artifacts with every delta. */
+/** Entries read only each plan's status and revision; streaming plans rebuild artifacts with every delta. */
 function samePlanStatuses(
   next: TimelineEntriesInput["plans"],
   previous: TimelineEntriesInput["plans"],
@@ -915,7 +918,14 @@ function samePlanStatuses(
   if (next === undefined || previous === undefined || next.length !== previous.length) return false;
   return next.every((plan, index) => {
     const before = previous[index]!;
-    return plan.id === before.id && plan.kind === before.kind && plan.status === before.status;
+    if (plan.id !== before.id || plan.kind !== before.kind || plan.status !== before.status) {
+      return false;
+    }
+    return (
+      plan.kind !== "proposed_plan" ||
+      before.kind !== "proposed_plan" ||
+      (plan.revision === before.revision && plan.previousPlanId === before.previousPlanId)
+    );
   });
 }
 

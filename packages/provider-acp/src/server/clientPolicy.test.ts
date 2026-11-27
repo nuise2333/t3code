@@ -122,6 +122,19 @@ describe("acpPermissionDisposition", () => {
     }
   });
 
+  it("denies plan-mode mutations and execution even under full access", () => {
+    const planPolicy: AcpRuntimePolicy = {
+      runtimeMode: "full-access",
+      interactionMode: "plan",
+      cwd,
+    };
+    for (const kind of ["edit", "delete", "move", "execute", "switch_mode"] as const) {
+      assert.equal(acpPermissionDisposition(planPolicy, permissionRequest(kind)), "deny");
+    }
+    assert.equal(acpPermissionDisposition(planPolicy, permissionRequest("read")), "allow");
+    assert.equal(acpClientExecuteDisposition(planPolicy), "deny");
+  });
+
   it.effect("denies mutations through workspace symlinks that escape the writable roots", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

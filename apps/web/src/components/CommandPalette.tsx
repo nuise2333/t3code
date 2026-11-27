@@ -82,6 +82,7 @@ import {
   PlugIcon,
   SquarePenIcon,
   TextSearchIcon,
+  ListChecksIcon,
   UserPlusIcon,
   ZoomInIcon,
   ZoomOutIcon,
@@ -290,6 +291,7 @@ import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindin
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
 import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { useGT } from "gt-react";
 import { setSidebarMode } from "./sidebar/sidebarMode";
 import { suggestAppAccessForRemote } from "./sourceControlAppAccessToast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -435,6 +437,12 @@ function OpenCommandPaletteDialog(props: {
   ) => void;
   readonly initialContext: CommandPaletteReturnContext | undefined;
 }) {
+  const gt = useGT();
+  const paletteComposerRef = useComposerHandleContext();
+  const togglePlanMode = useStableCallback(async () => {
+    if (paletteComposerRef?.current?.togglePlanMode() === true) return;
+    toastManager.add({ type: "warning", title: gt("This model has no plan mode") });
+  });
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { openChildSearch, setOpen } = props;
@@ -1420,6 +1428,17 @@ function OpenCommandPaletteDialog(props: {
       run: async () => {
         openThreadFind(activeThreadKey);
       },
+    });
+  }
+
+  if (activeThread || activeDraftThread) {
+    actionItems.push({
+      kind: "action",
+      value: "action:toggle-plan-mode",
+      title: gt("Toggle plan mode"),
+      searchTerms: ["plan", "plan mode", "planning", "build", "计划", "计划模式"],
+      icon: <ListChecksIcon className={ITEM_ICON_CLASS} />,
+      run: togglePlanMode,
     });
   }
 

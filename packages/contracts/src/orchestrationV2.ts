@@ -1506,6 +1506,9 @@ export const OrchestrationV2PlanArtifact = Schema.Union([
     ...OrchestrationV2PlanArtifactBaseFields,
     kind: Schema.Literal("proposed_plan"),
     markdown: Schema.String,
+    /** The active plan on the same thread this one revised; absent for a first draft. */
+    previousPlanId: Schema.optional(PlanId),
+    revision: Schema.optional(PositiveInt),
   }),
   Schema.Struct({
     ...OrchestrationV2PlanArtifactBaseFields,

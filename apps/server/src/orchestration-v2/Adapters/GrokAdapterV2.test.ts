@@ -7,6 +7,7 @@ import {
   RunAttemptId,
   RunId,
   type OrchestrationV2UserInputQuestion,
+  type OrchestrationV2PlanArtifact,
   type OrchestrationV2RuntimeRequest,
   ProviderInstanceId,
   ProviderSessionId,
@@ -364,6 +365,14 @@ describe("Grok launch permission mode", () => {
       ]);
     }),
   );
+
+  it.effect("launches native Plan even with Full access selected", () =>
+    Effect.gen(function* () {
+      assert.deepEqual(yield* launchArgs(policy("full-access", { interactionMode: "plan" })), [
+        ["--permission-mode", "plan", "agent", "stdio"],
+      ]);
+    }),
+  );
 });
 
 describe("Grok native questions", () => {
@@ -378,14 +387,15 @@ describe("Grok native questions", () => {
     layerHost,
   );
 
-  it.live("keeps x.ai multi-select questions live and returns all selected answers", () =>
+  it.live("resumes in Plan, answers Grok's question and captures the plan for review", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const workspace = yield* fs.makeTempDirectoryScoped({ prefix: "grok-multi-select-" });
       const questionText = "Which changes should be included?";
-      const transcript: AcpReplayTranscript = {
+      const markdown = "# Retry plan\n\nAdd backoff and cover it with tests.";
+      const transcript = {
         provider: GROK_PROVIDER,
         protocol: "acp.ndjson-jsonrpc",
         version: "1",
@@ -412,14 +422,14 @@ describe("Grok native questions", () => {
           {
             type: "expect_outbound",
             label: "session.new",
-            frame: { kind: "request", method: "session/new", params: "<any>" },
+            frame: { kind: "request", method: "session/load", params: "<any>" },
           },
           {
             type: "emit_inbound",
             label: "session.created",
             frame: {
               kind: "response",
-              method: "session/new",
+              method: "session/load",
               result: {
                 sessionId: "grok-multi-select-session",
                 models: {
@@ -445,7 +455,7 @@ describe("Grok native questions", () => {
                 params: {
                   sessionId: "grok-multi-select-session",
                   toolCallId: "grok-question",
-                  mode: "default",
+                  mode: "plan",
                   questions: [
                     {
                       id: "changes",
@@ -472,6 +482,26 @@ describe("Grok native questions", () => {
           },
           {
             type: "emit_inbound",
+            frame: {
+              kind: "request",
+              method: "_x.ai/exit_plan_mode",
+              params: {
+                sessionId: "grok-multi-select-session",
+                toolCallId: "plan",
+                planContent: markdown,
+              },
+            },
+          },
+          {
+            type: "expect_outbound",
+            frame: {
+              kind: "response",
+              method: "_x.ai/exit_plan_mode",
+              result: { outcome: "request_changes", feedback: "<any>" },
+            },
+          },
+          {
+            type: "emit_inbound",
             label: "complete",
             frame: {
               kind: "response",
@@ -480,8 +510,17 @@ describe("Grok native questions", () => {
             },
           },
         ],
+      } satisfies AcpReplayTranscript;
+      const initialTranscript: AcpReplayTranscript = {
+        ...transcript,
+        entries: transcript.entries
+          .slice(0, 4)
+          .map((entry) =>
+            entry.frame.method === "session/load"
+              ? { ...entry, frame: { ...entry.frame, method: "session/new" } }
+              : entry,
+          ),
       };
-      const statusPath = path.join(workspace, "status.json");
       const scriptPath = yield* path.fromFileUrl(
         new URL("../../../scripts/acp-replay-agent.ts", import.meta.url),
       );
@@ -493,14 +532,17 @@ describe("Grok native questions", () => {
         environment: {},
         hostPlatform: "darwin",
         selfInvocation: yield* resolveSelfInvocation(),
-        makeRuntime: makeAcpReplayRuntime({
-          transcript,
-          statusPath,
-          scriptPath,
-          childProcessSpawner,
-          fileSystem: fs,
-          initializeMeta: GROK_ACP_INITIALIZE_META,
-        }),
+        makeRuntime: (input) => {
+          const mode = input.runtimePolicy.interactionMode;
+          return makeAcpReplayRuntime({
+            transcript: mode === "plan" ? transcript : initialTranscript,
+            statusPath: path.join(workspace, `${mode}.json`),
+            scriptPath,
+            childProcessSpawner,
+            fileSystem: fs,
+            initializeMeta: GROK_ACP_INITIALIZE_META,
+          })(input);
+        },
       });
       const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
         runtimeMode: "approval-required",
@@ -522,6 +564,7 @@ describe("Grok native questions", () => {
       const question = yield* Deferred.make<OrchestrationV2UserInputQuestion>();
       const request = yield* Deferred.make<OrchestrationV2RuntimeRequest>();
       const terminal = yield* Deferred.make<void>();
+      const plans: OrchestrationV2PlanArtifact[] = [];
       yield* runtime.events.pipe(
         Stream.runForEach((event) => {
           if (
@@ -532,6 +575,7 @@ describe("Grok native questions", () => {
             return Deferred.succeed(question, event.turnItem.questions[0]);
           if (event.type === "runtime_request.updated")
             return Deferred.succeed(request, event.runtimeRequest);
+          if (event.type === "plan.updated") plans.push(event.plan);
           if (event.type === "turn.terminal") return Deferred.succeed(terminal, undefined);
           return Effect.void;
         }),
@@ -548,7 +592,7 @@ describe("Grok native questions", () => {
           providerInstanceId: instanceId,
           modelSelection,
           runtimeMode: "approval-required",
-          interactionMode: "default",
+          interactionMode: "plan",
           branch: null,
           worktreePath: workspace,
           activeProviderThreadId: providerThread.id,
@@ -577,7 +621,7 @@ describe("Grok native questions", () => {
           attachments: [],
         },
         modelSelection,
-        runtimePolicy: policy,
+        runtimePolicy: { ...policy, interactionMode: "plan" },
       });
       assert.deepEqual(yield* Deferred.await(question), {
         id: "changes",
@@ -597,6 +641,12 @@ describe("Grok native questions", () => {
         answers: { changes: ["Tests", "Docs"] },
       });
       yield* Deferred.await(terminal);
+      assert.deepEqual(
+        plans.flatMap((plan) =>
+          plan.kind === "proposed_plan" ? [[plan.status, plan.markdown]] : [],
+        ),
+        [["active", markdown]],
+      );
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 });

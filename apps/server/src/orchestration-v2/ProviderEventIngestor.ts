@@ -8,6 +8,7 @@ import {
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadProjection,
   type ModelSelection,
+  type ProviderInteractionMode,
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
@@ -201,6 +202,7 @@ export interface ProviderEventIngestInput {
   readonly nodeId?: NodeId;
   readonly rawEventId?: RawEventId;
   readonly event: ProviderAdapter.ProviderAdapterV2Event;
+  readonly interactionMode?: ProviderInteractionMode;
   readonly analyticsContext?: ProviderTurnAnalyticsContext;
 }
 
@@ -284,7 +286,10 @@ export const layer: Layer.Layer<
             id: eventId,
             type: payloadInput.type,
             threadId,
-            runId: payloadInput.runId ?? input.runId,
+            runId:
+              payloadInput.type === "plan.updated"
+                ? (payloadInput.runId ?? undefined)
+                : (payloadInput.runId ?? input.runId),
             nodeId: payloadInput.nodeId ?? input.nodeId,
             driver: input.event.driver,
             providerInstanceId: input.providerInstanceId,
@@ -294,6 +299,53 @@ export const layer: Layer.Layer<
           }),
         );
       });
+
+    const proposedPlanEvents = Effect.fn("ProviderEventIngestor.proposedPlanEvents")(function* (
+      input: ProviderEventIngestInput,
+      plan: Extract<OrchestrationV2PlanArtifact, { kind: "proposed_plan" }>,
+      occurredAt: DateTime.Utc,
+    ) {
+      const update = (payload: typeof plan) =>
+        makeDomainEvent(input, {
+          type: "plan.updated",
+          threadId: plan.threadId,
+          runId: payload.runId,
+          nodeId: payload.nodeId,
+          occurredAt,
+          payload,
+        });
+      const claudePrecedesReplacement =
+        input.event.driver === "claudeAgent" && plan.status === "superseded";
+      if (claudePrecedesReplacement) return [];
+      const stored = yield* projections.getPlan(plan.threadId, plan.id);
+      if (stored?.kind === "proposed_plan" && stored.status !== "draft") {
+        const terminal = stored.status === "completed" || stored.status === "superseded";
+        return [
+          yield* update({
+            ...stored,
+            markdown: plan.markdown || stored.markdown,
+            status: terminal || plan.status === "draft" ? stored.status : plan.status,
+            revision: stored.revision ?? 1,
+          }),
+        ];
+      }
+      if (plan.status !== "active") return [yield* update(plan)];
+      const active = yield* projections.getActiveProposals(plan.threadId);
+      const previous = active[0];
+      const events = yield* Effect.forEach(active, (prior) =>
+        update({ ...prior, status: "superseded" }),
+      );
+      const { previousPlanId: _previousPlanId, ...newPlan } = plan;
+      events.push(
+        yield* update({
+          ...newPlan,
+          ...(previous === undefined
+            ? { revision: 1 }
+            : { previousPlanId: previous.id, revision: (previous.revision ?? 1) + 1 }),
+        }),
+      );
+      return events;
+    });
 
     const dismissNativeUserInputs = Effect.fn("ProviderEventIngestor.dismissNativeUserInputs")(
       function* (
@@ -595,18 +647,14 @@ export const layer: Layer.Layer<
             case "plan.updated": {
               const occurredAt = yield* DateTime.now;
               const plan = input.event.plan;
-              const previous =
-                plan.kind === "todo_list"
-                  ? yield* projections.getPlan(plan.threadId, plan.id)
-                  : undefined;
-              const payload =
-                plan.kind === "todo_list"
-                  ? withPlanStepDurations(
-                      plan,
-                      previous?.kind === "todo_list" ? previous : undefined,
-                      occurredAt,
-                    )
-                  : plan;
+              if (plan.kind === "proposed_plan")
+                return yield* proposedPlanEvents(input, plan, occurredAt);
+              const previous = yield* projections.getPlan(plan.threadId, plan.id);
+              const payload = withPlanStepDurations(
+                plan,
+                previous?.kind === "todo_list" ? previous : undefined,
+                occurredAt,
+              );
               return [
                 yield* makeDomainEvent(input, {
                   type: "plan.updated",
@@ -655,6 +703,80 @@ export const layer: Layer.Layer<
               return [];
             case "turn.terminal":
               const dismissed = yield* dismissNativeUserInputs(input, input.event.providerTurnId);
+              if (
+                input.interactionMode === "plan" &&
+                input.event.status === "completed" &&
+                input.runId &&
+                input.nodeId
+              ) {
+                const item = yield* projections.getPlanPromotionItem(
+                  input.threadId,
+                  input.runId,
+                  input.event.providerThreadId,
+                );
+                if (item?.type !== "assistant_message" || !item.text.trim()) return dismissed;
+                const occurredAt = yield* DateTime.now;
+                const planId = yield* idAllocator.allocate.plan({
+                  threadId: input.threadId,
+                  runId: input.runId,
+                  driver: input.event.driver,
+                });
+                const planEvents = yield* proposedPlanEvents(
+                  input,
+                  {
+                    id: planId,
+                    threadId: input.threadId,
+                    runId: input.runId,
+                    nodeId: item.nodeId ?? input.nodeId,
+                    kind: "proposed_plan",
+                    status: "active",
+                    markdown: item.text,
+                  },
+                  occurredAt,
+                );
+                const keepAttachments = (item.attachments?.length ?? 0) > 0;
+                const events = [...dismissed, ...planEvents];
+                if (keepAttachments) {
+                  events.push(
+                    yield* makeDomainEvent(input, {
+                      type: "turn-item.updated",
+                      nodeId: item.nodeId,
+                      occurredAt,
+                      payload: {
+                        ...item,
+                        text: "",
+                        streaming: false,
+                        status: "completed",
+                        completedAt: item.completedAt ?? occurredAt,
+                      },
+                    }),
+                  );
+                }
+                events.push(
+                  yield* makeDomainEvent(input, {
+                    type: "turn-item.updated",
+                    nodeId: item.nodeId,
+                    occurredAt,
+                    payload: {
+                      ...item,
+                      id: keepAttachments
+                        ? idAllocator.derive.runSignalTurnItem({
+                            runId: input.runId,
+                            signal: "proposed-plan",
+                          })
+                        : item.id,
+                      type: "proposed_plan",
+                      planId,
+                      markdown: item.text,
+                      status: "completed",
+                      streaming: false,
+                      completedAt: item.completedAt ?? occurredAt,
+                      updatedAt: occurredAt,
+                    },
+                  }),
+                );
+                return events;
+              }
               if (input.event.status !== "failed") {
                 return dismissed;
               }
@@ -876,7 +998,9 @@ export const layer: Layer.Layer<
               (effect) =>
                 input.event.type === "app_thread.created"
                   ? threadCommands.withLock(input.event.appThread.id, effect)
-                  : effect,
+                  : input.event.type === "plan.updated" && input.event.plan.kind === "proposed_plan"
+                    ? threadCommands.withLock(input.event.plan.threadId, effect)
+                    : effect,
             ),
         ),
     });

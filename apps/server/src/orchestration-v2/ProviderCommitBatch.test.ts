@@ -318,9 +318,9 @@ it.effect("keeps a transaction failure when rolling back one failed snapshot", (
   }),
 );
 
-it.effect(
-  "allows a command holding the thread lock to commit while a provider control waits for it",
-  () =>
+it.effect.each([control, { type: "plan.updated", plan: { kind: "proposed_plan" } }] as const)(
+  "allows a command holding the thread lock to commit while $type waits for it",
+  (lockTakingEvent) =>
     Effect.gen(function* () {
       const coordinator = yield* ProviderCommitBatch.make((work) => work, true);
       const locks = yield* KeyedLock.make<ThreadId>();
@@ -340,7 +340,7 @@ it.effect(
       yield* Deferred.await(held);
       const consumer = yield* coordinator
         .consume(
-          Stream.make(control),
+          Stream.make(lockTakingEvent),
           () =>
             Deferred.succeed(waiting, undefined).pipe(
               Effect.andThen(locks.withLock(threadId, Effect.void)),

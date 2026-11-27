@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { CommandId, EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
+import { CommandId, EnvironmentId, MessageId, PlanId, ThreadId } from "@t3tools/contracts";
 import type { QueuedThreadMessage } from "./thread-outbox-model";
 
 const state = vi.hoisted(() => ({
@@ -89,9 +89,24 @@ describe("editing a pending message", () => {
     expect(await editPendingThreadMessage(message)).toBe(true);
     expect(state.held).toEqual({});
   });
-  it("does not reclaim a message already being dispatched", async () => {
-    state.dispatching = message.messageId;
-    expect(await editPendingThreadMessage(message)).toBe(false);
+  it.each([
+    {
+      kind: "a message already being dispatched",
+      dispatching: message.messageId,
+      pending: message,
+    },
+    {
+      // Resent from the composer it would no longer be linked to the plan it approves.
+      kind: "a plan approval",
+      dispatching: null,
+      pending: {
+        ...message,
+        sourceProposedPlan: { threadId: message.threadId, planId: PlanId.make("plan") },
+      },
+    },
+  ])("does not reclaim $kind", async ({ dispatching, pending }) => {
+    state.dispatching = dispatching;
+    expect(await editPendingThreadMessage(pending)).toBe(false);
     expect(state.confirm).not.toHaveBeenCalled();
     expect(state.draft.text).toBe("Existing draft");
   });

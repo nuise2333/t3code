@@ -743,15 +743,27 @@ export function buildBoundedThreadProjection(input: {
   const visibleHandoffIds = new Set(
     turnItems.flatMap((item) => (item.type === "handoff" ? [String(item.contextHandoffId)] : [])),
   );
+  const predecessorIds = new Set(
+    input.projection.plans.flatMap((plan) =>
+      plan.kind === "proposed_plan" &&
+      plan.previousPlanId !== undefined &&
+      (plan.status === "active" || visiblePlanIds.has(plan.id))
+        ? [plan.previousPlanId]
+        : [],
+    ),
+  );
   const plans = input.projection.plans
     .filter(
       (plan) =>
         plan.status === "active" ||
         plan.id === latestTodoList?.id ||
-        visiblePlanIds.has(String(plan.id)),
+        visiblePlanIds.has(String(plan.id)) ||
+        predecessorIds.has(plan.id),
     )
     .map((plan) =>
-      plan.status === "active" || plan.id === latestTodoList?.id
+      plan.status === "active" ||
+      plan.id === latestTodoList?.id ||
+      (predecessorIds.has(plan.id) && !visiblePlanIds.has(plan.id))
         ? plan
         : plan.kind === "proposed_plan"
           ? { ...plan, markdown: "", detailInTurnItem: true as const }

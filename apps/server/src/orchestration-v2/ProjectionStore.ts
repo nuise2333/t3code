@@ -698,6 +698,17 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
     providerTurnId: ProviderTurnId,
   ) => Effect.Effect<ProjectionPendingUserInputs, ProjectionStoreV2Error>;
+  readonly getActiveProposals: (
+    threadId: ThreadId,
+  ) => Effect.Effect<
+    ReadonlyArray<Extract<OrchestrationV2PlanArtifact, { kind: "proposed_plan" }>>,
+    ProjectionStoreV2Error
+  >;
+  readonly getPlanPromotionItem: (
+    threadId: ThreadId,
+    runId: RunId,
+    providerThreadId: ProviderThreadId,
+  ) => Effect.Effect<OrchestrationV2TurnItem | undefined, ProjectionStoreV2Error>;
   readonly getPlan: (
     threadId: ThreadId,
     planId: PlanId,
@@ -4229,6 +4240,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     OR plan.plan_id = ${latestTodoList?.plan_id ?? null}
                     OR plan.plan_id IN (
                       SELECT value FROM json_each(${cohortPlanIds})
+                      UNION ALL
+                      SELECT json_extract(child.payload_json, '$.previousPlanId')
+                      FROM orchestration_v2_projection_plans AS child
+                      WHERE child.thread_id = ${threadId} AND child.kind = 'proposed_plan'
+                        AND (child.status = 'active' OR child.plan_id IN (SELECT value FROM json_each(${cohortPlanIds})))
                     )
                   )
                 -- Keep the selected artifact last within its run for equal-run consumers.
@@ -5685,6 +5701,76 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           }),
         )
         .pipe(Effect.mapError(controlReadError(threadId)));
+
+    const getActiveProposals = Effect.fn("ProjectionStore.getActiveProposals")(
+      function* (threadId: ThreadId) {
+        const rows = yield* sql<PayloadRow>`
+        SELECT payload_json FROM orchestration_v2_projection_plans
+        WHERE thread_id = ${threadId} AND kind = 'proposed_plan' AND status = 'active'
+        ORDER BY rowid DESC`;
+        return (yield* decodeRows(decodePlanJson, threadId)(rows)).filter(
+          (plan) => plan.kind === "proposed_plan",
+        );
+      },
+      (effect, threadId) => effect.pipe(Effect.mapError(controlReadError(threadId))),
+    );
+
+    const getPlanPromotionItem = Effect.fn("ProjectionStore.getPlanPromotionItem")(
+      function* (threadId: ThreadId, runId: RunId, providerThreadId: ProviderThreadId) {
+        const proposed = yield* sql`SELECT 1 FROM orchestration_v2_projection_plans
+          WHERE thread_id = ${threadId} AND run_id = ${runId} AND kind = 'proposed_plan' LIMIT 1`;
+        if (proposed.length) return undefined;
+        const [itemRow] = yield* sql<PayloadRow>`
+          SELECT payload_json FROM orchestration_v2_projection_turn_items
+          WHERE thread_id = ${threadId} AND run_id = ${runId} AND type = 'assistant_message'
+            AND (provider_thread_id = ${providerThreadId} OR provider_thread_id IS NULL)
+            AND parent_item_id IS NULL
+          ORDER BY ordinal DESC, rowid DESC LIMIT 1`;
+        const item = itemRow && (yield* decodeTurnItemPayload(itemRow.payload_json));
+        const [messageRow] = yield* sql<PayloadRow>`
+          SELECT message.payload_json FROM orchestration_v2_projection_messages AS message
+          LEFT JOIN orchestration_v2_projection_nodes AS node ON node.node_id = message.node_id
+          WHERE message.thread_id = ${threadId} AND message.run_id = ${runId} AND message.role = 'assistant'
+            AND (node.provider_thread_id = ${providerThreadId} OR node.provider_thread_id IS NULL)
+          ORDER BY message.created_at DESC, message.rowid DESC LIMIT 1`;
+        if (messageRow === undefined) return item;
+        const message = yield* decodeMessagePayload(messageRow.payload_json);
+        if (item?.type === "assistant_message" && item.messageId === message.id) {
+          return {
+            ...item,
+            text: item.streaming && !message.streaming ? message.text : item.text,
+            attachments: item.attachments?.length ? item.attachments : message.attachments,
+          };
+        }
+        if (
+          item &&
+          DateTime.isGreaterThanOrEqualTo(item.startedAt ?? item.updatedAt, message.createdAt)
+        )
+          return item;
+        return {
+          id: TurnItemId.make(`turn-item:message:${message.id}`),
+          threadId,
+          runId,
+          nodeId: message.nodeId,
+          providerThreadId,
+          providerTurnId: null,
+          ordinal: 0,
+          nativeItemRef: null,
+          parentItemId: null,
+          title: null,
+          status: "completed",
+          startedAt: message.createdAt,
+          completedAt: message.updatedAt,
+          updatedAt: message.updatedAt,
+          type: "assistant_message",
+          messageId: message.id,
+          text: message.text,
+          attachments: message.attachments,
+          streaming: false,
+        } satisfies OrchestrationV2TurnItem;
+      },
+      (effect, threadId) => effect.pipe(Effect.mapError(controlReadError(threadId))),
+    );
 
     const getPlan: ProjectionStoreV2Shape["getPlan"] = (threadId, planId) =>
       sql
@@ -9329,6 +9415,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         getThreadRecords(threadId, fields, filter).pipe(NodeSqliteClient.readOnly),
       getRuntimeRequest: readOnReader(getRuntimeRequest),
       getPlan: readOnReader(getPlan),
+      getActiveProposals: readOnReader(getActiveProposals),
+      getPlanPromotionItem: readOnReader(getPlanPromotionItem),
       getProviderControlContext: readOnReader(getProviderControlContext),
       getLimitRecoveryCandidates: readOnReader(getLimitRecoveryCandidates),
       getLimitRecoveryWakeAt: readOnReader(getLimitRecoveryWakeAt),

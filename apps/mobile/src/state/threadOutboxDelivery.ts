@@ -62,6 +62,7 @@ import {
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxDispatchStep,
   resolveThreadOutboxFailureAction,
+  dropsPlanRevisionMode,
   resolveQueuedThreadSettings,
   shouldRetryThreadOutboxDelivery,
   threadOutboxRetryDelayMs,
@@ -416,6 +417,18 @@ export async function restoreRejectedQueuedMessage(
       return "deferred";
     }
     const revision = threadOutboxRevision(queuedMessage.messageId);
+
+    // A draft cannot carry the plan an approval answers, so resending one would implement the
+    // plan while its card could still approve it. The approval is dropped; the card approves again.
+    if (queuedMessage.sourceProposedPlan) {
+      if (!(await removeThreadOutboxMessage(queuedMessage, revision))) return "deferred";
+      setThreadComposerError(
+        threadKey,
+        `The plan was not approved. ${message}`,
+        queuedMessage.messageId,
+      );
+      return "restored";
+    }
 
     await waitForComposerDraftsLoaded();
     if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[queuedMessage.messageId]) {
@@ -798,6 +811,12 @@ export function createThreadOutboxDelivery(): {
     );
     if (!serverConfig) return false;
     const settings = resolveQueuedThreadSettings(queuedMessage, thread, serverConfig.providers);
+    if (dropsPlanRevisionMode(queuedMessage, settings, serverConfig.providers)) {
+      return restoreQueuedMessage(
+        queuedMessage,
+        "The current model does not support plan mode, so the plan cannot be sent back.",
+      );
+    }
     if (isModelSelectionUnavailable(serverConfig, settings.modelSelection, thread.projectId)) {
       const { title, detail } = describeUnavailableModelSelection(
         serverConfig,
@@ -896,6 +915,12 @@ export function createThreadOutboxDelivery(): {
       settings,
       currentConfig.providers,
     );
+    if (dropsPlanRevisionMode(queuedMessage, sendSettings, currentConfig.providers)) {
+      return restoreQueuedMessage(
+        persistedMessage,
+        "The current model does not support plan mode, so the plan cannot be sent back.",
+      );
+    }
     if (queuedMessage.compactBeforeSend === true) {
       if (!hasAccess()) return true;
       // Queued, since steering a running turn with a compaction is rejected.
@@ -958,6 +983,9 @@ export function createThreadOutboxDelivery(): {
         createdAt: queuedMessage.createdAt,
         dispatchMode: queuedMessage.dispatchMode ?? "start",
         ...(queuedMessage.freshContext ? { freshContext: true } : {}),
+        ...(queuedMessage.sourceProposedPlan
+          ? { sourceProposedPlan: queuedMessage.sourceProposedPlan }
+          : {}),
         resendAfterSocketLoss: false,
       },
     });

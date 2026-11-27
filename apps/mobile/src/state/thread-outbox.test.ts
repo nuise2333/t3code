@@ -1,3 +1,4 @@
+import { PLAN_REVISION_PROMPT } from "@t3tools/client-runtime/planReview";
 import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentNotRegisteredError } from "@t3tools/client-runtime/connection";
 import { isTransportConnectionErrorMessage } from "@t3tools/client-runtime/errors";
@@ -9,6 +10,7 @@ import {
   EnvironmentId,
   MessageId,
   OrchestrationDispatchCommandError,
+  PlanId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -82,6 +84,7 @@ import {
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxDispatchStep,
   resolveThreadOutboxFailureAction,
+  dropsPlanRevisionMode,
   resolveQueuedThreadSettings,
   shouldRetryThreadOutboxDelivery,
   type QueuedThreadMessage,
@@ -329,6 +332,7 @@ describe("thread outbox", () => {
       },
       runtimeMode: "approval-required",
       interactionMode: "plan",
+      sourceProposedPlan: { threadId: legacyMessage.threadId, planId: PlanId.make("plan-1") },
       dispatchMode: "queue",
       compactBeforeSend: true,
     } satisfies QueuedThreadMessage;
@@ -347,6 +351,22 @@ describe("thread outbox", () => {
       runtimeMode: selectedMessage.runtimeMode,
       interactionMode: selectedMessage.interactionMode,
     });
+  });
+
+  it("refuses a plan revision whose provider would run it outside plan mode", () => {
+    const revision = { text: `${PLAN_REVISION_PROMPT}\n\n## 1. Remove` };
+    const modelSelection = { instanceId: ProviderInstanceId.make("agent"), model: "m" };
+    const plan = { interactionMode: "plan", modelSelection } as const;
+    const provider = (showInteractionModeToggle?: boolean) => [
+      { instanceId: modelSelection.instanceId, showInteractionModeToggle },
+    ];
+    expect(dropsPlanRevisionMode(revision, plan, provider(true))).toBe(false);
+    expect(
+      dropsPlanRevisionMode(revision, { ...plan, interactionMode: "default" }, provider(true)),
+    ).toBe(true);
+    expect(dropsPlanRevisionMode(revision, plan, provider(false))).toBe(true);
+    expect(dropsPlanRevisionMode(revision, plan, provider(undefined))).toBe(true);
+    expect(dropsPlanRevisionMode({ text: "/plan inspect" }, plan, provider(undefined))).toBe(false);
   });
 
   it("normalizes queued plan mode against the queued provider, not the current thread", () => {

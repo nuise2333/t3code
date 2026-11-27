@@ -10,6 +10,7 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
+import { useState } from "react";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
@@ -78,8 +79,10 @@ function Picker(props: {
   thread: EnvironmentThreadShell;
   runtime: Parameters<typeof useComposerSelection>[0]["activeRuntime"];
   model?: string;
+  planModeAvailable?: boolean;
 }) {
-  const { onProviderModelSelectStable } = useComposerSelection({
+  const [toggled, setToggled] = useState("");
+  const { onProviderModelSelectStable, toggleInteractionModeStable } = useComposerSelection({
     environmentId,
     composerDraftTarget: scopeThreadRef(environmentId, props.thread.id),
     draftThread: null,
@@ -92,6 +95,8 @@ function Picker(props: {
     supportsProviderSwitchingViaHandoff: true,
     multipleModelSelections: null,
     runtimeMode: "full-access",
+    interactionMode: "default",
+    planModeAvailable: props.planModeAvailable === true,
     isLocalDraftThread: false,
     canOverrideServerThreadEnvMode: false,
     setPendingServerThreadEnvModeEntry: () => {},
@@ -99,14 +104,41 @@ function Picker(props: {
     scheduleComposerFocus: () => {},
   });
   return (
-    <button
-      type="button"
-      onClick={() => onProviderModelSelectStable(cursor, props.model ?? stored.model)}
-    >
-      Pick the model
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => onProviderModelSelectStable(cursor, props.model ?? stored.model)}
+      >
+        Pick the model
+      </button>
+      <button type="button" onClick={() => setToggled(String(toggleInteractionModeStable()))}>
+        Toggle plan mode
+      </button>
+      <output>{toggled}</output>
+    </>
   );
 }
+
+it.each([
+  { planModeAvailable: true, toggled: "true", mode: "plan" },
+  { planModeAvailable: false, toggled: "false", mode: null },
+])(
+  "switches the draft to plan mode only where the provider has one ($planModeAvailable)",
+  async ({ planModeAvailable, toggled, mode }) => {
+    setup();
+    const thread = cursorThread(`thread-plan-${planModeAvailable}`);
+    await using _screen = await render(
+      <Picker thread={thread} runtime={null} planModeAvailable={planModeAvailable} />,
+    );
+    await page.getByRole("button", { name: "Toggle plan mode" }).click();
+
+    await expect.element(page.getByRole("status")).toHaveTextContent(toggled);
+    expect(
+      useComposerDraftStore.getState().getComposerDraft(scopeThreadRef(environmentId, thread.id))
+        ?.interactionMode ?? null,
+    ).toBe(mode);
+  },
+);
 
 it("keeps a Cursor thread's stored model and options when the user re-picks its unavailable row", async () => {
   setup();

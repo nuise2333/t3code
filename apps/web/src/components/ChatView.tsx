@@ -18,6 +18,15 @@ import {
   presentThreadShellFromProjection,
 } from "./ChatView.logic";
 import { usePullRequestDraftThread } from "./chat/usePullRequestDraftThread";
+import { usePlanReviewSend } from "./chat/usePlanReviewSend";
+import { PlanReviewDialog } from "./chat/planReview/PlanReviewDialog";
+import { planReviewDraftKey, usePlanReviewDraftStore } from "../planReviewDraftStore";
+import { resolvePlanMarkdown } from "../proposedPlan";
+import {
+  EMPTY_PLAN_REVIEW_DRAFT,
+  hasPlanReviewFeedback,
+  type PlanReviewDraft,
+} from "@t3tools/client-runtime/planReview";
 import { usePullRequestLinking } from "../hooks/usePullRequestLinking";
 import { useComposerSelection } from "./chat/useComposerSelection";
 import { useComposerFocus } from "./chat/useComposerFocus";
@@ -193,7 +202,7 @@ import {
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
 import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
-import { DEFAULT_INTERACTION_MODE, type ChatMessage } from "../types";
+import { DEFAULT_INTERACTION_MODE, type ChatMessage, type ProposedPlan } from "../types";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
 import { copyThreadReference } from "../lib/copyThreadReference";
@@ -235,7 +244,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { shortcutLabelForCommand } from "../keybindings";
 import { cn } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
-import { toastManager } from "./ui/toast";
+import { stackedThreadToast, toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newMessageId } from "~/lib/utils";
 import {
@@ -570,6 +579,9 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
   });
   const composerDraftTarget = queuedRunEdit.draftTarget;
+  const composerInteractionMode = useComposerDraftStore(
+    (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
+  );
   const reportedModelSelection = serverProjection
     ? deriveReportedModelSelection(serverProjection)
     : null;
@@ -1452,6 +1464,10 @@ export default function ChatView(props: ChatViewProps) {
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
   const activeProviderStatus = selectedProviderEntry?.snapshot ?? null;
+  const planModeAvailable = activeProviderStatus?.showInteractionModeToggle === true;
+  const interactionMode: ProviderInteractionMode = planModeAvailable
+    ? (composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE)
+    : DEFAULT_INTERACTION_MODE;
   const conversationProviderStatus =
     providerStatuses.find((status) => status.instanceId === activeRuntime?.providerInstanceId) ??
     activeProviderStatus;
@@ -2561,6 +2577,7 @@ export default function ChatView(props: ChatViewProps) {
     activeProjectCwd,
     serverConfig,
     runtimeMode,
+    interactionMode,
     isWorking,
     // A waiting run is checkpoint drain; Stop there reaches its background work.
     runIsLive: (isWorking && activeRuntime?.status !== "waiting") || phase === "connecting",
@@ -3237,6 +3254,7 @@ export default function ChatView(props: ChatViewProps) {
   const {
     getModelDisabledReason,
     handleRuntimeModeChangeStable,
+    toggleInteractionModeStable,
     onEnvModeChangeStable,
     onProviderModelSelectStable,
     onStartFromOriginChange,
@@ -3254,6 +3272,8 @@ export default function ChatView(props: ChatViewProps) {
     supportsProviderSwitchingViaHandoff,
     multipleModelSelections,
     runtimeMode,
+    interactionMode,
+    planModeAvailable,
     isLocalDraftThread,
     canOverrideServerThreadEnvMode,
     setPendingServerThreadEnvModeEntry,
@@ -3273,6 +3293,7 @@ export default function ChatView(props: ChatViewProps) {
     threadDetailLoading,
     activeEnvironmentUnavailable,
     runtimeMode,
+    interactionMode,
     localCheckoutBranchMismatch,
     composerRef,
     persistThreadSettingsForNextTurn,
@@ -3297,6 +3318,7 @@ export default function ChatView(props: ChatViewProps) {
     isGitRepo,
     phase,
     runtimeMode,
+    interactionMode,
     sendEnvMode,
     startFromOrigin,
     localCheckoutBranchMismatch,
@@ -3356,6 +3378,87 @@ export default function ChatView(props: ChatViewProps) {
     persistThreadSettingsForNextTurn,
     linkCheckoutPullRequest,
   });
+
+  const [planReview, setPlanReview] = useState<{
+    readonly threadKey: string;
+    readonly plan: ProposedPlan;
+  } | null>(null);
+  const planReviewBlockedReason = activeEnvironmentUnavailable
+    ? gt("Not connected. Decide once the environment is back.")
+    : isSendBusy || phase === "running" || phase === "connecting"
+      ? gt("The agent is still working. Decide once it stops.")
+      : null;
+  const sendPlanReview = usePlanReviewSend({
+    environmentId,
+    routeThreadKey,
+    activeThread,
+    isServerThread,
+    blocked: planReviewBlockedReason !== null,
+    planModeAvailable,
+    composerRef,
+    runtimeMode,
+    localCheckoutBranchMismatch,
+    beginLocalDispatch,
+    resetLocalDispatch,
+    setOptimisticUserMessages,
+    setThreadError,
+    anchorNewTurn,
+    persistThreadSettingsForNextTurn,
+  });
+  const decidePlanReview = async (
+    plan: ProposedPlan,
+    decision: "approve" | "revise",
+    draft: PlanReviewDraft,
+  ) => {
+    const failure =
+      planReviewBlockedReason ??
+      (await sendPlanReview({
+        planId: plan.id,
+        planMarkdown: plan.planMarkdown,
+        draft,
+        decision,
+      }));
+    if (failure === null) {
+      usePlanReviewDraftStore
+        .getState()
+        .clearSent(planReviewDraftKey(routeThreadRef, plan.id), draft);
+      setPlanReview(null);
+      return;
+    }
+    toastManager.add(
+      stackedThreadToast({
+        type: "warning",
+        title:
+          decision === "approve"
+            ? gt("The plan was not approved")
+            : gt("The plan was not sent back"),
+        description: failure,
+      }),
+    );
+  };
+  const reviewPlanStable = useStableCallback((plan: ProposedPlan) =>
+    setPlanReview({ threadKey: routeThreadKey, plan }),
+  );
+  const approvePlanStable = useStableCallback((plan: ProposedPlan) => {
+    const draft =
+      usePlanReviewDraftStore.getState().drafts[planReviewDraftKey(routeThreadRef, plan.id)];
+    // Notes written earlier ride along with an approval, so the reviewer sees them first.
+    if (draft && hasPlanReviewFeedback(draft)) {
+      setPlanReview({ threadKey: routeThreadKey, plan });
+      return;
+    }
+    return decidePlanReview(plan, "approve", EMPTY_PLAN_REVIEW_DRAFT);
+  });
+  // A review closes once its thread is left or its plan is answered or replaced.
+  const reviewedPlanStatus =
+    planReview === null
+      ? null
+      : (serverProjection?.plans.find((plan) => plan.id === planReview.plan.id)?.status ??
+        planReview.plan.status);
+  const reviewedPlan =
+    planReview?.threadKey === routeThreadKey && reviewedPlanStatus === "active"
+      ? planReview.plan
+      : null;
 
   const onWorktreeSetupWorkLocally = () => {
     if (!worktreeSetup || worktreeSetup.phase !== "running" || !draftId) {
@@ -3873,6 +3976,9 @@ export default function ChatView(props: ChatViewProps) {
                   onOpenModelPicker={openModelPickerStable}
                   onInsertTextIntoComposer={insertTextIntoComposerStable}
                   onReplyToResponse={replyToResponseStable}
+                  {...(isServerThread
+                    ? { onReviewPlan: reviewPlanStable, onApprovePlan: approvePlanStable }
+                    : {})}
                   {...(activeProject
                     ? { onRunShellCommand: parentPanel?.runShellCommand ?? runShellCommandStable }
                     : {})}
@@ -4245,6 +4351,9 @@ export default function ChatView(props: ChatViewProps) {
                                 onOpenProviderSetup={openProviderSetupStable}
                                 getModelDisabledReason={getModelDisabledReason}
                                 handleRuntimeModeChange={handleRuntimeModeChangeStable}
+                                planModeAvailable={planModeAvailable}
+                                interactionMode={interactionMode}
+                                onToggleInteractionMode={toggleInteractionModeStable}
                                 focusComposer={focusComposerStable}
                                 scheduleComposerFocus={scheduleComposerFocusStable}
                                 setThreadError={setThreadError}
@@ -4527,6 +4636,36 @@ export default function ChatView(props: ChatViewProps) {
         onConfirm={onConfirmRevertStable}
       />
       {embedded ? null : <LinkPullRequestDialogHost />}
+      <PlanReviewDialog
+        plan={
+          reviewedPlan === null
+            ? null
+            : {
+                id: reviewedPlan.id,
+                markdown: reviewedPlan.planMarkdown,
+                revision: reviewedPlan.revision,
+                previousPlanId: reviewedPlan.previousPlanId,
+              }
+        }
+        previousMarkdown={
+          reviewedPlan?.previousPlanId === undefined || serverProjection === null
+            ? null
+            : resolvePlanMarkdown(
+                reviewedPlan.previousPlanId,
+                serverProjection.plans,
+                serverVisibleTurnItems.map((row) => row.item),
+              )
+        }
+        threadRef={routeThreadRef}
+        cwd={gitCwd ?? undefined}
+        blockedReason={planReviewBlockedReason}
+        onDecide={(decision, draft) =>
+          reviewedPlan === null
+            ? Promise.resolve()
+            : decidePlanReview(reviewedPlan, decision, draft)
+        }
+        onClose={() => setPlanReview(null)}
+      />
       <ThreadVisitWatermark threadRef={routeThreadRef} />
       <ExpandedImageDialogHost threadKey={routeThreadKey} />
     </div>

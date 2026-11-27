@@ -1421,6 +1421,10 @@ describe("Kiro permission policy", () => {
 
   it("keeps Autopilot on only for an unrestricted Full access thread", () => {
     assert.equal(kiroAutopilotValue(policy({ runtimeMode: "full-access" })), "on");
+    assert.equal(
+      kiroAutopilotValue({ ...policy({ runtimeMode: "full-access" }), interactionMode: "plan" }),
+      "off",
+    );
     assert.equal(kiroAutopilotValue(policy({ runtimeMode: "approval-required" })), "off");
     // An explicit override restricts Full access, so Kiro's review stays on.
     assert.equal(

@@ -10,10 +10,13 @@ describe("grokAcpSpawnArgs", () => {
     expect(grokAcpSpawnArgs()).toEqual(["agent", "stdio"]);
   });
 
-  it("forces Grok to ask when T3 is Supervised", () => {
-    expect(grokAcpSpawnArgs("approval-required")).toEqual([
+  it.each([
+    ["approval-required", "default"],
+    ["plan", "plan"],
+  ] as const)("applies the native permission mode for T3 %s", (runtimeMode, expected) => {
+    expect(grokAcpSpawnArgs(runtimeMode)).toEqual([
       "--permission-mode",
-      "default",
+      expected,
       "agent",
       "stdio",
     ]);

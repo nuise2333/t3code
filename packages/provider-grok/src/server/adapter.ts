@@ -160,7 +160,7 @@ const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensi
     ),
   );
 
-// Capture the reverse-requested plan, then abandon the native gate to finish the turn.
+// Capture the reverse-requested plan and leave the native session in Plan for revisions.
 const registerGrokExitPlanModeExtensions = ({
   runtime,
   captureProposedPlan,
@@ -220,7 +220,8 @@ const registerGrokAskUserQuestionExtensions = ({
 /** Explicit policy overrides launch in ask mode so Grok cannot bypass T3 approval checks. */
 export function grokLaunchRuntimeMode(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-): RuntimeMode {
+): RuntimeMode | "plan" {
+  if (runtimePolicy.interactionMode === "plan") return "plan";
   return runtimePolicy.approvalPolicy === undefined && runtimePolicy.sandboxPolicy === undefined
     ? runtimePolicy.runtimeMode
     : "approval-required";
@@ -364,6 +365,7 @@ export function makeGrokAcpAdapterFlavor(
     },
     applyModelSelection: applyGrokSessionModelSelection,
     ownedModelOptionIds: [GROK_REASONING_EFFORT_OPTION_ID],
+    restartOnInteractionModeChange: true,
     makeRuntime:
       options.makeRuntime ??
       (({ runtimePolicy, ...input }) =>

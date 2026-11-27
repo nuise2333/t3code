@@ -63,9 +63,9 @@ const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Defa
 
 Prefer making reasonable assumptions and carrying out the user's request. Ask a concise question only when a missing user decision would materially change the result. Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`;
 
-const T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Plan
+export const T3_CODE_PLAN_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Plan
 
-Investigate with read-only actions and do not edit files or otherwise execute the implementation. Resolve discoverable facts before asking questions. When the requirements are decision complete, return a concrete implementation plan and do not start implementing it. Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`;
+Investigate with read-only actions. Resolve discoverable facts before asking questions. Once the requirements are settled, give the complete plan as your final reply in Markdown. Start the reply with a level-one heading (# Title), then the plan. Stop after the plan and wait for the user's approval. Do not implement it in this turn.`;
 
 export interface T3AcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
@@ -90,7 +90,7 @@ export function t3AcpPromptWithInstructions(input: {
   }
   const instructions = [
     input.state.interactionMode === "plan"
-      ? T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
+      ? `${T3_CODE_PLAN_MODE_INSTRUCTIONS} Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`
       : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
     ...(input.state.hasT3Mcp
       ? [

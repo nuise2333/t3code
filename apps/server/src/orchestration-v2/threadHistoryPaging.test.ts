@@ -996,6 +996,7 @@ describe("threadHistoryPaging", () => {
       ...base,
       plans: [
         {
+          previousPlanId: "plan-previous",
           id: "plan-historical-visible",
           threadId: THREAD,
           runId: null,
@@ -1004,11 +1005,31 @@ describe("threadHistoryPaging", () => {
           kind: "proposed_plan",
           markdown: detail,
         },
+        {
+          ...base.plans[0],
+          id: "plan-previous",
+          kind: "proposed_plan",
+          status: "superseded",
+          markdown: "Previous",
+          previousPlanId: "plan-older",
+        },
+        {
+          ...base.plans[0],
+          id: "plan-older",
+          kind: "proposed_plan",
+          status: "superseded",
+          markdown: "Older",
+        },
       ],
     } as unknown as typeof base;
 
     const bounded = buildBoundedThreadProjection({ projection, snapshotSequence: 9 });
 
+    expect(bounded.projection.plans.map((plan) => plan.id)).toEqual([
+      "plan-historical-visible",
+      "plan-previous",
+    ]);
+    expect(bounded.projection.plans[1]).toMatchObject({ markdown: "Previous" });
     expect(bounded.projection.visibleTurnItems[0]?.item).toMatchObject({
       type: "proposed_plan",
       markdown: detail,

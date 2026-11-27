@@ -559,6 +559,10 @@
       "types": "./src/modelTraits.ts",
       "default": "./src/modelTraits.ts"
     },
+    "./planReview": {
+      "types": "./src/planReview.ts",
+      "default": "./src/planReview.ts"
+    },
     "./routing": {
       "types": "./src/routing.ts",
       "default": "./src/routing.ts"

@@ -26,6 +26,7 @@ const GROK_AUTH_METHOD_CACHED_TOKEN = "cached_token";
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 
 type GrokAcpRuntimeGrokSettings = Pick<GrokSettings, "binaryPath">;
+type GrokLaunchMode = RuntimeMode | "plan";
 
 interface GrokAcpRuntimeInput extends Omit<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
@@ -33,7 +34,7 @@ interface GrokAcpRuntimeInput extends Omit<
 > {
   readonly grokSettings: GrokAcpRuntimeGrokSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
-  readonly runtimeMode?: RuntimeMode;
+  readonly runtimeMode?: GrokLaunchMode;
 }
 
 // grok agent treats settings-only acceptEdits as ask; it has no Auto-accept edits launch mode.
@@ -44,12 +45,14 @@ export const GROK_SUPPORTED_RUNTIME_MODES = [
 ] as const satisfies ReadonlyArray<RuntimeMode>;
 
 // argv overrides Grok config so Supervised cannot inherit always-approve.
-export function grokAcpSpawnArgs(runtimeMode?: RuntimeMode): ReadonlyArray<string> {
+export function grokAcpSpawnArgs(runtimeMode?: GrokLaunchMode): ReadonlyArray<string> {
   switch (runtimeMode) {
     case undefined:
       return ["agent", "stdio"];
     case "auto":
       return ["--permission-mode", "auto", "agent", "stdio"];
+    case "plan":
+      return ["--permission-mode", "plan", "agent", "stdio"];
     case "full-access":
       return ["agent", "--always-approve", "stdio"];
     default:
@@ -61,7 +64,7 @@ function buildGrokAcpSpawnInput(
   grokSettings: GrokAcpRuntimeGrokSettings | null | undefined,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
-  runtimeMode?: RuntimeMode,
+  runtimeMode?: GrokLaunchMode,
 ): AcpSessionRuntime.AcpSpawnInput {
   return {
     command: grokSettings?.binaryPath || "grok",

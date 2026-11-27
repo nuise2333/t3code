@@ -65,7 +65,14 @@ import {
   summarizeNativeProtocolPayload,
 } from "@t3tools/provider-core/server/nativeProtocolLogging";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
+import {
+  T3_CODE_PLAN_MODE_INSTRUCTIONS,
+  t3OrchestrationSystemPrompt,
+} from "@t3tools/provider-core/server/orchestrationInstructions";
+import {
+  OPENCODE_PLAN_READ_PERMISSIONS,
+  OPENCODE_PLAN_T3_MCP_READ_TOOLS,
+} from "./planPermissions.ts";
 import {
   buildResponseLanguageInstructions,
   buildRuntimeInstructions,
@@ -665,12 +672,35 @@ export function openCodePermissionRules(
   const dangerFullAccess = sandboxType === "dangerFullAccess";
   const implicitFullAccess =
     sandboxType === undefined && runtimePolicy.runtimeMode === "full-access";
+  const planning = runtimePolicy.interactionMode === "plan";
+  const planRules: PermissionRuleset = planning
+    ? [
+        { permission: "edit", pattern: "*", action: "deny" },
+        { permission: "plan_exit", pattern: "*", action: "deny" },
+        ...OPENCODE_PLAN_T3_MCP_READ_TOOLS.map((tool) => ({
+          permission: `t3-code_${tool}`,
+          pattern: "*",
+          action: "allow" as const,
+        })),
+      ]
+    : [];
 
   if (!requiresApproval && (externallySandboxed || dangerFullAccess || implicitFullAccess)) {
     // Task children copy only external_directory and deny rules before their first tool call.
     return [
-      { permission: "*", pattern: "*", action: "allow" },
+      { permission: "*", pattern: "*", action: planning ? "deny" : "allow" },
       { permission: "external_directory", pattern: "*", action: "allow" },
+      ...(planning
+        ? [
+            { permission: "bash", pattern: "*", action: "ask" as const },
+            ...[...OPENCODE_PLAN_READ_PERMISSIONS, "lsp", "codesearch"].map((permission) => ({
+              permission,
+              pattern: "*",
+              action: "allow" as const,
+            })),
+          ]
+        : []),
+      ...planRules,
     ];
   }
 
@@ -685,18 +715,16 @@ export function openCodePermissionRules(
   ];
 
   if (requiresApproval) {
-    rules.push({ permission: "*", pattern: "*", action: "ask" });
+    if (!planning) rules.push({ permission: "*", pattern: "*", action: "ask" });
     for (const permission of OPENCODE_RESTRICTED_PERMISSIONS) {
       rules.push({ permission, pattern: "*", action: "ask" });
     }
   }
 
   rules.push(
-    ...OPENCODE_ALWAYS_ALLOWED_PERMISSIONS.map((permission) => ({
-      permission,
-      pattern: "*",
-      action: "allow" as const,
-    })),
+    ...OPENCODE_ALWAYS_ALLOWED_PERMISSIONS.filter(
+      (permission) => !planning || (permission !== "task" && permission !== "todowrite"),
+    ).map((permission) => ({ permission, pattern: "*", action: "allow" as const })),
   );
 
   rules.push(
@@ -740,7 +768,7 @@ export function openCodePermissionRules(
     }
   }
 
-  return rules;
+  return [...rules, ...planRules];
 }
 
 function permissionRuleEquals(
@@ -774,7 +802,12 @@ export function openCodeChildPermissionRules(
     (childRule) =>
       !inheritedRules.some((inheritedRule) => permissionRuleEquals(childRule, inheritedRule)),
   );
-  return [...parentRules, ...childSpecificRules];
+  return [
+    ...parentRules,
+    ...(runtimePolicy.interactionMode === "plan"
+      ? childSpecificRules.filter((rule) => rule.action === "deny")
+      : childSpecificRules),
+  ];
 }
 
 /** Boundaries are exclusive: use the next user message, or omit at head to retain the selected turn. */
@@ -3480,15 +3513,17 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           responseLanguage: string,
           parts: Array<TextPartInput | FilePartInput>,
         ) => {
-          const agent =
-            getModelSelectionStringOptionValue(turn.modelSelection, "agent") ??
-            (turn.runtimePolicy.interactionMode === "plan" ? "plan" : undefined);
+          const planning = turn.runtimePolicy.interactionMode === "plan";
+          const selectedAgent =
+            getModelSelectionStringOptionValue(turn.modelSelection, "agent") ?? "build";
+          const agent = planning ? "plan" : selectedAgent === "plan" ? "build" : selectedAgent;
           const variant = OpenCodeRuntime.selectedOpenCodeVariant(turn.modelSelection);
           const reminder = buildResponseLanguageInstructions(responseLanguage);
           return {
-            ...(agent === undefined ? {} : { agent }),
+            agent,
             ...(variant === undefined ? {} : { variant }),
             system: [
+              planning ? T3_CODE_PLAN_MODE_INSTRUCTIONS : undefined,
               orchestrationSystemPrompt,
               buildRuntimeInstructions({
                 harness: "OpenCode",

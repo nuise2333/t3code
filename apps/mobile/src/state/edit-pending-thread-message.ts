@@ -26,6 +26,8 @@ import {
 export async function editPendingThreadMessage(message: QueuedThreadMessage): Promise<boolean> {
   if (
     message.creation ||
+    // A draft cannot carry the plan an approval answers; it is removed and approved again instead.
+    message.sourceProposedPlan ||
     appAtomRegistry.get(dispatchingQueuedMessageIdAtom) === message.messageId ||
     appAtomRegistry.get(editingQueuedMessageIdsAtom)[message.messageId]
   ) {

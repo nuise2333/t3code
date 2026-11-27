@@ -20,7 +20,11 @@ import {
   OPENCODE2_HTTP_PROTOCOL,
   OpenCode2OrchestratorReplayHarness,
 } from "./Adapters/OpenCode2AdapterV2.testkit.ts";
-import { OPENCODE_PROVIDER } from "@t3tools/provider-opencode/testing";
+import {
+  OPENCODE_PLAN_READ_PERMISSIONS,
+  OPENCODE_PLAN_T3_MCP_READ_TOOLS,
+  OPENCODE_PROVIDER,
+} from "@t3tools/provider-opencode/testing";
 import { provideDeterministicTestRuntime } from "./testkit/DeterministicRuntime.ts";
 import type { OrchestratorV2ScenarioStep } from "./testkit/OrchestratorScenario.ts";
 import { runOrchestratorV2ProviderReplayScenario } from "./testkit/ProviderReplayHarness.ts";
@@ -51,11 +55,23 @@ const reply = (operation: string, data: unknown): ProviderReplayEntry => ({
   type: "emit_inbound",
   frame: { type: "sdk.response", operation, data },
 });
-const event = (type: string, data: Record<string, unknown>): ProviderReplayEntry => ({
+const event = (
+  type: string,
+  data: Record<string, unknown>,
+  sequence?: number,
+): ProviderReplayEntry => ({
   type: "emit_inbound",
   frame: {
     type: "sdk.event",
-    event: { id: `evt_${type.replaceAll(".", "")}`, created: 1, type, data },
+    event: {
+      id: `evt_${type.replaceAll(".", "")}`,
+      created: 1,
+      type,
+      data,
+      ...(sequence === undefined
+        ? {}
+        : { durable: { aggregateID: data.sessionID, seq: sequence, version: 1 } }),
+    },
   },
 });
 const labelled = (entry: ProviderReplayEntry, label: string): ProviderReplayEntry =>
@@ -118,10 +134,22 @@ const autoEditRules = (name: string) => [
 ];
 
 const planRules = (name: string) => [
-  { action: "*", resource: "*", effect: "allow" },
+  { action: "*", resource: "*", effect: "deny" },
+  ...[
+    ...OPENCODE_PLAN_READ_PERMISSIONS,
+    "opencode_list_mcp_resources",
+    "opencode_read_mcp_resource",
+  ].map((action) => ({ action, resource: "*", effect: "allow" })),
   { action: "edit", resource: "*", effect: "deny" },
+  { action: "shell", resource: "*", effect: "ask" },
+  { action: "external_directory", resource: "*", effect: "allow" },
   ...PLAN_PATHS,
-  ...mcpRules(name),
+  mcpRules(name)[0],
+  ...OPENCODE_PLAN_T3_MCP_READ_TOOLS.map((tool) => ({
+    action: `t3-code-thread_${name}_${tool}`,
+    resource: "*",
+    effect: "allow",
+  })),
 ];
 
 const sessionInfo = (directory: string, permissions: ReadonlyArray<unknown>, title: string) => ({
@@ -155,12 +183,16 @@ const answeredPrompt = (text: string): ReadonlyArray<ProviderReplayEntry> => [
       delivery: "steer",
     },
   }),
-  event("session.text.ended", {
-    sessionID: SESSION,
-    assistantMessageID: `msg_assistant_${text}`,
-    ordinal: 0,
-    text,
-  }),
+  event(
+    "session.text.ended",
+    {
+      sessionID: SESSION,
+      assistantMessageID: `msg_assistant_${text}`,
+      ordinal: 0,
+      text,
+    },
+    1,
+  ),
   event("session.execution.succeeded", { sessionID: SESSION }),
 ];
 
@@ -421,6 +453,7 @@ describe("OpenCode 2 through the orchestrator", () => {
           reply("session.update", null),
           out("session.switchAgent", { sessionID: SESSION, agent: "build" }),
           reply("session.switchAgent", null),
+          ...instructionsWritten,
           ...answeredPrompt("BUILT"),
         ],
         commands: [
@@ -439,6 +472,25 @@ describe("OpenCode 2 through the orchestrator", () => {
         projection.runs.map((run) => run.status),
         ["completed", "completed"],
       );
+      assert.deepEqual(
+        projection.visibleTurnItems.flatMap(({ item }) =>
+          item.type === "proposed_plan"
+            ? [[item.type, item.markdown]]
+            : item.type === "assistant_message"
+              ? [[item.type, item.text]]
+              : [],
+        ),
+        [
+          ["proposed_plan", "PLANNED"],
+          ["assistant_message", "BUILT"],
+        ],
+      );
+      assert.deepInclude(projection.plans[0], {
+        kind: "proposed_plan",
+        status: "active",
+        revision: 1,
+        markdown: "PLANNED",
+      });
     }),
   );
 

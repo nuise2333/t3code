@@ -98,6 +98,8 @@ export function composerCommandKeyHandler(input: {
   /** Predicted next prompt that Tab fills into an empty composer; Escape dismisses it. */
   readonly promptSuggestion: string | null;
   readonly dismissPromptSuggestion: () => void;
+  /** Resolves false where plan mode is unavailable, leaving Shift+Tab to the browser. */
+  readonly toggleInteractionMode: () => boolean;
 }) {
   const {
     keybindings,
@@ -230,7 +232,7 @@ export function composerCommandKeyHandler(input: {
       prompt: promptRef.current,
     });
     if (key === "Tab" && event.shiftKey && submissionIntent === null) {
-      return applyListEdit(event, listOutdentForTab);
+      return applyListEdit(event, listOutdentForTab) || input.toggleInteractionMode();
     }
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive =

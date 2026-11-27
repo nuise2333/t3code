@@ -32,7 +32,7 @@ import {
 
 const FX_PRESENTATION = {
   displayName: "fx",
-  showInteractionModeToggle: false,
+  showInteractionModeToggle: true,
   supportedRuntimeModes: FX_SUPPORTED_RUNTIME_MODES,
 } as const;
 const FX_MODEL_CAPABILITIES = createModelCapabilities({

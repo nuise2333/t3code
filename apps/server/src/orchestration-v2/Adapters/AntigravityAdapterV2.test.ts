@@ -1079,7 +1079,7 @@ describe("AntigravityAdapterV2 subagent reads", () => {
 });
 
 describe("AntigravityAdapterV2 runtime mode ceiling", () => {
-  const modesSetFor = (pickedMode: string) =>
+  const modesSetFor = (pickedMode: string, interactionMode: "default" | "plan" = "default") =>
     Effect.gen(function* () {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const path = yield* Path.Path;
@@ -1127,7 +1127,7 @@ describe("AntigravityAdapterV2 runtime mode ceiling", () => {
         },
         runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "approval-required",
-          interactionMode: "default",
+          interactionMode,
           cwd: process.cwd(),
           maxRuntimeMode: "auto-accept-edits",
         }),
@@ -1140,6 +1140,7 @@ describe("AntigravityAdapterV2 runtime mode ceiling", () => {
       assert.deepEqual(yield* modesSetFor("yolo"), ["default"]);
       // A mode under the ceiling is still the user's to pick.
       assert.deepEqual(yield* modesSetFor("auto_edit"), ["default", "auto_edit"]);
+      assert.deepEqual(yield* modesSetFor("auto_edit", "plan"), ["default"]);
     }),
   );
 });

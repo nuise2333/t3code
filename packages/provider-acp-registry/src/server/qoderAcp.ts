@@ -2,6 +2,7 @@ import type { RuntimeMode, ServerProvider } from "@t3tools/contracts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   acpPermissionDisposition,
+  unknownRecord,
   type AcpPermissionDisposition,
 } from "@t3tools/provider-acp/server/clientPolicy";
 import type * as EffectAcpSchema from "effect-acp/compat";
@@ -59,12 +60,11 @@ export function qoderPermissionDisposition(
   policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
   request: EffectAcpSchema.RequestPermissionRequest,
 ): AcpPermissionDisposition {
+  const qoder = unknownRecord(request.toolCall._meta?.qoder);
+  const planExit = qoder?.toolName === "ExitPlanMode";
+  if (policy.interactionMode === "plan" && planExit) return "deny";
   const disposition = acpPermissionDisposition(policy, request);
   if (disposition !== "allow") return disposition;
   if (policy.runtimeMode !== "full-access") return "ask";
-  const qoder = request.toolCall._meta?.qoder;
-  if (typeof qoder !== "object" || qoder === null) return disposition;
-  const planning = "planning" in qoder && qoder.planning === true;
-  const planExit = "toolName" in qoder && qoder.toolName === "ExitPlanMode";
-  return planning || planExit ? "ask" : disposition;
+  return qoder?.planning === true || planExit ? "ask" : disposition;
 }

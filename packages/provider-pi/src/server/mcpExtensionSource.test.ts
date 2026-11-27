@@ -336,6 +336,30 @@ describe("Pi MCP tool schemas", () => {
 });
 
 describe("Pi tool discovery permissions", () => {
+  it("blocks mutating tools in Plan even under Full access and restores access for Build", async () => {
+    const bridge = await loadMcpBridge({ runtimeMode: "full-access" });
+    const changeMode = bridge.commands.get("t3-interaction-mode");
+    assert.isDefined(changeMode);
+    const hook = bridge.handlers.get("tool_call") as unknown as (event: {
+      toolName: string;
+      input: unknown;
+    }) => Promise<{ block: true } | undefined>;
+
+    await changeMode!("plan");
+    const sections = {};
+    await bridge.handlers.get("before_agent_start")!(
+      { systemPrompt: "Pi", systemPromptOptions: { sections } },
+      { ui: { notify: () => {} } },
+    );
+    assert.include(JSON.stringify(sections), "Start the reply with a level-one heading");
+    assert.isUndefined(await hook({ toolName: "read", input: {} }));
+    for (const toolName of ["edit", "write", "bash"]) {
+      assert.isTrue((await hook({ toolName, input: {} }))?.block);
+    }
+    await changeMode!("default");
+    assert.isUndefined(await hook({ toolName: "bash", input: {} }));
+  });
+
   it.each(["approval-required", "auto-accept-edits", "auto"])(
     "allows annotated T3 reads in %s while gating mutations and replacements",
     async (runtimeMode) => {

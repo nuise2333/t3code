@@ -1,4 +1,30 @@
+import type {
+  OrchestrationV2PlanArtifact,
+  OrchestrationV2TurnItem,
+  PlanId,
+} from "@t3tools/contracts";
 import { stripDisplayedPlanMarkdown, proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+
+type ProposedPlanTurnItem = Extract<OrchestrationV2TurnItem, { readonly type: "proposed_plan" }>;
+
+/**
+ * The body of the plan a revision replaced. History paging moves a plan's body onto its turn
+ * item and empties it outside the window, so null means it is not loaded here.
+ */
+export function resolvePlanMarkdown(
+  planId: PlanId,
+  plans: ReadonlyArray<OrchestrationV2PlanArtifact>,
+  turnItems: ReadonlyArray<{ readonly type: string } | ProposedPlanTurnItem>,
+): string | null {
+  const plan = plans.find((candidate) => candidate.id === planId);
+  if (plan?.kind !== "proposed_plan") return null;
+  if (plan.markdown.trim()) return plan.markdown;
+  const item = turnItems.find(
+    (candidate): candidate is ProposedPlanTurnItem =>
+      candidate.type === "proposed_plan" && "planId" in candidate && candidate.planId === planId,
+  );
+  return item?.markdown.trim() ? item.markdown : null;
+}
 
 export function buildCollapsedProposedPlanPreviewMarkdown(
   planMarkdown: string,
@@ -50,8 +76,6 @@ function sanitizePlanFileSegment(input: string): string {
     .replace(/^-+|-+$/g, "");
   return sanitized.length > 0 ? sanitized : "plan";
 }
-
-export const PLAN_IMPLEMENTATION_PROMPT_PREFIX = "PLEASE IMPLEMENT THIS PLAN:\n";
 
 export function buildProposedPlanMarkdownFilename(planMarkdown: string): string {
   const title = proposedPlanTitle(planMarkdown);

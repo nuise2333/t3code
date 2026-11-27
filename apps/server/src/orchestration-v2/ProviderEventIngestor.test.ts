@@ -6,8 +6,10 @@ import {
   CheckpointRef,
   CheckpointScopeId,
   MessageId,
+  PlanId,
   GitCommandError,
   type ModelSelection,
+  type OrchestrationV2PlanArtifact,
   NodeId,
   type OrchestrationV2AppThread,
   type OrchestrationV2DomainEvent,
@@ -597,6 +599,222 @@ layer("ProviderEventIngestorV2", (it) => {
         ["provider-thread.updated"],
       );
       assert.equal(latestThreadSequence, 2);
+    }),
+  );
+
+  it.effect("chains activated proposals and promotes a completed plan run in place", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const sink = yield* EventSink.EventSinkV2;
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const ids = yield* IdAllocator.IdAllocatorV2;
+      const thread = yield* threadCreatedEvent(now);
+      yield* sink.write({ events: [thread] });
+      const threadId = thread.threadId;
+      const runId = RunId.make("run:review");
+      const nodeId = NodeId.make("node:review");
+      const providerInstanceId = modelSelection.instanceId;
+      const input = {
+        providerSessionId: yield* ids.allocate.providerSession({ providerInstanceId, threadId }),
+        providerInstanceId,
+        threadId,
+        runId,
+        nodeId,
+      };
+      const first = {
+        id: PlanId.make("z-first"),
+        kind: "proposed_plan",
+        status: "active",
+        threadId,
+        nodeId,
+        runId: null,
+        markdown: "First",
+      } as const;
+      const update = (plan: Extract<OrchestrationV2PlanArtifact, { kind: "proposed_plan" }>) =>
+        ingestor.ingestNormalized({
+          ...input,
+          event: { type: "plan.updated", driver: CODEX_DRIVER, plan },
+        });
+      yield* update(first);
+      const second = { ...first, id: PlanId.make("a-second"), markdown: "Second" };
+      yield* update({ ...second, status: "draft" });
+      yield* ingestor.ingestNormalized({
+        ...input,
+        event: {
+          type: "plan.updated",
+          driver: ProviderDriverKind.make("claudeAgent"),
+          plan: { ...first, status: "superseded" },
+        },
+      });
+      yield* update(second);
+      yield* update({ ...second, markdown: "Second finished" });
+      yield* update({ ...second, markdown: "" });
+      yield* update(first);
+      assert.deepInclude(yield* store.getPlan(threadId, first.id), {
+        revision: 1,
+        status: "superseded",
+      });
+      assert.deepInclude(yield* store.getPlan(threadId, second.id), {
+        revision: 2,
+        previousPlanId: first.id,
+        status: "active",
+        markdown: "Second finished",
+      });
+      const providerTurnId = ProviderTurnId.make("turn:review");
+      const providerThreadId = ProviderThreadId.make("provider-thread:review");
+      const item = {
+        id: TurnItemId.make("item:review"),
+        threadId,
+        runId,
+        nodeId,
+        providerTurnId,
+        providerThreadId,
+        ordinal: 2,
+        nativeItemRef: null,
+        parentItemId: null,
+        status: "completed",
+        title: null,
+        startedAt: now,
+        updatedAt: now,
+        completedAt: now,
+        type: "assistant_message",
+        messageId: MessageId.make("message:review"),
+        text: "Third",
+        streaming: false,
+      } as const;
+      const emitText = (text: string) =>
+        ingestor.ingestNormalized({
+          ...input,
+          event: {
+            type: "turn_item.updated",
+            driver: CODEX_DRIVER,
+            turnItem: { ...item, text },
+          },
+        });
+      const terminal = {
+        type: "turn.terminal",
+        driver: CODEX_DRIVER,
+        providerTurnId,
+        providerThreadId,
+        runOrdinal: 1,
+        status: "completed",
+        failure: null,
+        threadDisposition: "reusable",
+      } as const;
+      const normalize = () =>
+        ingestor.normalize({ ...input, event: terminal, interactionMode: "plan" });
+      yield* emitText("  ");
+      assert.deepEqual(yield* normalize(), []);
+      yield* emitText(item.text);
+      assert.deepEqual(yield* ingestor.normalize({ ...input, event: terminal }), []);
+      assert.deepEqual(
+        yield* ingestor.normalize({
+          ...input,
+          interactionMode: "plan",
+          event: { ...terminal, status: "interrupted" },
+        }),
+        [],
+      );
+      const failed = yield* ingestor.normalize({
+        ...input,
+        interactionMode: "plan",
+        event: {
+          ...terminal,
+          status: "failed",
+          failureItemOrdinal: 3,
+          failure: makeProviderFailure({ class: "unknown", message: "failed" }),
+        },
+      });
+      assert.deepEqual(
+        failed.map((event) => event.type),
+        ["turn-item.updated"],
+      );
+      const original = yield* store.getTurnItem({ threadId, itemId: item.id });
+      yield* sink.write({ events: yield* normalize() });
+      assert.deepEqual(yield* normalize(), []);
+      const snapshot = (yield* store.getThreadSnapshotWindow(threadId, { rowLimit: 1 })).projection;
+      assert.lengthOf(snapshot.turnItems, 1);
+      const card = snapshot.turnItems[0]!;
+      assert.equal(card.type, "proposed_plan");
+      if (card.type !== "proposed_plan") return;
+      assert.equal(card.ordinal, original?.ordinal);
+      assert.deepInclude(card, { id: item.id, markdown: "Third" });
+      assert.deepInclude(
+        snapshot.plans.find((plan) => plan.id === card.planId),
+        { previousPlanId: second.id, revision: 3 },
+      );
+      assert.deepInclude(
+        snapshot.plans.find((plan) => plan.id === second.id),
+        { markdown: "Second finished", status: "superseded" },
+      );
+      assert.isFalse(snapshot.plans.some((plan) => plan.id === first.id));
+      yield* update({ ...first, id: card.planId, status: "completed", runId, markdown: item.text });
+      const next = { ...first, id: PlanId.make("new-cycle") };
+      yield* update({ ...next, previousPlanId: first.id, revision: 5 });
+      assert.deepInclude(yield* store.getPlan(threadId, next.id), { revision: 1 });
+      assert.notProperty(yield* store.getPlan(threadId, next.id), "previousPlanId");
+
+      const legacy = { ...first, id: PlanId.make("legacy-active") };
+      yield* sink.write({
+        events: [
+          {
+            type: "plan.updated",
+            id: yield* ids.allocate.event({ threadId }),
+            threadId,
+            occurredAt: now,
+            payload: legacy,
+          },
+        ],
+      });
+      const later = { ...input, runId: RunId.make("run:later") };
+      const attachment = {
+        type: "image",
+        id: "image-review",
+        name: "diagram.png",
+        mimeType: "image/png",
+        sizeBytes: 15,
+      } as const;
+      yield* ingestor.ingestNormalized({
+        ...later,
+        event: {
+          type: "message.updated",
+          driver: CODEX_DRIVER,
+          message: {
+            id: MessageId.make("message:only"),
+            threadId,
+            runId: later.runId,
+            nodeId,
+            role: "assistant",
+            text: "Plan with diagram",
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+            attachments: [attachment],
+            createdBy: "agent",
+            creationSource: "provider",
+          },
+        },
+      });
+      yield* sink.write({
+        events: yield* ingestor.normalize({ ...later, event: terminal, interactionMode: "plan" }),
+      });
+      const active = yield* store.getActiveProposals(threadId);
+      assert.lengthOf(active, 1);
+      assert.deepInclude(active[0], { previousPlanId: legacy.id, revision: 2 });
+      assert.equal((yield* store.getPlan(threadId, next.id))?.status, "superseded");
+      assert.equal((yield* store.getPlan(threadId, legacy.id))?.status, "superseded");
+      const records = yield* store.getThreadRecords(threadId, ["turnItems"], {
+        turnItemRunId: later.runId,
+      });
+      assert.deepInclude(
+        records.turnItems.find((row) => row.type === "assistant_message"),
+        { text: "", attachments: [attachment] },
+      );
+      assert.deepInclude(
+        records.turnItems.find((row) => row.type === "proposed_plan"),
+        { markdown: "Plan with diagram" },
+      );
     }),
   );
 

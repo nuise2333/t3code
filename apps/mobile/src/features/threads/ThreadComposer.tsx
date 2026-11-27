@@ -76,6 +76,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { ComposerAttachmentButton } from "./ComposerAttachmentButton";
+import { ComposerPlanModeControl } from "./ComposerPlanModeControl";
 import {
   ComposerAttachmentStrip,
   ComposerAttachmentThumbnail,
@@ -898,6 +899,18 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       />
     ) : null;
 
+  const planModeControl =
+    !props.isDraft &&
+    queuedEdit === null &&
+    selectedProviderStatus?.showInteractionModeToggle === true ? (
+      <ComposerPlanModeControl
+        threadKey={composerOwnerKey}
+        on={props.selectedThread.interactionMode === "plan"}
+        size={usesLargeControls ? "large" : "regular"}
+        disabled={!props.canOperateThread || isSubmissionLocked}
+      />
+    ) : null;
+
   return (
     <Animated.View
       onLayout={(event) => props.onHeightChange?.(event.nativeEvent.layout.height)}
@@ -1179,6 +1192,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 }
               >
                 {compactControl}
+                {planModeControl}
                 {modelControl}
                 <ComposerDictationStartAction
                   size={usesLargeControls ? "large" : "regular"}

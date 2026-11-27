@@ -1826,7 +1826,7 @@ describe("incremental v2 timeline entries", () => {
     }
   });
 
-  it("rebuilds the plan entry when only its artifact status changes", () => {
+  it("rebuilds the plan entry when only its artifact status or revision changes", () => {
     const fixture = makeStreamingWorkTimelineFixture("proposed_plan");
     const visibleTurnItems = withStreamedText(
       fixture.visibleTurnItems,
@@ -1848,6 +1848,18 @@ describe("incremental v2 timeline entries", () => {
     expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(input));
     expect(next.entries.find((entry) => entry.kind === "proposed-plan")).toMatchObject({
       proposedPlan: { status: "superseded" },
+    });
+
+    const previousPlanId = PlanId.make("first-plan");
+    const revised = deriveTimelineEntriesFromVisibleTurnItemsWithState(
+      {
+        ...input,
+        plans: input.plans.map((plan) => ({ ...plan, revision: 2, previousPlanId })),
+      },
+      next,
+    );
+    expect(revised.entries.find((entry) => entry.kind === "proposed-plan")).toMatchObject({
+      proposedPlan: { revision: 2, previousPlanId },
     });
   });
 });

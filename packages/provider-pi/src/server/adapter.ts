@@ -82,6 +82,7 @@ import {
 import {
   PI_FILE_CHANGE_TOOLS,
   PI_T3_RESPONSE_LANGUAGE_COMMAND,
+  PI_T3_INTERACTION_MODE_COMMAND,
   PI_T3_SERVICE_TIER_COMMAND,
 } from "./mcpExtensionSource.ts";
 import { PI_STANDARD_SERVICE_TIER } from "./modelCapabilities.ts";
@@ -664,6 +665,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
       let serviceTierMayBeSet = false;
       // Same reload hazard as the tier: a set language is resent every turn.
       let responseLanguageMayBeSet = false;
+      let planModeMayBeSet = false;
       let appliedSessionName: string | null = null;
       const outOfTurnExtensionErrors: Array<PiRpcRecord> = [];
       let lastKnownLeaf: string | null = null;
@@ -3259,6 +3261,20 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             const continuation =
               turnInput.message.createdBy === "agent" &&
               turnInput.message.creationSource === "provider";
+            const interactionMode = turnInput.runtimePolicy.interactionMode;
+            if (!continuation && (interactionMode === "plan" || planModeMayBeSet)) {
+              const result = yield* request({
+                type: "prompt",
+                message: `/${PI_T3_INTERACTION_MODE_COMMAND} ${interactionMode}`,
+              });
+              const disposition = recordString(result, "disposition");
+              if (disposition !== undefined && disposition !== "handled") {
+                return yield* protocolError(
+                  "T3 Code's Pi extension did not apply the interaction mode",
+                );
+              }
+              planModeMayBeSet = interactionMode === "plan";
+            }
             if (!continuation) {
               yield* applySelection(turnInput.modelSelection);
               yield* applyResponseLanguage();
