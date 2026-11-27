@@ -3072,36 +3072,36 @@ export const layerWsRpc = (
           /* Request instrumentation already owns the span; keep this helper in that context. */
           Effect.fnUntraced(function* (input) {
             const path = yield* Path.Path;
+            const source =
+              input.resource._tag === "office-render" ? input.resource.source : input.resource;
             if (
-              input.resource._tag === "attachment" ||
-              input.resource._tag === "native-app-icon" ||
-              input.resource._tag === "tool-output-image" ||
-              input.resource._tag === SOURCE_CONTROL_MEDIA_ASSET ||
+              source._tag === "attachment" ||
+              source._tag === "native-app-icon" ||
+              source._tag === "tool-output-image" ||
+              source._tag === SOURCE_CONTROL_MEDIA_ASSET ||
               // A network path is served only from the thread's project, looked up below.
-              (input.resource._tag === "media-file" &&
-                path.isAbsolute(input.resource.path) &&
-                !isNetworkPath(input.resource.path))
+              (source._tag === "media-file" &&
+                path.isAbsolute(source.path) &&
+                !isNetworkPath(source.path))
             ) {
               return yield* issueAssetUrl({ resource: input.resource });
             }
-            if (input.resource._tag === "draft-workspace-file") {
+            if (source._tag === "draft-workspace-file") {
               return yield* issueAssetUrl({
                 resource: input.resource,
-                workspaceRoot: input.resource.cwd,
+                workspaceRoot: source.cwd,
               });
             }
-            if (input.resource._tag === "project-favicon") {
-              const project = yield* projectStore
-                .findActiveByWorkspaceRoot(input.resource.cwd)
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new AssetWorkspaceContextResolutionError({
-                        resource: input.resource,
-                        cause,
-                      }),
-                  ),
-                );
+            if (source._tag === "project-favicon") {
+              const project = yield* projectStore.findActiveByWorkspaceRoot(source.cwd).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new AssetWorkspaceContextResolutionError({
+                      resource: input.resource,
+                      cause,
+                    }),
+                ),
+              );
               if (Option.isNone(project)) {
                 return yield* new AssetWorkspaceContextNotFoundError({
                   resource: input.resource,
@@ -3119,17 +3119,15 @@ export const layerWsRpc = (
                   : {}),
               });
             }
-            const thread = yield* threadManagement
-              .getThreadRecords(input.resource.threadId, [])
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new AssetWorkspaceContextResolutionError({
-                      resource: input.resource,
-                      cause,
-                    }),
-                ),
-              );
+            const thread = yield* threadManagement.getThreadRecords(source.threadId, []).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new AssetWorkspaceContextResolutionError({
+                    resource: input.resource,
+                    cause,
+                  }),
+              ),
+            );
             const project = yield* projectService.getById(thread.thread.projectId).pipe(
               Effect.mapError(
                 (cause) =>

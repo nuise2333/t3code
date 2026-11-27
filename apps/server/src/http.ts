@@ -1,3 +1,4 @@
+import * as Result from "effect/Result";
 import * as Mime from "effect/http/Mime";
 import {
   AuthOrchestrationOperateScope,
@@ -429,10 +430,20 @@ export const layerAssetRoute = HttpRouter.add(
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
 
-    const asset = yield* resolveAsset(
+    const resolution = yield* resolveAsset(
       suffix.slice(0, separatorIndex),
       suffix.slice(separatorIndex + 1),
-    );
+    ).pipe(Effect.result);
+    if (Result.isFailure(resolution)) {
+      const unavailable = resolution.failure._tag === "OfficeRendererUnavailable";
+      return HttpServerResponse.text(
+        unavailable
+          ? "LibreOffice is not installed on this computer."
+          : "LibreOffice could not open this file.",
+        { status: unavailable ? 503 : 422 },
+      );
+    }
+    const asset = resolution.success;
     if (!asset) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }

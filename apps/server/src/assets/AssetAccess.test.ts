@@ -3,6 +3,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import {
   AssetAccessError,
   AssetCreateUrlInput,
@@ -25,6 +26,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClientRequest, HttpClientResponse, HttpServerResponse } from "effect/http";
 import { vi } from "vite-plus/test";
 
+import * as OfficeRender from "../officeRender/OfficeRender.ts";
 import * as AssetSigner from "./AssetSigner.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -121,6 +123,7 @@ const layerTest = Layer.mergeAll(
     Layer.provide(WorkspacePaths.layer),
     Layer.provide(T3ProjectFileLoader.layer),
   ),
+  OfficeRender.layer.pipe(Layer.provide(layerConfig)),
   NativeAppIconResolver.layer.pipe(Layer.provide(layerConfig)),
   AssetSigner.layer.pipe(
     Layer.provideMerge(ServerSecretStore.layer.pipe(Layer.provide(layerConfig))),
@@ -1247,6 +1250,81 @@ describe("AssetAccess", () => {
       }).pipe(Effect.flip);
       expect(error).toBeInstanceOf(AssetPreviewTypeValidationError);
     }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect(
+    "serves only the rendered PDF from Office grants for host files, drafts, and attachments",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const config = yield* ServerConfig.ServerConfig;
+        const workspaceRoot = yield* fs.makeTempDirectoryScoped();
+        const name = "报告.docx";
+        const file = path.join(workspaceRoot, name);
+        const attachmentId = "thread-1-00000000-0000-4000-8000-000000000031-docx";
+        yield* fs.makeDirectory(config.attachmentsDir, { recursive: true });
+        const attachmentPath = path.join(config.attachmentsDir, attachmentId + ".docx");
+        for (const source of [
+          {
+            _tag: "media-file",
+            threadId: ThreadId.make("render"),
+            path: name,
+            disposition: "attachment",
+          },
+          { _tag: "draft-workspace-file", cwd: workspaceRoot, path: name },
+          { _tag: "attachment", attachmentId, fileName: name },
+        ] as const) {
+          const sourcePath = source._tag === "attachment" ? attachmentPath : file;
+          yield* fs.writeFileString(sourcePath, "original");
+          const resource = { _tag: "office-render", source } as const;
+          const unavailable = yield* issueAssetUrl({ resource, workspaceRoot }).pipe(
+            Effect.provideService(OfficeRender.OfficeRender, {
+              available: Effect.succeed(false),
+              renderPdf: () => Effect.die("Unexpected conversion"),
+            }),
+            Effect.flip,
+          );
+          expect(unavailable).toMatchObject({
+            _tag: "AssetOfficeRendererUnavailableError",
+            resource,
+          });
+          const minted = yield* issueAssetUrl({ resource, workspaceRoot });
+          const [token, encodedName] = minted.relativeUrl
+            .slice(ASSET_ROUTE_PREFIX.length + 1)
+            .split("/");
+          expect(decodeURIComponent(encodedName!)).toBe("报告.pdf");
+          expect(yield* resolveAsset(token!, encodeURIComponent(name))).toBeNull();
+          const served = yield* resolveAsset(token!, encodedName!);
+          if (served?.kind !== "file") throw new Error("Missing rendered PDF");
+          const response = HttpServerResponse.toWeb(yield* assetFileResponse(served, "bytes=0-3"));
+          expect(response.status).toBe(206);
+          expect(response.headers.get("content-type")).toBe("application/pdf");
+          expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
+          expect(response.headers.get("content-disposition")).toBeNull();
+          expect(yield* Effect.promise(() => response.text())).toBe("%PDF");
+          yield* fs.writeFileString(sourcePath, "changed contents");
+          expect((yield* issueAssetUrl({ resource, workspaceRoot })).fileRevision).not.toBe(
+            minted.fileRevision,
+          );
+          yield* fs.rename(sourcePath, sourcePath + ".old");
+          yield* fs.writeFileString(sourcePath, "replacement");
+          expect(yield* resolveAsset(token!, encodedName!)).toBeNull();
+        }
+      }).pipe(
+        Effect.provideServiceEffect(
+          OfficeRender.OfficeRender,
+          OfficeRender.make({
+            find: async () => "fake",
+            run: async (_binary, args) => {
+              const outdir = args[args.indexOf("--outdir") + 1]!;
+              await NodeFSP.writeFile(NodePath.join(outdir, "source.pdf"), "%PDF-example");
+              return "";
+            },
+          }),
+        ),
+        Effect.provide(layerTest),
+      ),
   );
 
   it.effect("signs MCP render intent only for inline HTML attachments", () =>
