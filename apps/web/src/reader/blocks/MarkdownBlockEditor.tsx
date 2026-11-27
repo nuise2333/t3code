@@ -482,6 +482,17 @@ export function MarkdownBlockEditor(props: MarkdownBlockEditorProps) {
       className={cn(READER_ROOT_CLASS, "outline-none")}
       data-markdown-block-editor
       onKeyDown={onRootKeyDown}
+      onCopy={(event) => {
+        // The whole file selected copies as the file: its Markdown, with its own line ends.
+        const selection = event.currentTarget.ownerDocument.getSelection();
+        const blocks = event.currentTarget.querySelectorAll("[data-markdown-block]");
+        const first = blocks[0];
+        const last = blocks[blocks.length - 1];
+        if (open || !selection || selection.isCollapsed || !first || !last) return;
+        if (!selection.containsNode(first, true) || !selection.containsNode(last, true)) return;
+        event.preventDefault();
+        event.clipboardData.setData("text/plain", parsed.text);
+      }}
     >
       {parsed.blocks.map((block, index) =>
         index === openIndex ? (
