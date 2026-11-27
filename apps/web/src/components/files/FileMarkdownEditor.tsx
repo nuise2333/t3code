@@ -4,7 +4,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
-import { useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
@@ -25,7 +25,13 @@ import { useAtomCommand } from "~/state/use-atom-command";
 
 import { contentsOnClose, reconcileIncoming } from "./fileMarkdownPublish";
 import { FileMarkdownPreview, markdownFileBaseDir } from "./FileMarkdownPreview";
-import { changeFileSaveSession, type FileSaveTarget } from "./fileSaveSessions";
+import {
+  changeFileSaveSession,
+  type FileSaveConflict,
+  type FileSaveTarget,
+  resolveFileSaveConflict,
+  subscribeFileSaveConflict,
+} from "./fileSaveSessions";
 import { setProjectFileQueryData } from "./projectFilesQueryState";
 
 // Keystrokes are published after a pause, and at once on blur, page hide and unmount.
@@ -131,6 +137,8 @@ export function FileMarkdownEditor(props: {
     dirty: false,
     conflicted: false,
     conflict: null as { readonly base: string; readonly disk: string } | null,
+    /** The save session refused a write because the disk changed under it; it holds the draft. */
+    sessionConflict: false,
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
   });
   const saveTarget: FileSaveTarget = { environmentId, cwd, relativePath };
@@ -163,6 +171,7 @@ export function FileMarkdownEditor(props: {
     setConflict(null);
     status.current.conflicted = false;
     status.current.conflict = null;
+    status.current.sessionConflict = false;
   };
 
   const takeIn = (next: string) => {
@@ -174,6 +183,8 @@ export function FileMarkdownEditor(props: {
 
   const reconcile = useEffectEvent((contents: string) => {
     const current = status.current;
+    // The session publishes the disk's version as it holds the draft back; the bar decides.
+    if (current.sessionConflict) return;
     const outcome = reconcileIncoming(contents, current);
     // While a conflict stands, `published` is still the base both sides started from, so a newer
     // disk version is weighed against it again: a clean merge or a revert to the base settles it.
@@ -207,23 +218,59 @@ export function FileMarkdownEditor(props: {
     reconcile(contents);
   }, [contents]);
 
+  const onSessionConflict = useEffectEvent((next: FileSaveConflict | null) => {
+    const current = status.current;
+    if (!next) return;
+    clearTimeout(current.timer);
+    current.sessionConflict = true;
+    current.conflicted = true;
+    current.conflict = { base: next.base, disk: next.disk };
+    current.latest = next.local;
+    current.published = next.local;
+    current.dirty = false;
+    if (next.local !== text) takeIn(next.local);
+    setConflict(current.conflict);
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the save session reports a write it refused because the file changed on disk; it lives outside React
+  useEffect(
+    () => subscribeFileSaveConflict({ environmentId, cwd, relativePath }, onSessionConflict),
+    [environmentId, cwd, relativePath],
+  );
+
+  /** Settles a conflict with `contents`, through the save session when it holds the draft. */
+  const resolveWith = (contents: string, disk: string) => {
+    const current = status.current;
+    if (!current.sessionConflict) return false;
+    settle();
+    takeIn(contents);
+    current.dirty = false;
+    resolveFileSaveConflict(saveTarget, contents);
+    if (contents === disk) current.published = disk;
+    return true;
+  };
+
+  const leave = useEffectEvent(() => {
+    const current = status.current;
+    // The session keeps a refused draft until the conflict is settled; give it the latest one.
+    if (current.sessionConflict) {
+      changeFileSaveSession(saveTarget, current.latest);
+      return;
+    }
+    if (current.conflict) {
+      current.latest = contentsOnClose(current.latest, current.conflict);
+      current.published = current.conflict.disk;
+      current.dirty = true;
+      current.conflicted = false;
+      current.conflict = null;
+    }
+    publish();
+  });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the last keystrokes reach the save session before the page is hidden, and before the session's lease is released on unmount: layout cleanups run ahead of passive ones
   useLayoutEffect(() => {
-    // An unsettled conflict is not dropped with the editor or the page: both sides are saved, marked.
-    const leave = () => {
-      const current = status.current;
-      if (current.conflict) {
-        current.latest = contentsOnClose(current.latest, current.conflict);
-        current.published = current.conflict.disk;
-        current.dirty = true;
-        current.conflicted = false;
-        current.conflict = null;
-      }
-      publish();
-    };
-    window.addEventListener("pagehide", leave);
+    const onPageHide = () => leave();
+    window.addEventListener("pagehide", onPageHide);
     return () => {
-      window.removeEventListener("pagehide", leave);
+      window.removeEventListener("pagehide", onPageHide);
       leave();
     };
   }, []);
@@ -299,6 +346,7 @@ export function FileMarkdownEditor(props: {
             size="xs"
             variant="outline"
             onClick={() => {
+              if (resolveWith(status.current.latest, conflict.disk)) return;
               settle();
               status.current.published = conflict.disk;
               status.current.dirty = true;
@@ -311,6 +359,7 @@ export function FileMarkdownEditor(props: {
             size="xs"
             variant="outline"
             onClick={() => {
+              if (resolveWith(conflict.disk, conflict.disk)) return;
               settle();
               status.current.dirty = false;
               takeIn(conflict.disk);
@@ -323,6 +372,7 @@ export function FileMarkdownEditor(props: {
             variant="outline"
             onClick={() => {
               const merged = contentsOnClose(status.current.latest, conflict);
+              if (resolveWith(merged, conflict.disk)) return;
               settle();
               takeIn(merged);
               status.current.published = conflict.disk;
