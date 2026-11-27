@@ -2291,6 +2291,7 @@ describe("chooseAutoModel", () => {
         readonly taskClass?: "implement" | "hard" | "quick_edit" | "readonly";
         readonly providers?: ReadonlyArray<ServerProvider>;
         readonly models?: typeof board.models;
+        readonly plans?: NonNullable<RoutingTable["teamBoard"]>["subscriptionPlans"];
       } = {},
     ) => {
       const providers = options.providers ?? all;
@@ -2299,7 +2300,11 @@ describe("chooseAutoModel", () => {
         subtask,
         table: {
           ...tableOf(ROWS),
-          teamBoard: { ...board, models: options.models ?? board.models },
+          teamBoard: {
+            ...board,
+            models: options.models ?? board.models,
+            ...(options.plans === undefined ? {} : { subscriptionPlans: options.plans }),
+          },
         },
         taskClass: options.taskClass ?? "implement",
         providers,
@@ -2590,12 +2595,54 @@ describe("chooseAutoModel", () => {
     expect(worker("cheap", "backend", { taskClass: "hard", models: cnProPricey })).toStrictEqual(
       cn,
     );
+    // On a plan with room, Cheap counts what a run costs there, so the price limit lets it in.
+    const weekly = (usedPercent: number) => ({
+      usageLimits: {
+        checkedAt: "2026-07-01T00:00:00.000Z",
+        windows: [
+          {
+            id: "weekly",
+            label: "Weekly",
+            kind: "weekly" as const,
+            usedPercent,
+            windowDurationMins: 10_080,
+          },
+        ],
+      },
+    });
+    const cnOnPlan = provider(opencodeId, "opencode", ["fake-cn", "fake-cn-pro"], weekly(10));
+    const cnProDearer = cnProPricey.map((entry) =>
+      entry.models[0] === "fake-cn-pro" ? { ...entry, costUsd: 40 } : entry,
+    );
+    expect(
+      worker("cheap", "backend", {
+        taskClass: "hard",
+        providers: [cnOnPlan],
+        models: cnProDearer,
+        plans: [{ agent: "opencode", monthlyUsd: 10, apiUsd: { "fake-cn-pro": 100 } }],
+      }),
+    ).toStrictEqual(cnPro);
+    // A plan the board does not price may not cover the model at all, so Cheap pays list.
+    expect(
+      worker("cheap", "backend", { taskClass: "hard", providers: [cnOnPlan], models: cnProPricey }),
+    ).toStrictEqual(cn);
     const newestPricey = cnProPricey.map((entry) =>
       entry.models[0] === "fake-cn-pro" ? { ...entry, newest: true } : entry,
     );
     expect(worker("cheap", "backend", { taskClass: "hard", models: newestPricey })).toStrictEqual(
       cnPro,
     );
+    // About as strong, Best leaves an agent down to the user's last quota alone.
+    const opusFaster = board.models.map((entry) =>
+      entry.models[0] === "model-opus" ? { ...entry, minutes: 100 } : { ...entry, minutes: 150 },
+    );
+    const bestOf = (claudeUsed: number) =>
+      worker("best", "backend", {
+        providers: [claude(weekly(claudeUsed)), codex()],
+        models: opusFaster,
+      });
+    expect(bestOf(10)).toStrictEqual(opus);
+    expect(bestOf(95)).toStrictEqual(sol);
     // A level measured apart has its own score and price, and the worker runs at the one picked.
     const solAt = (low: number, high: number, max: number) =>
       board.models.map((entry) =>

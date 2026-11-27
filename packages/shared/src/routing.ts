@@ -1041,6 +1041,8 @@ interface TeamBoardPick {
   readonly coding: number;
   readonly costUsd: number | undefined;
   readonly minutes: number | undefined;
+  /** Best only: the agent that would run it is down to the quota left for the user. */
+  readonly reserved?: boolean;
 }
 
 /**
@@ -1128,14 +1130,17 @@ function chooseBoardModel(
     const top = [...picks].sort(strongest)[0];
     const broader = (pick: TeamBoardPick) =>
       axis === undefined ? pick.coding : (pick.board.scores[axis] ?? 0);
-    return picks
-      .filter(
-        (pick) =>
-          top !== undefined &&
-          pick.score >= top.score - BEST_NEAR_SCORE &&
-          broader(pick) >= broader(top) - BEST_NEAR_BROADER,
-      )
-      .sort((a, b) => (time(a) === time(b) ? strongest(a, b) : time(a) - time(b)))[0];
+    const near = picks.filter(
+      (pick) =>
+        top !== undefined &&
+        pick.score >= top.score - BEST_NEAR_SCORE &&
+        broader(pick) >= broader(top) - BEST_NEAR_BROADER,
+    );
+    // About as strong elsewhere, it leaves the user's last quota alone.
+    const open = near.filter((pick) => pick.reserved !== true);
+    return (open.length > 0 ? open : near).sort((a, b) =>
+      time(a) === time(b) ? strongest(a, b) : time(a) - time(b),
+    )[0];
   }
   const nearOwnBest = (pick: TeamBoardPick) =>
     axis !== undefined || pick.coding >= bestCoding(pick.board) - BALANCED_LEVEL_SLACK;
@@ -1418,6 +1423,10 @@ export function chooseTeamWorkerModel(input: {
           byAgent(a, b),
       )[0];
   };
+  const reservedFor = (board: TeamBoardModel, effort: string) => {
+    const agent = agentFor(board, effort)?.candidate;
+    return agent !== undefined && quotaStanding(agent.provider, agent.slug, input.now).inReserve;
+  };
   /** The share of list price a run costs on the agent that would take it; 1 off a subscription. */
   const priceShare = (board: TeamBoardModel, effort: string) => {
     const agent = agentFor(board, effort)?.candidate;
@@ -1435,9 +1444,9 @@ export function chooseTeamWorkerModel(input: {
     );
     const worth =
       plan && board.models.map((id) => plan.apiUsd[id]).find((usd) => usd !== undefined);
-    return plan && worth !== undefined
-      ? Math.min(1, plan.monthlyUsd / worth)
-      : SUBSCRIPTION_PRICE_SHARE;
+    if (plan && worth !== undefined) return Math.min(1, plan.monthlyUsd / worth);
+    // An ACP agent's windows can cover only some of its models, so Cheap's tight limit waits for data.
+    return input.kind === "cheap" ? 1 : SUBSCRIPTION_PRICE_SHARE;
   };
   const balancedFirst = input.table.teamBoard?.balancedFirst;
   const pick = chooseBoardModel(
@@ -1459,11 +1468,13 @@ export function chooseTeamWorkerModel(input: {
           return best && nearestLevel(best.levels, effort, capFor(board));
         },
         cap,
-      ).map((entry) =>
-        input.kind === "balanced" && entry.costUsd !== undefined
-          ? { ...entry, costUsd: entry.costUsd * priceShare(entry.board, entry.effort) }
-          : entry,
-      ),
+      ).map((entry) => {
+        if (input.kind === "best")
+          return { ...entry, reserved: reservedFor(entry.board, entry.effort) };
+        return entry.costUsd === undefined
+          ? entry
+          : { ...entry, costUsd: entry.costUsd * priceShare(entry.board, entry.effort) };
+      }),
     ),
     subtask === null
       ? balancedFirst?.default
