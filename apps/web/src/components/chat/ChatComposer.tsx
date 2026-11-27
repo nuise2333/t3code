@@ -3635,7 +3635,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           provider={selectedProvider}
           modelKey={`${selectedInstanceId}:${selectedModel}`}
           effort={selectedPromptEffort}
+          // Banners sit in the mascots' airspace, so the mascots duck instead of covering them.
           yieldToUi={
+            shelfItems.length > 0 ||
             composerMenuOpen ||
             isStashMenuOpen ||
             isComposerModelPickerOpen ||

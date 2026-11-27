@@ -1727,6 +1727,8 @@ html:not(.dark) .optical-mascot .optical-mascot-actor::after {
 }
 
 .optical-mascot[data-optical-mascot-peek="1"] .optical-mascot-minis,
+.optical-mascot[data-optical-mascot-peek="1"] .optical-mascot-fx,
+.optical-mascot[data-optical-mascot-peek="1"] .optical-mascot-habitat,
 .optical-mascot[data-optical-mascot-peek="1"] .optical-mascot-actor::after {
   opacity: 0 !important;
 }
