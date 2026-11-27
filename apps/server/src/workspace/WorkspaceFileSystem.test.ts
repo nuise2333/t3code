@@ -656,6 +656,24 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
       }),
     );
 
+    it.effect("round-trips binary writes without carrying over a text BOM", () =>
+      Effect.gen(function* () {
+        const service = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* makeTempDir;
+        const relativePath = "pasted.png";
+        yield* writeTextFile(cwd, relativePath, "\uFEFFold");
+        const bytes = Uint8Array.of(0x89, 0x50, 0, 0xff);
+        yield* service.writeFile({
+          cwd,
+          relativePath,
+          contents: Buffer.from(bytes).toString("base64"),
+          encoding: "base64",
+        });
+        expect(Array.from(yield* fs.readFile(`${cwd}/${relativePath}`))).toEqual(Array.from(bytes));
+      }),
+    );
+
     it.effect("saves over an existing file without rescanning the workspace", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;

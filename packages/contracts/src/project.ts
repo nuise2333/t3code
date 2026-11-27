@@ -529,6 +529,7 @@ export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
+  encoding: Schema.optional(Schema.Literal("base64")),
   /** False for autosave, so a save cannot bring back a file renamed or trashed meanwhile. */
   createIfMissing: Schema.optional(Schema.Boolean),
 });

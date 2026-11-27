@@ -576,10 +576,16 @@ export const make = Effect.gen(function* () {
       .pipe(Effect.orElseSucceed(() => false));
     // readFile decodes the BOM away, so an editor save would otherwise drop it from the file.
     const keepsBom =
+      input.encoding !== "base64" &&
       replacesFile &&
       !input.contents.startsWith(UTF8_BOM) &&
       (yield* Effect.promise(() => startsWithUtf8Bom(realTargetPath)));
-    const contents = keepsBom ? UTF8_BOM + input.contents : input.contents;
+    const contents =
+      input.encoding === "base64"
+        ? Buffer.from(input.contents, "base64")
+        : keepsBom
+          ? UTF8_BOM + input.contents
+          : input.contents;
     const createIfMissing = input.createIfMissing !== false;
     const missingError = () =>
       new WorkspaceFileMissingError({
