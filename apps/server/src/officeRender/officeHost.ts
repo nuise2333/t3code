@@ -102,6 +102,7 @@ export async function prepareProfile(profile: string, platform: NodeJS.Platform,
       )
         directories.push(dir);
     }
+    // Without a login session the font list is unavailable; documents then render unsubstituted.
     const { stdout } = await NodeUtil.promisify(NodeChildProcess.execFile)(
       "/usr/bin/osascript",
       [
@@ -111,8 +112,8 @@ export async function prepareProfile(profile: string, platform: NodeJS.Platform,
         'ObjC.import("AppKit"); ObjC.deepUnwrap($.NSFontManager.sharedFontManager.availableFontFamilies).join("\\n")',
       ],
       { timeout: 10000 },
-    );
-    families = stdout.trim().split("\n");
+    ).catch(() => ({ stdout: "" }));
+    families = stdout.trim().split("\n").filter(Boolean);
   }
   const { links, registry } = officeProfile(profile, directories, families);
   await NodeFSP.mkdir(NodePath.join(profile, "user", "fonts"), { recursive: true });
