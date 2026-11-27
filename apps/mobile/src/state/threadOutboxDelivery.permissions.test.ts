@@ -3,6 +3,7 @@ import {
   CommandId,
   EnvironmentId,
   MessageId,
+  PlanId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -649,5 +650,16 @@ describe("compaction before a queued send", () => {
     expect(state.start).toHaveBeenCalledOnce();
     expect(state.start.mock.calls[0]?.[0].input).toMatchObject(compactTurn);
     expect(remaining()).toEqual([queued]);
+  });
+});
+
+describe("queued plan approval", () => {
+  it("links the turn it starts to the approved plan", async () => {
+    setOperateGrant("secondary", true);
+    const sourceProposedPlan = { threadId: ThreadId.make("thread"), planId: PlanId.make("plan") };
+    await state.manager.enqueue(message({ sourceProposedPlan }));
+    await runDrain();
+    expect(state.start.mock.calls[0]?.[0].input).toMatchObject({ sourceProposedPlan });
+    expect(remaining()).toEqual([]);
   });
 });

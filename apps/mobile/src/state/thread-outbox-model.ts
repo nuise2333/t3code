@@ -1,4 +1,5 @@
 import { isTransportConnectionErrorMessage } from "@t3tools/client-runtime/errors";
+import { PLAN_REVISION_PROMPT } from "@t3tools/client-runtime/planReview";
 import {
   clampFileAttachmentUploadBytes,
   fileAttachmentTooLargeMessage,
@@ -14,6 +15,7 @@ import {
   MessageId,
   ModelSelection,
   OrchestrationMessageContext,
+  PlanId,
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -65,6 +67,7 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   freshContext: Schema.optional(Schema.Boolean),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  sourceProposedPlan: Schema.optional(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
   creation: Schema.optional(QueuedThreadCreationSchema),
   createdAt: IsoDateTime,
 });
@@ -96,6 +99,8 @@ export interface QueuedThreadMessage {
   readonly modelSelection?: ModelSelectionType;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
+  /** The proposed plan this message approves; the turn it starts marks that plan implemented. */
+  readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
   /** Captured at enqueue because draining may occur long after the tap. */
   readonly dispatchMode?: ComposerDispatchMode;
   /** Sends "When you return"'s `/compact` ahead of the message, which queues behind it. */
@@ -146,6 +151,20 @@ export function resolveQueuedThreadSettings(
       message.interactionMode ?? thread.interactionMode,
     ),
   };
+}
+
+/** A plan sent back for revision must not quietly run as an implementation turn. */
+export function dropsPlanRevisionMode(
+  message: Pick<QueuedThreadMessage, "text">,
+  settings: Pick<ThreadSettingsSnapshot, "interactionMode" | "modelSelection">,
+  providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "showInteractionModeToggle">>,
+): boolean {
+  if (!message.text.startsWith(PLAN_REVISION_PROMPT)) return false;
+  // Older environments leave the flag out for providers that ignore plan mode.
+  const provider = providers.find(
+    (candidate) => candidate.instanceId === settings.modelSelection.instanceId,
+  );
+  return settings.interactionMode !== "plan" || provider?.showInteractionModeToggle !== true;
 }
 
 export function modelSelectionsEqual(left: ModelSelectionType, right: ModelSelectionType): boolean {

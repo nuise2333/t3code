@@ -9,7 +9,7 @@ import {
   collectComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
 import { Schema } from "effect";
-import { PLAN_IMPLEMENTATION_PROMPT_PREFIX } from "../../proposedPlan";
+import { PLAN_IMPLEMENTATION_PROMPT_PREFIX } from "@t3tools/client-runtime/planReview";
 
 const CLAUDE_ULTRATHINK_PREFIX = "Ultrathink:\n";
 const REVIEW_COMMENT_BLOCK_PATTERN = /<review_comment\b[^>]*>[\s\S]*?<\/review_comment>/g;

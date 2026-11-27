@@ -703,6 +703,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   ::highlight(t3-assistant-citation-comment) {
     background-color: color-mix(in oklab, var(--primary) 45%, transparent);
   }
+  /* Plan review annotations, painted over the rendered plan. */
+  ::highlight(t3-plan-review-delete) {
+    background-color: color-mix(in oklab, var(--destructive) 24%, transparent);
+    text-decoration: line-through;
+  }
+  ::highlight(t3-plan-review-replace) {
+    background-color: color-mix(in oklab, var(--warning) 30%, transparent);
+  }
+  ::highlight(t3-plan-review-comment) {
+    background-color: color-mix(in oklab, var(--info) 26%, transparent);
+  }
+  ::highlight(t3-plan-review-focus) {
+    background-color: color-mix(in oklab, var(--primary) 45%, transparent);
+  }
   :root {
     /* Keep the original T3 Code artwork palettes as the defaults. Built-in
        themes override them with their own pigments in the components layer. */

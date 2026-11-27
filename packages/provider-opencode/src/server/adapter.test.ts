@@ -325,7 +325,7 @@ describe("OpenCodeAdapterV2", () => {
     ["unset", "prompt"],
     ["unset", "resume"],
     ["default", "prompt"],
-  ] as const)("normalizes reasoning variants for %s inventory at %s dispatch", ([kind, request]) =>
+  ] as const)("normalizes %s variants and stale Plan agent at %s dispatch", ([kind, request]) =>
     Effect.gen(function* () {
       const suffix = `variant-${kind}-${request}`;
       const nativeEvents = asyncEventStream();
@@ -341,7 +341,9 @@ describe("OpenCodeAdapterV2", () => {
         {
           event: {
             subscribe: async (_input: unknown, options: { signal?: AbortSignal }) => {
-              options.signal?.addEventListener("abort", () => nativeEvents.close(), { once: true });
+              options.signal?.addEventListener("abort", () => nativeEvents.close(), {
+                once: true,
+              });
               return { stream: nativeEvents.stream };
             },
           },
@@ -400,7 +402,7 @@ describe("OpenCodeAdapterV2", () => {
       );
       assert.equal(inputs.length, 1);
       const payload = inputs[0]!;
-      assert.equal(payload.agent, "plan");
+      assert.equal(payload.agent, "build");
       if (request === "resume") assert.deepEqual(payload.parts, []);
       if (kind === "supported" || kind === "unknown" || kind === "failure") {
         assert.equal(payload.variant, "medium");
@@ -3641,7 +3643,13 @@ describe("OpenCodeAdapterV2", () => {
               get: Effect.succeed({ ...DEFAULT_SERVER_SETTINGS, responseLanguage: "简体中文" }),
             } as unknown as ProviderHost.ProviderHost["Service"]["settings"],
           },
-          { options: [{ id: "variant", value: "high" }], interactionMode: "plan" },
+          {
+            options: [
+              { id: "variant", value: "high" },
+              { id: "agent", value: "build" },
+            ],
+            interactionMode: "plan",
+          },
         );
         yield* harness.startTurn();
         const snapshot = yield* harness.runtime.readThreadSnapshot({
@@ -3663,6 +3671,7 @@ describe("OpenCodeAdapterV2", () => {
 
         const [start, steer] = promptInputs;
         assert.equal(start?.agent, "plan");
+        assert.include(start?.system ?? "", "Start the reply with a level-one heading");
         assert.equal(start?.variant, "high");
         assert.include(start?.system ?? "", "OpenCode");
         const reminder = buildResponseLanguageInstructions("简体中文");
@@ -4923,6 +4932,20 @@ describe("OpenCodeAdapterV2", () => {
     const fullAccess = openCodePermissionRules(runtimePolicy("full-access"));
     assert.equal(permissionAction(fullAccess, "bash"), "allow");
     assert.equal(permissionAction(fullAccess, "edit"), "allow");
+    const planPolicy = runtimePolicy("full-access", { interactionMode: "plan" });
+    const plan = openCodePermissionRules(planPolicy);
+    assert.equal(permissionAction(plan, "edit"), "deny");
+    assert.equal(permissionAction(plan, "bash"), "ask");
+    assert.equal(permissionAction(plan, "plan_exit"), "deny");
+    assert.equal(permissionAction(plan, "docs_update_document"), "deny");
+    assert.equal(permissionAction(plan, "t3-code_t3_thread_send"), "deny");
+    assert.equal(permissionAction(plan, "t3-code_t3_project_read"), "allow");
+    assert.equal(permissionAction(plan, "webfetch"), "allow");
+    assert.equal(permissionAction(plan, "read"), "allow");
+    const childPlan = openCodeChildPermissionRules(planPolicy, [
+      { permission: "docs_update_document", pattern: "*", action: "allow" },
+    ]);
+    assert.equal(permissionAction(childPlan, "docs_update_document"), "deny");
     const fullAccessRulesCopiedToTaskChildren = fullAccess.filter(
       (rule) => rule.permission === "external_directory" || rule.action === "deny",
     );

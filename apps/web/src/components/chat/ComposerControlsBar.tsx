@@ -15,6 +15,7 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { useAtomValue } from "@effect/atom-react";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { ComposerThreadAssists, type ThreadAssistsState } from "./ComposerThreadAssists";
+import { ComposerPlanModeControl } from "./ComposerPlanModeControl";
 import { ComposerControl } from "./ComposerControl";
 import {
   ComposerFooterModeControls,
@@ -146,6 +147,10 @@ export function ComposerControlsBar(props: {
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
   /** Sits on the right, before permissions, like Antigravity's usage pill. */
   trailingSlot?: ReactNode;
+  /** The selected provider can run plan mode, so its switch shows. */
+  planModeAvailable: boolean;
+  interactionMode: ChatComposerProps["interactionMode"];
+  onToggleInteractionMode: () => void;
 }) {
   const {
     environmentId,
@@ -749,6 +754,13 @@ export function ComposerControlsBar(props: {
       ) : null}
       {/* Token saver and Council sit with permissions on the right, as in Antigravity. */}
       <div data-resting-fixed className="flex shrink-0 items-center gap-1 empty:hidden">
+        {props.planModeAvailable ? (
+          <ComposerPlanModeControl
+            on={props.interactionMode === "plan"}
+            size={controlSize}
+            onToggle={props.onToggleInteractionMode}
+          />
+        ) : null}
         <ComposerThreadAssists
           environmentId={environmentId}
           serverThreadId={serverThreadId}

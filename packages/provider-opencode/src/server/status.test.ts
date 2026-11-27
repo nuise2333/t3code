@@ -719,10 +719,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
             id: "agent",
             label: "Agent",
             type: "select",
-            options: [
-              { id: "build", label: "Build", isDefault: true },
-              { id: "plan", label: "Plan" },
-            ],
+            options: [{ id: "build", label: "Build", isDefault: true }],
             currentValue: "build",
           },
         ]);

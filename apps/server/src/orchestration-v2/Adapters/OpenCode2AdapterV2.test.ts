@@ -48,6 +48,8 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
   OPENCODE_2_STILL_STOPPING,
+  OPENCODE_PLAN_READ_PERMISSIONS,
+  OPENCODE_PLAN_T3_MCP_READ_TOOLS,
   OPENCODE_PROVIDER,
   t3McpServerName,
 } from "@t3tools/provider-opencode/testing";
@@ -271,6 +273,25 @@ const buildPaths = [
     resource: "/home/.local/share/opencode/tool-output/*",
     effect: "allow",
   },
+];
+const planRules = [
+  { action: "*", resource: "*", effect: "deny" },
+  ...[
+    ...OPENCODE_PLAN_READ_PERMISSIONS,
+    "opencode_list_mcp_resources",
+    "opencode_read_mcp_resource",
+  ].map((action) => ({ action, resource: "*", effect: "allow" })),
+  { action: "edit", resource: "*", effect: "deny" },
+  { action: "shell", resource: "*", effect: "ask" },
+  { action: "external_directory", resource: "*", effect: "allow" },
+];
+const planMcpRules = [
+  mcpRules[0],
+  ...OPENCODE_PLAN_T3_MCP_READ_TOOLS.map((tool) => ({
+    action: `t3-code-thread_opencode2-adapter_${tool}`,
+    resource: "*",
+    effect: "allow",
+  })),
 ];
 const agentList = {
   location: { directory: WORK },
@@ -521,6 +542,78 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         turnInput(thread, { ...bigPickle, options: [{ id: "variant", value: "medium" }] }),
       );
       assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+    }),
+  );
+
+  it.effect("switches to Plan and denies unknown tools in Full access", () =>
+    Effect.gen(function* () {
+      const { runtime, thread } = yield* resumed([
+        out("session.switchAgent", { sessionID: SESSION, agent: "plan" }),
+        reply("session.switchAgent", null),
+        out("agent.list", "<any>"),
+        reply("agent.list", agentList),
+        out("session.update", {
+          sessionID: SESSION,
+          permissions: [...planRules, ...planMcpRules],
+        }),
+        reply("session.update", null),
+        out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+        promptAccepted,
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ]);
+      const input = turnInput(thread);
+      const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+      yield* runtime.startTurn({
+        ...input,
+        runtimePolicy: { ...input.runtimePolicy, interactionMode: "plan" },
+      });
+      assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+    }),
+  );
+
+  it.effect("limits plan editing to the native plan directory despite agent path allows", () =>
+    Effect.gen(function* () {
+      const planEdit = {
+        action: "edit",
+        resource: "/home/.opencode/plan/*",
+        effect: "allow",
+      };
+      const build = agentList.data[0]!;
+      const permissions = [...planRules, ...buildPaths, planEdit, ...planMcpRules];
+      const runtime = yield* openCode2ReplayRuntime([
+        ...opening,
+        out("agent.list", "<any>"),
+        reply("agent.list", {
+          ...agentList,
+          data: [
+            {
+              ...build,
+              permissions: [
+                ...build.permissions,
+                { action: "edit", resource: "src/*", effect: "allow" },
+              ],
+            },
+            {
+              ...build,
+              id: "plan",
+              name: "Plan",
+              permissions: [
+                ...build.permissions,
+                planEdit,
+                { action: "edit", resource: "docs/*", effect: "allow" },
+              ],
+            },
+          ],
+        }),
+        out("session.create", { permissions }),
+        replyData("session.create", sessionInfo({ permissions })),
+      ]);
+      const thread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection: bigPickle,
+        runtimePolicy: { ...policy(), interactionMode: "plan" },
+      });
+      assert.equal(thread.nativeThreadRef?.nativeId, SESSION);
     }),
   );
 

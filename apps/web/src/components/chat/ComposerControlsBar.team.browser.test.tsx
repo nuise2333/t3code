@@ -157,6 +157,9 @@ function Bar(
         onModelPickerOpenChange={setOpen}
         modelPickerIconClassName={undefined}
         getModelDisabledReason={() => null}
+        planModeAvailable={false}
+        interactionMode="default"
+        onToggleInteractionMode={() => undefined}
       />
     </AppAtomRegistryProvider>
   );

@@ -174,7 +174,7 @@ with** the next higher level. It rewinds to your earlier message, like
 which stays until you change it. Auto never does this on its own. **Find the
 cause on** opens a new thread in the same project on a model from another
 vendor that reads code at least as well as the failing one, whether or not
-Auto is on, in plan mode where that provider has it, with a draft that asks
+Auto is on, in [plan mode](#plan-mode-and-plan-review), with a draft that asks
 for a read-only root-cause analysis of the failing command; nothing sends until
 you do. It shows only when such a model is ready.
 
@@ -353,6 +353,41 @@ stops below the target, T3 Code brings it back once per round; if it stops
 again, the strip says Council needs you: reply to keep fixing, lower the target,
 or choose **Accept and finish**. A new message after a pass, an accept or the
 round limit starts a new cycle that reviews only what comes next.
+
+## Plan mode and plan review
+
+Turn on plan mode to have the agent investigate and propose a plan before making
+edits, then review, revise, or approve that plan to start implementing it.
+
+Toggle plan mode with the plan control in the composer, `Shift+Tab` in the web
+or desktop composer (outside list or code indentation), or **Toggle plan mode**
+in the command palette. Claude, Codex, and Cursor use their native plan mode;
+other agents are instructed to investigate read-only and end with a Markdown
+plan, which T3 Code presents as a plan card. Some third-party agents run tools
+outside T3 Code's interception, so read-only behavior during planning relies on
+each agent's own plan or read-only mode.
+
+On a plan card, choose **Approve and implement** right away, or open **Review**
+to annotate the plan first:
+
+- Select text on web or desktop, or tap a block on mobile, to mark a part for
+  deletion, replacement, or a comment, and optionally add general feedback.
+- Choose **Request changes** to send your notes back for a revised plan while
+  keeping plan mode on.
+- Choose **Approve and implement** to exit plan mode back to default mode and
+  start implementing, sending any notes as implementation instructions.
+
+A few behaviors are easy to miss:
+
+- **Approving turns plan mode off.** **Approve and implement** switches both the
+  thread and the composer back to default mode; **Request changes** keeps plan
+  mode on.
+- **Draft notes stay on this device.** Unsent annotations and general feedback
+  are stored locally on the device or browser where you wrote them and do not
+  sync to other clients until sent.
+- **Revision comparison is local to the thread.** **Compare with previous**
+  diffs only against the immediately preceding plan revision in the same thread
+  (when loaded), not against earlier revisions or plans in other threads.
 
 ## Quote an assistant response
 

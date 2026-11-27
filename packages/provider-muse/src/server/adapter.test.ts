@@ -418,12 +418,14 @@ describe("MuseAdapterV2", () => {
 
   it.effect("selects the runtime mode's permission profile on native start and resume", () =>
     Effect.gen(function* () {
-      for (const [runtimeMode, profile, approvalMode] of [
-        ["approval-required", ":ask-me", "promptUnmatched"],
-        ["full-access", ":unrestricted", "allowAll"],
+      for (const [interactionMode, runtimeMode, profile, approvalMode] of [
+        ["default", "approval-required", ":ask-me", "promptUnmatched"],
+        ["default", "full-access", ":unrestricted", "allowAll"],
+        ["plan", "full-access", ":ask-me", "denyUnmatched"],
       ] as const) {
         const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           ...runtimePolicy,
+          interactionMode,
           runtimeMode,
         });
         const fresh = yield* makeFakeMuse();
@@ -439,6 +441,49 @@ describe("MuseAdapterV2", () => {
         const mode = yield* saved.takeCall("session/setApprovalMode");
         assert.strictEqual(mode.params.mode, approvalMode);
       }
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("reopens the same Muse session when entering Plan and returning to Build", () =>
+    Effect.gen(function* () {
+      const nativeSessionId = "saved-session";
+      const first = yield* makeFakeMuse("initial");
+      const plan = yield* makeFakeMuse("plan");
+      const build = yield* makeFakeMuse("build");
+      const hosts = [first, plan, build];
+      const readOnlyLaunches: boolean[] = [];
+      const harness = yield* makeHarness(
+        first,
+        INSTANCE_ID,
+        nativeSessionId,
+        undefined,
+        undefined,
+        runtimePolicy,
+        {
+          createHost: async (options) => {
+            readOnlyLaunches.push(options.readOnly === true);
+            return hosts.shift()!.host;
+          },
+        },
+      );
+      for (const [ordinal, interactionMode, host] of [
+        [1, "plan", plan],
+        [2, "default", build],
+      ] as const) {
+        const policy = { ...runtimePolicy, interactionMode };
+        yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, ordinal, policy));
+        assert.equal((yield* host.takeCall("session/resume")).params.sessionId, nativeSessionId);
+        const started = yield* host.takeCall("turn/start");
+        const includesPlan = JSON.stringify(started.params.input).includes(
+          "interaction mode: Plan",
+        );
+        assert.equal(includesPlan, interactionMode === "plan");
+        yield* host.emit("turn/completed", { turnId: started.commandId, terminal: "completed" });
+        assert.equal((yield* harness.takeEvent("turn.terminal")).status, "completed");
+      }
+      assert.deepEqual(readOnlyLaunches, [false, true, false]);
+      assert.equal(first.closeCount(), 1);
+      assert.equal(plan.closeCount(), 1);
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 

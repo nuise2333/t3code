@@ -17,17 +17,20 @@ const editRequest = {
 describe("fx permission prompts", () => {
   // In Auto, fx's own review asks only about what it refused itself; T3
   // answering those by its Auto policy would approve exactly what fx escalated.
-  it("sends every Auto prompt to the user", () => {
+  it.each([
+    ["default", "ask"],
+    ["plan", "deny"],
+  ] as const)("handles Auto write requests in %s mode", (interactionMode, disposition) => {
     assert.equal(
       fxPermissionDisposition(
         ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "auto",
-          interactionMode: "default",
+          interactionMode,
           cwd: "/work",
         }),
         editRequest,
       ),
-      "ask",
+      disposition,
     );
   });
 });

@@ -62,10 +62,12 @@ export const KIRO_SUPPORTED_RUNTIME_MODES = [
  */
 export function kiroAutopilotValue(policy: {
   readonly runtimeMode: RuntimeMode;
+  readonly interactionMode?: AcpRuntimePolicy["interactionMode"];
   readonly approvalPolicy?: unknown;
   readonly sandboxPolicy?: unknown;
 }): "on" | "off" {
-  return policy.runtimeMode === "full-access" &&
+  return policy.interactionMode !== "plan" &&
+    policy.runtimeMode === "full-access" &&
     policy.approvalPolicy === undefined &&
     policy.sandboxPolicy === undefined
     ? "on"

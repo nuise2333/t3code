@@ -89,7 +89,9 @@ Antigravity creates empty `.gemini/skills` and `.agents/skills` folders in the
 workspace when a session starts. Git does not track empty folders, so they never
 appear in commits.
 
-Use Antigravity's native `/plan` command for planning. Tool approvals follow [Permission modes](./permission-modes.md).
+Antigravity supports [plan mode](./composer.md#plan-mode-and-plan-review) (running
+in approval-required mode while planning) as well as its native `/plan` command.
+Tool approvals follow [Permission modes](./permission-modes.md).
 Questions with fixed choices still need one of the offered answers, even in
 **Full access**.
 

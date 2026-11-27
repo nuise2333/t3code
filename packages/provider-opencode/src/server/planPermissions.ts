@@ -1,0 +1,33 @@
+export const OPENCODE_PLAN_READ_PERMISSIONS = [
+  "read",
+  "glob",
+  "grep",
+  "question",
+  "skill",
+  "webfetch",
+  "websearch",
+] as const;
+
+export const OPENCODE_PLAN_T3_MCP_READ_TOOLS = [
+  "device_list",
+  "device_screenshot",
+  "html_preview",
+  "list_scheduled_tasks",
+  "list_thread_pull_requests",
+  "orchestrator_capabilities",
+  "preview_status",
+  "preview_wait_for",
+  "read_pull_request_guide",
+  "t3_environment_links",
+  "t3_environment_read",
+  "t3_preview_list",
+  "t3_project_list",
+  "t3_project_read",
+  "t3_theme_read",
+  "t3_thread_list",
+  "t3_thread_search",
+  "t3_thread_wait",
+  "t3_worktree_list",
+  "t3_worktree_status",
+  "tool_search",
+] as const;

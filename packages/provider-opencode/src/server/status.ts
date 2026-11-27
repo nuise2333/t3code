@@ -32,7 +32,7 @@ import * as OpenCodeServerOwner from "./OpenCodeServerOwner.ts";
 
 const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
-  showInteractionModeToggle: false,
+  showInteractionModeToggle: true,
 } as const;
 
 class OpenCodeProbeError extends Schema.TaggedError<OpenCodeProbeError>()("OpenCodeProbeError", {
@@ -207,10 +207,7 @@ const DEFAULT_OPENCODE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabi
       id: "agent",
       label: "Agent",
       type: "select",
-      options: [
-        { id: "build", label: "Build", isDefault: true },
-        { id: "plan", label: "Plan" },
-      ],
+      options: [{ id: "build", label: "Build", isDefault: true }],
       currentValue: "build",
     },
   ],
@@ -223,7 +220,8 @@ function openCodeCapabilitiesForModel(input: {
 }): ModelCapabilities {
   const variantOptions = openCodeVariantOptions(Object.keys(input.model.variants ?? {}));
   const primaryAgents = input.agents.filter(
-    (agent) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
+    (agent) =>
+      agent.name !== "plan" && !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
   );
   const defaultAgent = inferDefaultAgent(primaryAgents);
   const agentOptions = primaryAgents.map((agent) =>

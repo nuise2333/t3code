@@ -203,7 +203,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
     ...buildServerProvider({
       presentation: {
         displayName: "Antigravity",
-        showInteractionModeToggle: false,
+        showInteractionModeToggle: true,
         // No automatic review, so Auto falls back to Supervised instead of approving everything.
         supportedRuntimeModes: ["approval-required", "auto-accept-edits", "full-access"],
       },

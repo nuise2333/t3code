@@ -56,6 +56,7 @@ export interface MuseSdkHostOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly runtimeMode?: RuntimeMode;
   readonly readOnly?: boolean;
+  readonly sessionMcp?: boolean;
   /** Read-only generation needs session logging for turn/item notifications. */
   readonly sessionLogging?: boolean;
   readonly signal?: AbortSignal;
@@ -200,7 +201,7 @@ export async function createMuseSdkHost(
   timer.unref();
   try {
     const host = await Promise.race([
-      handshake.initialize(museInitializeParams(options.readOnly)),
+      handshake.initialize(museInitializeParams(options.readOnly && options.sessionMcp !== true)),
       interrupted,
     ]);
     if (host.initializeResult.schema?.version !== 1) {

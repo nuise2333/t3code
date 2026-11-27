@@ -24,7 +24,7 @@ import { useEffect, useRef, createContext, type MouseEvent, type ReactNode } fro
 import { type LegendListRef } from "@legendapp/list/react";
 import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
 import type { PendingApproval } from "../../session-logic";
-import { type ChatFileAttachment } from "../../types";
+import { type ChatFileAttachment, type ProposedPlan } from "../../types";
 import { type ExpandedImageItem, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { type AssistantCitationTarget } from "./AssistantCitationSource";
 import { type MessagesTimelineRow, type WorkGroupScrollAnchor } from "./MessagesTimeline.logic";
@@ -55,6 +55,9 @@ export interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
   /** Absent hides "Reply", as in the guest view. */
   onReplyToResponse: ((response: ResponseContextRecord) => boolean) | undefined;
+  /** Absent hides a proposed plan's review and approve actions, as in the guest view. */
+  onReviewPlan: ((plan: ProposedPlan) => void) | undefined;
+  onApprovePlan: ((plan: ProposedPlan) => Promise<void> | void) | undefined;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;

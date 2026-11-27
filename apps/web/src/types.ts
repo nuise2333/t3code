@@ -96,6 +96,8 @@ export interface ProposedPlan {
   readonly runId: RunId | null;
   readonly planMarkdown: string;
   readonly status: OrchestrationV2PlanArtifact["status"];
+  readonly revision?: number;
+  readonly previousPlanId?: PlanId;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

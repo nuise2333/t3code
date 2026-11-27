@@ -305,6 +305,7 @@ function baseSnapshot(
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     ...(iconUrl ? { iconUrl } : {}),
     continuation: { groupKey: input.continuationKey },
+    showInteractionModeToggle: true,
     ...(isQoderAcp(input.settings) ? QODER_PRESENTATION : {}),
     supportsTextGeneration: false,
     enabled: input.settings.enabled,

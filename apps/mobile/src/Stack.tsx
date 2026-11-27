@@ -61,6 +61,7 @@ import { GitCommitSheet } from "./features/threads/git/GitCommitSheet";
 import { GitConfirmSheet } from "./features/threads/git/GitConfirmSheet";
 import { GitOverviewSheet } from "./features/threads/git/GitOverviewSheet";
 import { ThreadPullRequestsSheet } from "./features/threads/ThreadPullRequestsSheet";
+import { PlanReviewScreen } from "./features/threads/planReview/PlanReviewScreen";
 import { ThreadAgentsSheet } from "./features/threads/ThreadAgentsSheet";
 import { ThreadBackgroundWorkSheet } from "./features/threads/ThreadBackgroundWorkSheet";
 import { ThreadQueueSheet } from "./features/threads/ThreadQueueControl";
@@ -664,6 +665,10 @@ const RootStackConfig = createWorkspaceStackNavigator({
       screen: ReviewCommentComposerSheet,
       linking: `${THREAD_LINKING_PREFIX}/review-comment`,
       options: sheetRoute({ detent: 0.55, android: "fullScreen" }),
+    }),
+    ThreadPlanReview: createNativeStackScreen({
+      screen: PlanReviewScreen,
+      options: sheetRoute({ detent: "full", android: "fullScreen" }),
     }),
     ThreadFiles: createNativeStackScreen({
       screen: ThreadFilesTreeScreen,

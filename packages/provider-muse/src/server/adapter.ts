@@ -28,10 +28,12 @@ import type { MuseSettings } from "../settings.ts";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
+import { T3_CODE_PLAN_MODE_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -316,8 +318,6 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       input: ProviderAdapter.ProviderAdapterV2OpenSessionInput,
     ) {
       if (!options.settings.enabled) return yield* protocolError("Muse Code is disabled");
-      if (input.runtimePolicy.interactionMode === "plan")
-        return yield* protocolError("Muse Code does not support dedicated Plan mode");
       const scope = yield* Effect.scope;
       // Native realpath also corrects filesystem case, which Muse validates.
       const requestedCwd = input.runtimePolicy.cwd ?? providerHost.paths.cwd;
@@ -348,6 +348,8 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       const commands = yield* Semaphore.make(1);
       const eventPermit = yield* Semaphore.make(1);
       let host: MuseSdkHost;
+      let hostScope: Scope.Closeable | undefined;
+      let readOnly = input.runtimePolicy.interactionMode === "plan";
       let hostEpoch = 0;
       let closed = false;
       let broken = false;
@@ -1309,7 +1311,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                 })),
               };
         // Muse does not propagate allowAll to workflow children; T3 answers for them.
-        const autoApprove = child && input.runtimePolicy.runtimeMode === "full-access";
+        const autoApprove = child && !readOnly && input.runtimePolicy.runtimeMode === "full-access";
         const entry: PendingRequest = {
           native,
           request: runtimeRequest,
@@ -1774,6 +1776,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       );
       const launchHost = Effect.fnUntraced(function* () {
         const epoch = ++hostEpoch;
+        if (hostScope !== undefined) yield* Scope.close(hostScope, Exit.void);
+        const nativeScope = yield* Scope.fork(scope, "sequential");
+        hostScope = nativeScope;
         const mcpSession = yield* mcpSessions.read(input.threadId);
         const environment = McpProviderSession.withAgentDeviceEnvironment(
           options.environment,
@@ -1790,10 +1795,13 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         const scopeUnit = launch.unit;
         const stopScope =
           scopeUnit === undefined ? Effect.void : yield* Effect.cached(agentScope.stop(scopeUnit));
-        yield* Scope.addFinalizer(scope, stopScope);
+        yield* Scope.addFinalizer(nativeScope, stopScope);
         const processExited = yield* Deferred.make<ProcessExit>();
         // Observe raw exit before acquisition: inherited stdout can also block startup cleanup.
-        yield* Deferred.await(processExited).pipe(Effect.andThen(stopScope), Effect.forkIn(scope));
+        yield* Deferred.await(processExited).pipe(
+          Effect.andThen(stopScope),
+          Effect.forkIn(nativeScope),
+        );
         const created = yield* Effect.acquireRelease(
           createMuseSdkHostEffect(
             {
@@ -1802,6 +1810,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               cwd,
               environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
+              ...(readOnly ? { readOnly: true, sessionLogging: true, sessionMcp: true } : {}),
               onProcessExit: (exit) => {
                 Deferred.doneUnsafe(processExited, Effect.succeed(exit));
               },
@@ -1819,7 +1828,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           ),
           (created) =>
             Effect.gen(function* () {
-              if (host === created) {
+              if (host === created && hostEpoch === epoch) {
                 closed = true;
                 hostEpoch++;
               }
@@ -1836,7 +1845,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               ).pipe(Effect.ignore);
             }),
           { interruptible: true },
-        ).pipe(Effect.provideService(Scope.Scope, scope));
+        ).pipe(Effect.provideService(Scope.Scope, nativeScope));
         host = created;
         created.connection.onNotification((notification) => {
           Queue.offerUnsafe(inbox, {
@@ -1880,7 +1889,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         void created.exited.then(reportExit);
         yield* Deferred.await(processExited).pipe(
           Effect.tap((exit) => Effect.sync(() => reportExit(exit))),
-          Effect.forkIn(scope),
+          Effect.forkIn(nativeScope),
         );
       });
       yield* Effect.addFinalizer(() =>
@@ -1911,12 +1920,35 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         }
         if (active)
           return yield* protocolError("Cannot change Muse sessions during an active turn");
-        const existing = args.existingProviderThread;
+        const existing =
+          args.existingProviderThread ??
+          (thread?.appThreadId === args.threadId ? thread : undefined);
         if (
           existing &&
           (existing.driver !== MUSE_PROVIDER || existing.providerInstanceId !== options.instanceId)
         )
           return yield* protocolError("Muse thread belongs to another provider instance");
+        const planning = args.runtimePolicy.interactionMode === "plan";
+        if (planning !== readOnly) {
+          yield* Effect.gen(function* () {
+            hostEpoch++;
+            wake = undefined;
+            yield* settleObservedChildren("cancelled");
+          }).pipe(eventPermit.withPermits(1));
+          readOnly = planning;
+          thread = undefined;
+          nativeSessionId = undefined;
+          yield* launchHost().pipe(
+            Effect.onExit((exit) =>
+              Exit.isFailure(exit)
+                ? Effect.sync(() => {
+                    broken = true;
+                    relaunchable = true;
+                  })
+                : Effect.void,
+            ),
+          );
+        }
         const requestedId = existing
           ? (existing.nativeThreadRef?.nativeId ?? undefined)
           : input.initialNativeThreadId;
@@ -1931,25 +1963,33 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         return yield* Effect.gen(function* () {
           nativeSessionId = requestedId ?? host.connection.mintCommandId();
           const mcpSession = yield* mcpSessions.read(args.threadId);
-          if (mcpSession && !host.initializeResult.grantedCapabilities.includes("sessionMcp"))
+          const supportsSessionMcp =
+            host.initializeResult.grantedCapabilities.includes("sessionMcp");
+          if (mcpSession && !supportsSessionMcp && !readOnly)
             return yield* protocolError(
               "Update Muse Code to a version that supports session MCP servers",
             );
-          const config = mcpSession
-            ? {
-                mcpServers: {
-                  // Muse's required default fails runs if T3 tools are unreachable; make them optional.
-                  "t3-code": {
-                    transport: "streamableHttp",
-                    mode: "optional",
-                    url: mcpSession.endpoint,
-                    headers: { Authorization: mcpSession.authorizationHeader },
+          const config =
+            mcpSession && supportsSessionMcp
+              ? {
+                  mcpServers: {
+                    // Muse's required default fails runs if T3 tools are unreachable; make them optional.
+                    "t3-code": {
+                      transport: "streamableHttp",
+                      mode: "optional",
+                      url: mcpSession.endpoint,
+                      headers: { Authorization: mcpSession.authorizationHeader },
+                    },
                   },
-                },
-              }
-            : undefined;
+                }
+              : undefined;
           const startModel = yield* resolveModel(args.modelSelection);
-          const permissionProfile = musePermissionProfile(args.runtimePolicy.runtimeMode);
+          const permissionProfile = musePermissionProfile(
+            readOnly ? "approval-required" : args.runtimePolicy.runtimeMode,
+          );
+          const approvalMode = readOnly
+            ? "denyUnmatched"
+            : museApprovalMode(args.runtimePolicy.runtimeMode);
           const result = yield* request(
             requestedId ? "session/resume" : "session/start",
             requestedId
@@ -1959,7 +1999,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                   ...(config ? { config } : {}),
                   ...(startModel ? { modelId: startModel } : {}),
                   providerId: "meta",
-                  approvalMode: museApprovalMode(args.runtimePolicy.runtimeMode),
+                  approvalMode,
                   permissionProfile,
                 },
           ).pipe(
@@ -1980,7 +2020,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             );
           if (requestedId)
             yield* request("session/setApprovalMode", {
-              mode: museApprovalMode(args.runtimePolicy.runtimeMode),
+              mode: approvalMode,
             });
           const createdAt = yield* DateTime.now;
           thread = existing
@@ -2038,7 +2078,11 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           resolveAttachmentPath: providerHost.resolveAttachmentPath,
           resolveExtractedTextPath: providerHost.resolveExtractedTextPath,
         });
-        if (text) parts.push({ type: "text", text });
+        if (text || readOnly)
+          parts.push({
+            type: "text",
+            text: readOnly ? `${T3_CODE_PLAN_MODE_INSTRUCTIONS}\n\n${text}` : text,
+          });
         for (const attachment of message.attachments)
           if (isProviderNativeImageAttachment(attachment)) {
             const path = providerHost.resolveAttachmentPath(attachment);
@@ -2084,10 +2128,16 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             detail: "Muse already has an active turn; queue through the orchestrator",
             reason: "previous_turn_active",
           });
-        if (turnInput.runtimePolicy.interactionMode === "plan")
-          return yield* protocolError("Muse does not support dedicated Plan mode");
         if (turnInput.runtimePolicy.runtimeMode !== input.runtimePolicy.runtimeMode)
           return yield* protocolError("Runtime policy changes require a fresh Muse host");
+        if ((turnInput.runtimePolicy.interactionMode === "plan") !== readOnly) {
+          yield* register({
+            threadId: turnInput.threadId,
+            modelSelection: turnInput.modelSelection,
+            runtimePolicy: turnInput.runtimePolicy,
+            existingProviderThread: turnInput.providerThread,
+          });
+        }
         const continuation =
           turnInput.message.createdBy === "agent" &&
           turnInput.message.creationSource === "provider";

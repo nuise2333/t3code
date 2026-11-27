@@ -40,7 +40,7 @@ import {
 const KIRO_DRIVER_KIND = ProviderDriverKind.make("kiro");
 const KIRO_PRESENTATION = {
   displayName: "Kiro",
-  showInteractionModeToggle: false,
+  showInteractionModeToggle: true,
   supportedRuntimeModes: KIRO_SUPPORTED_RUNTIME_MODES,
 } as const;
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({ optionDescriptors: [] });

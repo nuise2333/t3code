@@ -260,6 +260,8 @@ interface MessagesTimelineProps {
   onOpenModelPicker?: (() => void) | undefined;
   onInsertTextIntoComposer?: ((text: string) => boolean) | undefined;
   onReplyToResponse?: TimelineRowSharedState["onReplyToResponse"];
+  onReviewPlan?: TimelineRowSharedState["onReviewPlan"];
+  onApprovePlan?: TimelineRowSharedState["onApprovePlan"];
   isWorking: boolean;
   runlessWorkActive?: boolean;
   activeTurnStartedAt?: string | null;
@@ -396,6 +398,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onOpenModelPicker,
   onInsertTextIntoComposer,
   onReplyToResponse,
+  onReviewPlan,
+  onApprovePlan,
   isWorking,
   runlessWorkActive = false,
   activeTurnStartedAt = null,
@@ -1248,6 +1252,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onRespondToApproval,
     citationRequest: readyCitationRequest,
     onReplyToResponse,
+    onReviewPlan,
+    onApprovePlan,
     listRef,
     timestampFormat,
     routeThreadKey,

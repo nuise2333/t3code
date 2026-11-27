@@ -71,7 +71,14 @@ import {
   buildResponseLanguageInstructions,
   buildRuntimeInstructions,
 } from "@t3tools/provider-core/server/runtimeInstructions";
-import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
+import {
+  T3_CODE_PLAN_MODE_INSTRUCTIONS,
+  t3OrchestrationSystemPrompt,
+} from "@t3tools/provider-core/server/orchestrationInstructions";
+import {
+  OPENCODE_PLAN_READ_PERMISSIONS,
+  OPENCODE_PLAN_T3_MCP_READ_TOOLS,
+} from "../planPermissions.ts";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
 import { HTML_RENDER_TOOL_NAME } from "@t3tools/shared/htmlRender";
 import { htmlRenderFromToolItem } from "@t3tools/shared/toolOutput";
@@ -431,33 +438,64 @@ export const t3McpServerName = Effect.fn("t3McpServerName")(function* (threadId:
 });
 
 // Last match wins: deny all threads' T3 servers, then allow only this thread's.
-const mcpRules = (mcpServerName: string | null): ReadonlyArray<Rule> =>
+const mcpRules = (mcpServerName: string | null, planning: boolean): ReadonlyArray<Rule> =>
   mcpServerName === null
     ? []
     : [
-        { action: "t3-code-*", resource: "*", effect: "deny" },
-        { action: `${mcpServerName}_*`, resource: "*", effect: "allow" },
+        rule("t3-code-*", "deny"),
+        ...(planning
+          ? OPENCODE_PLAN_T3_MCP_READ_TOOLS.map((tool) => rule(`${mcpServerName}_${tool}`, "allow"))
+          : [rule(`${mcpServerName}_*`, "allow")]),
       ];
+
+const PLAN_EDIT_PATH = /^(?:[A-Za-z]:)?\/(?:[^*?]+\/)?\.opencode\/plan\/\*$/;
 
 const sessionRules = (
   policy: RulesPolicy,
   paths: ReadonlyArray<Rule>,
   grants: ReadonlyArray<Rule>,
   mcpServerName: string | null,
-): ReadonlyArray<Rule> => [
-  ...(policy.runtimeMode === "full-access"
-    ? [rule("*", "allow")]
-    : [
-        rule("shell", "ask"),
-        rule("edit", policy.runtimeMode === "auto-accept-edits" ? "allow" : "ask"),
-        rule("external_directory", "ask"),
-      ]),
-  ...grants,
-  // Plan edits are re-allowed only for plan paths; free-tier sessions refuse denied shell/read.
-  ...(policy.interactionMode === "plan" ? [rule("edit", "deny")] : []),
-  ...paths,
-  ...mcpRules(mcpServerName),
-];
+): ReadonlyArray<Rule> => {
+  const fullAccess = policy.runtimeMode === "full-access";
+  if (policy.interactionMode === "plan") {
+    return [
+      rule("*", "deny"),
+      ...[
+        ...OPENCODE_PLAN_READ_PERMISSIONS,
+        "opencode_list_mcp_resources",
+        "opencode_read_mcp_resource",
+      ].map((action) => rule(action, "allow")),
+      ...(fullAccess
+        ? []
+        : [
+            { action: "read", resource: "*.env", effect: "ask" as const },
+            { action: "read", resource: "*.env.*", effect: "ask" as const },
+            { action: "read", resource: "*.env.example", effect: "allow" as const },
+          ]),
+      rule("edit", "deny"),
+      rule("shell", "ask"),
+      rule("external_directory", fullAccess ? "allow" : "ask"),
+      ...paths.filter(
+        (entry) =>
+          entry.action === "external_directory" ||
+          PLAN_EDIT_PATH.test(entry.resource.replaceAll("\\", "/")),
+      ),
+      ...mcpRules(mcpServerName, true),
+    ];
+  }
+  return [
+    ...(fullAccess
+      ? [rule("*", "allow")]
+      : [
+          rule("shell", "ask"),
+          rule("edit", policy.runtimeMode === "auto-accept-edits" ? "allow" : "ask"),
+          rule("external_directory", "ask"),
+        ]),
+    ...grants,
+    ...paths,
+    ...mcpRules(mcpServerName, false),
+  ];
+};
 
 const sameRules = (left: ReadonlyArray<Rule> | undefined, right: ReadonlyArray<Rule>) =>
   left?.length === right.length &&
@@ -3908,10 +3946,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     yield* readModels(session.cwd);
 
     const agentRules = new Map<string, ReadonlyMap<string, ReadonlyArray<Rule>>>();
-    const pathsFor = Effect.fnUntraced(function* (
-      directory: string,
-      agents: ReadonlyArray<string>,
-    ) {
+    const pathsFor = Effect.fnUntraced(function* (directory: string, agent: string) {
       let known = agentRules.get(directory);
       if (known === undefined) {
         // A fresh server lists no agents for its first moments, like its models.
@@ -3936,10 +3971,8 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         agentRules.set(directory, known);
       }
       const paths = new Map<string, Rule>();
-      for (const agent of agents) {
-        for (const entry of known.get(agent) ?? []) {
-          paths.set(`${entry.action}\u0000${entry.resource}`, entry);
-        }
+      for (const entry of known.get(agent) ?? []) {
+        paths.set(`${entry.action}\u0000${entry.resource}`, entry);
       }
       return [...paths.values()];
     });
@@ -3953,7 +3986,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       const paths =
         policy.runtimeMode === "full-access" && !plan
           ? []
-          : yield* pathsFor(thread.directory, plan ? [thread.agent, "plan"] : [thread.agent]);
+          : yield* pathsFor(thread.directory, plan ? "plan" : thread.agent);
       return sessionRules(
         policy,
         paths,
@@ -4284,6 +4317,9 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       }
       const responseLanguage = yield* readResponseLanguage;
       const instructions = [
+        turnInput.runtimePolicy.interactionMode === "plan"
+          ? T3_CODE_PLAN_MODE_INSTRUCTIONS
+          : undefined,
         buildRuntimeInstructions({
           harness: "OpenCode",
           model: turnInput.modelSelection.model,
@@ -4832,7 +4868,6 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                   }),
                 });
               }
-              // Switch to the plan agent before writing rules to retain its own path allows.
               const agent = agentFor(turnInput);
               if (agent !== state.agent) {
                 yield* client.session.switchAgent({

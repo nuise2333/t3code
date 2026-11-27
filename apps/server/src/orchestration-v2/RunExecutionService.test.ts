@@ -18,6 +18,8 @@ import {
   type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
   ProviderDriverKind,
+  PositiveInt,
+  ProjectId,
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
@@ -45,11 +47,16 @@ import * as TestClock from "effect/testing/TestClock";
 import { CodexAppServerRequestError } from "effect-codex-app-server/errors";
 import { SqlError, classifySqliteError } from "effect/sql/SqlError";
 
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { toPersistenceSqlError } from "../persistence/Errors.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import type { PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
+import * as EventStore from "./EventStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -4959,4 +4966,248 @@ it.effect("drops a child's held text once the child is handed to another run", (
 
     assert.deepEqual(yield* Ref.get(staleWrites), []);
   }),
+);
+
+it.effect(
+  "keeps assistant_message without promoting to proposed_plan in plan mode when emitsProposedPlan is true",
+  () =>
+    Effect.gen(function* () {
+      const key = "plan-emits-proposed-plan-true";
+      const ids = backgroundScenarioIds(key);
+      const now = DateTime.makeUnsafe("2026-07-21T12:00:00.000Z");
+      const providerInstanceId = ProviderInstanceId.make("codex");
+      const providerSessionId = ProviderSessionId.make(`session:${key}`);
+      const modelSelection = { instanceId: providerInstanceId, model: "gpt-5.4" };
+      const ingestionDone = yield* Deferred.make<void>();
+      const db = SqlitePersistence.layerMemory;
+      const stores = Layer.mergeAll(
+        EventStore.layer,
+        ProjectionStore.layer,
+        TurnItemPositionStore.layer,
+      ).pipe(Layer.provide(db));
+      const eventSink = EventSink.layer.pipe(Layer.provide(Layer.mergeAll(stores, db)));
+      const ingestor = ProviderEventIngestor.layer.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(
+            eventSink,
+            stores,
+            IdAllocator.layer,
+            ThreadCommandExecutor.layer,
+            Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+            Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+              getInstance: () => Effect.undefined,
+            }),
+          ),
+        ),
+      );
+      const layerPlanTest = Layer.mergeAll(
+        stores,
+        eventSink,
+        IdAllocator.layer,
+        RunExecutionService.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              McpAppModelContext.layerEmpty,
+              PreviewAgentActivity.layer,
+              Layer.mock(CheckpointService.CheckpointServiceV2)({
+                captureBaseline: () => Effect.void,
+              }),
+              stores,
+              eventSink,
+              IdAllocator.layer,
+              ThreadCommandExecutor.layer,
+              ingestor,
+              ServerSettings.layerTest(),
+            ),
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        const sink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const projectId = ProjectId.make(`project:${key}`);
+        yield* sink.write({
+          events: [
+            {
+              id: yield* idAllocator.allocate.event({ threadId: ids.threadId }),
+              type: "thread.created",
+              threadId: ids.threadId,
+              occurredAt: now,
+              payload: {
+                createdBy: "user",
+                creationSource: "web",
+                id: ids.threadId,
+                projectId,
+                title: "Plan emitsProposedPlan",
+                providerInstanceId,
+                modelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "plan",
+                branch: null,
+                worktreePath: null,
+                branchPullRequest: null,
+                activeOrderKey: null,
+                activeProviderThreadId: ids.providerThreadId,
+                lineage: {
+                  parentThreadId: null,
+                  relationshipToParent: null,
+                  rootThreadId: ids.threadId,
+                },
+                forkedFrom: null,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                settledOverride: null,
+                settledAt: null,
+                lastVisitedAt: null,
+                deletedAt: null,
+              },
+            },
+          ],
+        });
+        yield* runExecution.startRootRun({
+          commandId: CommandId.make(`command:${key}`),
+          appThread: {
+            ...rootAppThread(ids.threadId),
+            projectId,
+          },
+          providerSessionId,
+          session: {
+            providerSession: { capabilities: CodexProviderCapabilitiesV2 },
+            events: Stream.empty,
+            subscribeEvents: Effect.succeed({
+              events: Stream.make(
+                {
+                  type: "turn_item.updated",
+                  driver,
+                  turnItem: {
+                    id: TurnItemId.make(`turn-item:${key}:assistant`),
+                    threadId: ids.threadId,
+                    runId: ids.runId,
+                    nodeId: ids.rootNodeId,
+                    providerThreadId: ids.providerThreadId,
+                    providerTurnId: ids.rootProviderTurnId,
+                    ordinal: 1,
+                    nativeItemRef: null,
+                    parentItemId: null,
+                    title: null,
+                    status: "completed",
+                    startedAt: now,
+                    completedAt: now,
+                    updatedAt: now,
+                    type: "assistant_message",
+                    messageId: MessageId.make(`message:${key}:assistant`),
+                    text: "Which database should we target?",
+                    attachments: [],
+                    streaming: false,
+                  },
+                },
+                rootTerminalEvent(ids, "completed"),
+              ),
+              close: Deferred.succeed(ingestionDone, undefined),
+            }),
+            startTurn: () => Effect.void,
+          } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
+          run: {
+            id: ids.runId,
+            threadId: ids.threadId,
+            ordinal: PositiveInt.make(1),
+            providerInstanceId,
+            modelSelection,
+            providerThreadId: ids.providerThreadId,
+            userMessageId: MessageId.make(`message:${key}:user`),
+            rootNodeId: ids.rootNodeId,
+            activeAttemptId: ids.attemptId,
+            status: "running",
+            requestedAt: now,
+            startedAt: now,
+            completedAt: null,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+          rootNode: {
+            id: ids.rootNodeId,
+            threadId: ids.threadId,
+            runId: ids.runId,
+            parentNodeId: null,
+            rootNodeId: ids.rootNodeId,
+            kind: "root_turn",
+            status: "running",
+            countsForRun: true,
+            providerThreadId: ids.providerThreadId,
+            providerTurnId: ids.rootProviderTurnId,
+            nativeItemRef: null,
+            runtimeRequestId: null,
+            checkpointScopeId: null,
+            startedAt: now,
+            completedAt: null,
+          },
+          checkpointScope: {
+            id: CheckpointScopeId.make(`checkpoint-scope:${key}`),
+            worktreePath: null,
+          } as unknown as OrchestrationV2CheckpointScope,
+          providerThread: {
+            id: ids.providerThreadId,
+            driver,
+            providerInstanceId,
+            providerSessionId,
+            appThreadId: ids.threadId,
+            ownerNodeId: null,
+            nativeThreadRef: null,
+            nativeConversationHeadRef: null,
+            status: "active",
+            firstRunOrdinal: PositiveInt.make(1),
+            lastRunOrdinal: PositiveInt.make(1),
+            handoffIds: [],
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+          attempt: {
+            id: ids.attemptId,
+            runId: ids.runId,
+            attemptOrdinal: PositiveInt.make(1),
+            rootNodeId: ids.rootNodeId,
+            providerInstanceId,
+            providerThreadId: ids.providerThreadId,
+            providerTurnId: ids.rootProviderTurnId,
+            reason: "initial",
+            status: "running",
+            startedAt: now,
+            completedAt: null,
+          },
+          attemptId: ids.attemptId,
+          providerTurnOrdinal: 1,
+          message: {
+            messageId: MessageId.make(`message:${key}:user`),
+            text: "Plan the migration.",
+            attachments: [],
+            createdBy: "user",
+            creationSource: "web",
+          },
+          modelSelection,
+          runtimePolicy: {
+            runtimeMode: "full-access",
+            interactionMode: "plan",
+            cwd: process.cwd(),
+          },
+        });
+        yield* Deferred.await(ingestionDone);
+        const records = yield* projections.getThreadRecords(ids.threadId, ["turnItems", "plans"], {
+          turnItemRunId: ids.runId,
+        });
+        assert.isEmpty(records.plans);
+        assert.deepEqual(
+          records.turnItems.map((item) =>
+            item.type === "assistant_message"
+              ? { type: item.type, text: item.text }
+              : { type: item.type },
+          ),
+          [{ type: "assistant_message", text: "Which database should we target?" }],
+        );
+      }).pipe(Effect.provide(layerPlanTest));
+    }),
 );

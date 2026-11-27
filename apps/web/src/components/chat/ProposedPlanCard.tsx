@@ -1,4 +1,6 @@
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "@t3tools/shared/proposedPlanText";
+import { countPlanReviewNotes } from "@t3tools/client-runtime/planReview";
+import { useGT } from "gt-react";
 import { memo, useState, useId } from "react";
 import { findRevealRef } from "./markdownFindContext";
 import {
@@ -32,32 +34,50 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { Spinner } from "../ui/spinner";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { planReviewDraftKey, usePlanReviewDraftStore } from "~/planReviewDraftStore";
 import { projectEnvironment } from "~/state/projects";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useAtomCommand } from "~/state/use-atom-command";
+import type { ProposedPlan } from "~/types";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
-  planMarkdown,
+  plan,
   environmentId,
   threadRef,
   cwd,
   workspaceRoot,
   findActive = false,
+  onReview,
+  onApprove,
 }: {
-  planMarkdown: string;
+  plan: ProposedPlan;
   environmentId: EnvironmentId;
   threadRef?: ScopedThreadRef | undefined;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
   findActive?: boolean;
+  /** Absent where the reader cannot answer the plan, as in the guest view. */
+  onReview?: ((plan: ProposedPlan) => void) | undefined;
+  /** Resolves once the approval was sent or refused; opening the review instead returns at once. */
+  onApprove?: ((plan: ProposedPlan) => Promise<void> | void) | undefined;
 }) {
+  const gt = useGT();
+  const { planMarkdown } = plan;
   const [expanded, setExpanded] = useState(false);
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [lastSavePath, setLastSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
+  const [approving, setApproving] = useState(false);
+  // Only the count is read, so writing a note in the review does not re-render the card per key.
+  const noteCount = usePlanReviewDraftStore((state) => {
+    if (!threadRef || plan.status !== "active") return 0;
+    const draft = state.drafts[planReviewDraftKey(threadRef, plan.id)];
+    return draft ? countPlanReviewNotes(draft) : 0;
+  });
   const writeProjectFile = useAtomCommand(projectEnvironment.writeFile, {
     reportFailure: false,
   });
@@ -67,13 +87,14 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not copy plan",
-          description: error instanceof Error ? error.message : "An error occurred while copying.",
+          title: gt("Could not copy plan"),
+          description:
+            error instanceof Error ? error.message : gt("An error occurred while copying."),
         }),
       );
     },
   });
-  const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
+  const title = proposedPlanTitle(planMarkdown) ?? gt("Proposed plan");
   const lineCount = planMarkdown.split("\n").length;
   const canCollapse = planMarkdown.length > 900 || lineCount > 20;
   const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
@@ -101,8 +122,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Workspace path is unavailable",
-          description: "This thread does not have a workspace path to save into.",
+          title: gt("Workspace path is unavailable"),
+          description: gt("This thread does not have a workspace path to save into."),
         }),
       );
       return;
@@ -118,7 +139,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     if (!relativePath) {
       toastManager.add({
         type: "warning",
-        title: "Enter a workspace path",
+        title: gt("Enter a workspace path"),
       });
       return;
     }
@@ -139,7 +160,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         setIsSaveDialogOpen(false);
         toastManager.add({
           type: "success",
-          title: "Plan saved to workspace",
+          title: gt("Plan saved to workspace"),
           description: result.value.relativePath,
         });
         return;
@@ -149,8 +170,9 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not save plan",
-            description: error instanceof Error ? error.message : "An error occurred while saving.",
+            title: gt("Could not save plan"),
+            description:
+              error instanceof Error ? error.message : gt("An error occurred while saving."),
           }),
         );
       }
@@ -161,31 +183,68 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     <div className="rounded-2xl border border-border/80 bg-card/70 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Badge variant="secondary">Plan</Badge>
-          {}
+          <Badge variant="secondary">{gt("Plan")}</Badge>
+          {plan.revision !== undefined && plan.revision > 1 ? (
+            <Badge variant="outline">
+              {gt("Revision {revision}", { revision: plan.revision })}
+            </Badge>
+          ) : null}
+          {plan.status === "completed" ? (
+            <Badge variant="success">{gt("Approved")}</Badge>
+          ) : plan.status === "superseded" ? (
+            <Badge variant="outline">{gt("Replaced by a newer revision")}</Badge>
+          ) : null}
           <h3 data-thread-find-text="true" className="truncate text-sm font-medium text-foreground">
             {title}
           </h3>
         </div>
-        <Menu>
-          <MenuTrigger
-            render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
-          >
-            <EllipsisIcon aria-hidden="true" className="size-4" />
-          </MenuTrigger>
-          <MenuPopup align="end">
-            <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
-            </MenuItem>
-            <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-            <MenuItem
-              onClick={openSaveDialog}
-              disabled={!canWriteFiles || !workspaceRoot || isSavingToWorkspace}
+        <div className="flex items-center gap-2">
+          {plan.status === "active" && onReview && onApprove ? (
+            <>
+              <Button
+                size="xs"
+                // Notes written earlier are waiting in the review, so that is the way forward.
+                variant={noteCount > 0 ? "default" : "outline"}
+                onClick={() => onReview(plan)}
+              >
+                {noteCount > 0 ? gt("Review ({count})", { count: noteCount }) : gt("Review")}
+              </Button>
+              <Button
+                size="xs"
+                variant={noteCount > 0 ? "outline" : "default"}
+                disabled={approving}
+                aria-busy={approving}
+                onClick={async () => {
+                  setApproving(true);
+                  await onApprove(plan);
+                  setApproving(false);
+                }}
+              >
+                {approving ? <Spinner aria-hidden="true" /> : null}
+                {gt("Approve and implement")}
+              </Button>
+            </>
+          ) : null}
+          <Menu>
+            <MenuTrigger
+              render={<Button aria-label={gt("Plan actions")} size="icon-xs" variant="outline" />}
             >
-              Save to workspace
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
+              <EllipsisIcon aria-hidden="true" className="size-4" />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              <MenuItem onClick={handleCopyPlan}>
+                {isCopied ? gt("Copied!") : gt("Copy to clipboard")}
+              </MenuItem>
+              <MenuItem onClick={handleDownload}>{gt("Download as markdown")}</MenuItem>
+              <MenuItem
+                onClick={openSaveDialog}
+                disabled={!canWriteFiles || !workspaceRoot || isSavingToWorkspace}
+              >
+                {gt("Save to workspace")}
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        </div>
       </div>
       <div className="mt-4">
         <div
@@ -225,7 +284,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
             >
-              {expanded ? "Collapse plan" : "Expand plan"}
+              {expanded ? gt("Collapse plan") : gt("Expand plan")}
             </Button>
           </div>
         ) : null}
@@ -272,19 +331,21 @@ function SavePlanToWorkspaceForm({
   onCancel: () => void;
   onSave: (path: string) => void;
 }) {
+  const gt = useGT();
   const [savePath, setSavePath] = useState(initialPath);
   const savePathInputId = useId();
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Save plan to workspace</DialogTitle>
+        <DialogTitle>{gt("Save plan to workspace")}</DialogTitle>
         <DialogDescription>
-          Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
+          {gt("Enter a path relative to the workspace root:")}{" "}
+          <code>{workspaceRoot ?? gt("the workspace")}</code>
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
         <label htmlFor={savePathInputId} className="grid gap-1.5">
-          <span className="text-xs font-medium text-foreground">Workspace path</span>
+          <span className="text-xs font-medium text-foreground">{gt("Workspace path")}</span>
           <Input
             id={savePathInputId}
             value={savePath}
@@ -297,10 +358,10 @@ function SavePlanToWorkspaceForm({
       </DialogPanel>
       <DialogFooter>
         <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
-          Cancel
+          {gt("Cancel")}
         </Button>
         <Button size="sm" onClick={() => onSave(savePath)} disabled={!canWriteFiles || saving}>
-          {saving ? "Saving..." : "Save"}
+          {saving ? gt("Saving...") : gt("Save")}
         </Button>
       </DialogFooter>
     </>

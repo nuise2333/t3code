@@ -1,11 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import type { RuntimeMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 export interface AcpRuntimePolicy {
   readonly runtimeMode: RuntimeMode;
+  readonly interactionMode?: ProviderInteractionMode;
   readonly cwd: string | null;
   readonly approvalPolicy?: unknown;
   readonly sandboxPolicy?: unknown;
@@ -145,6 +146,12 @@ function acpOperationDisposition(
   operation: AcpPolicyOperation,
 ): AcpPermissionDisposition {
   const toolKind = operation.kind ?? "other";
+  if (
+    runtimePolicy.interactionMode === "plan" &&
+    (isAcpMutationKind(toolKind) || toolKind === "execute" || toolKind === "switch_mode")
+  ) {
+    return "deny";
+  }
   if (isAcpReadKind(toolKind)) {
     return acpReadDisposition(runtimePolicy);
   }

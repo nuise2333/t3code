@@ -6,6 +6,7 @@ import {
   CommandId,
   EnvironmentId,
   MessageId,
+  PlanId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -768,6 +769,31 @@ describe("thread outbox recovery rollback", () => {
     expect(
       appAtomRegistry.get(threadComposerErrorsAtom)[`${message.environmentId}:${message.threadId}`],
     ).toEqual({ message: "rejected", messageId: message.messageId });
+  });
+
+  it("drops a rejected plan approval instead of drafting it without its plan", async () => {
+    const message: QueuedThreadMessage = {
+      ...queuedMessage({
+        messageId: "message-approval",
+        text: "PLEASE IMPLEMENT THIS PLAN:\n# Plan",
+      }),
+      interactionMode: "default",
+      sourceProposedPlan: { threadId: ThreadId.make("thread-1"), planId: PlanId.make("plan-1") },
+    };
+    const threadKey = `${message.environmentId}:${message.threadId}`;
+    await harness.manager.enqueue(message);
+
+    await expect(restoreRejectedQueuedMessage(message, "Model unavailable.")).resolves.toBe(
+      "restored",
+    );
+
+    // Resent from the composer it would implement the plan while its card could still approve it.
+    expect(composerDrafts.getComposerDraftSnapshot(threadKey).text).toBe("");
+    expect(remainingMessages()).toEqual([]);
+    expect(appAtomRegistry.get(threadComposerErrorsAtom)[threadKey]).toEqual({
+      message: "The plan was not approved. Model unavailable.",
+      messageId: message.messageId,
+    });
   });
 
   it("leaves no error when the restored text is resent before recovery finishes", async () => {

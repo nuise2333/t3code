@@ -33,6 +33,7 @@ import type {
   ThreadContextRecord,
   EnvironmentContextRecord,
   ResolvedKeybindingsConfig,
+  ProviderInteractionMode,
   RuntimeMode,
   RuntimeRequestId,
   ScopedThreadRef,
@@ -327,6 +328,8 @@ export interface ChatComposerHandle {
   isModelPickerOpen: () => boolean;
   isCaretAtStart: () => boolean;
   compactContext: () => void;
+  /** Resolves false where the selected provider has no plan mode. */
+  togglePlanMode: () => boolean;
   readSnapshot: () => {
     value: string;
     cursor: number;
@@ -492,6 +495,11 @@ export interface ChatComposerProps {
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
+  /** The selected provider can run plan mode. */
+  planModeAvailable: boolean;
+  interactionMode: ProviderInteractionMode;
+  /** Resolves false where plan mode is unavailable. */
+  onToggleInteractionMode: () => boolean;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -582,6 +590,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onOpenProviderSetup,
     getModelDisabledReason,
     handleRuntimeModeChange,
+    planModeAvailable,
+    interactionMode,
+    onToggleInteractionMode,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -2380,6 +2391,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       submitComposer,
       promptSuggestion: offeredPromptSuggestion,
       dismissPromptSuggestion,
+      toggleInteractionMode: onToggleInteractionMode,
     })(key, event, isTaskItem);
 
   const {
@@ -2502,6 +2514,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       defaultRuntimeMode={props.defaultRuntimeMode}
       compatibleRuntimeModeOptions={compatibleRuntimeModeOptions}
       handleRuntimeModeChange={handleRuntimeModeChange}
+      planModeAvailable={planModeAvailable}
+      interactionMode={interactionMode}
+      onToggleInteractionMode={onToggleInteractionMode}
       composerControlsCollapsed={composerControlsCollapsed}
       effortDisplay={settings.effortDisplay}
       permissionsShownInStrip={props.permissionsShownInStrip}
@@ -3296,6 +3311,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         trigger.click();
       },
       compactContext: compactThreadContextStable,
+      togglePlanMode: onToggleInteractionMode,
       isModelPickerOpen: () => isComposerModelPickerOpen,
       isCaretAtStart: () => {
         const range = composerEditorRef.current?.readSelectionRange();
@@ -3461,6 +3477,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedProvider,
       selectedProviderModels,
       compactThreadContextStable,
+      onToggleInteractionMode,
     ],
   );
 

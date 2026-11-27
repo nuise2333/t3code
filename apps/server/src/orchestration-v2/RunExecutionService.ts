@@ -681,6 +681,9 @@ export const layer: Layer.Layer<
         // Root turn snapshot written with the run when T3 ends the run itself.
         readonly abandonedProviderTurn?: OrchestrationV2ProviderTurn;
         readonly terminal: ProviderTerminalEvent;
+        readonly planCompletionEvents?: ReturnType<
+          ProviderEventIngestor.ProviderEventIngestorV2Shape["normalize"]
+        >;
         readonly completedAt?: DateTime.Utc;
         readonly failureItemPersisted: boolean;
         readonly refreshAfterTurn: Effect.Effect<void>;
@@ -809,6 +812,7 @@ export const layer: Layer.Layer<
                 ]
               : [],
           events: [
+            ...(input.planCompletionEvents ? yield* input.planCompletionEvents : []),
             ...cascadedSubagentEvents,
             ...(input.abandonedProviderTurn === undefined
               ? []
@@ -1083,6 +1087,14 @@ export const layer: Layer.Layer<
         const latestProviderThread = yield* Ref.make(input.providerThread);
         const latestRootProviderTurn = yield* Ref.make<OrchestrationV2ProviderTurn | null>(null);
         // Later root turns in one attempt are provider continuations, such as Codex goal turns.
+        let emittedProposal = false;
+        const needsPlanCompletion = (event: ProviderAdapter.ProviderAdapterV2Event) =>
+          event.type === "turn.terminal" &&
+          event.status === "completed" &&
+          input.runtimePolicy.interactionMode === "plan" &&
+          // Native planners end plan turns with questions too; only promote for the rest.
+          !input.session.providerSession.capabilities.planning.emitsProposedPlan &&
+          !emittedProposal;
         let firstRootProviderTurnId: ProviderTurnId | undefined;
         const analyticsContext = {
           runId: input.run.id,
@@ -1174,6 +1186,7 @@ export const layer: Layer.Layer<
           }
           const providerThread = yield* Ref.get(latestProviderThread);
           const openSubagents = yield* Ref.get(openRunOwnedSubagents);
+          const completedPlanMode = needsPlanCompletion(terminal);
           const writeTerminal = (settledTerminal: ProviderTerminalEvent) =>
             writeFinalRunEvents({
               run: input.run,
@@ -1204,10 +1217,25 @@ export const layer: Layer.Layer<
               openRunOwnedSubagents: openSubagents,
               openRunOwnedSubagentsTerminal: terminal,
               ...(abandonedProviderTurn === undefined ? {} : { abandonedProviderTurn }),
+              ...(completedPlanMode
+                ? {
+                    planCompletionEvents: providerEventIngestor.normalize({
+                      providerSessionId: input.providerSessionId,
+                      providerInstanceId: input.run.providerInstanceId,
+                      threadId: input.run.threadId,
+                      runId: input.run.id,
+                      nodeId: input.rootNode.id,
+                      event: terminal,
+                      interactionMode: "plan",
+                    }),
+                  }
+                : {}),
               terminal: settledTerminal,
               failureItemPersisted: settledTerminal.status === "failed",
               refreshAfterTurn,
             }).pipe(
+              (effect) =>
+                completedPlanMode ? threadCommands.withLock(input.run.threadId, effect) : effect,
               Effect.mapError(
                 (cause) => new RunExecutionIngestError({ runId: input.run.id, cause }),
               ),
@@ -1688,7 +1716,7 @@ export const layer: Layer.Layer<
                 Effect.forkIn(scope),
               );
             }
-          } else if (deliveredEvent) {
+          } else if (deliveredEvent && !needsPlanCompletion(event)) {
             storedEventCount = yield* ingestDelivered(event, deliveredEvent);
           } else if (
             event.type === "turn_item.updated" &&
@@ -1702,6 +1730,14 @@ export const layer: Layer.Layer<
               runId: event.turnItem.runId,
             });
             reservedHeldTurnItemIds.add(event.turnItem.id);
+          }
+          if (
+            event.type === "plan.updated" &&
+            event.plan.kind === "proposed_plan" &&
+            event.plan.threadId === input.run.threadId &&
+            event.plan.status !== "superseded"
+          ) {
+            emittedProposal = true;
           }
           if (event.type === "provider_thread.updated") {
             if (event.providerThread.id === input.providerThread.id && storedEventCount > 0) {

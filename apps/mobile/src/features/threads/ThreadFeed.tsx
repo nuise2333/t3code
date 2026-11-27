@@ -2262,6 +2262,7 @@ function renderFeedEntry(
               entry.pendingMessage &&
               !entry.acknowledged &&
               !entry.pendingMessage.creation &&
+              !entry.pendingMessage.sourceProposedPlan &&
               entry.pendingMessage.messageId !== props.dispatchingMessageId ? (
                 <Pressable
                   accessibilityRole="button"

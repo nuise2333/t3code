@@ -451,6 +451,7 @@ export interface AcpAdapterV2Flavor {
   readonly sessionModeForPolicy?: (
     policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
   ) => string | undefined;
+  readonly restartOnInteractionModeChange?: boolean;
   /**
    * Native select-option values to apply for a runtime policy (e.g. Kiro's
    * `autopilot`), set on every session configure. A value the session does
@@ -1410,8 +1411,15 @@ function completedAtForStatus(status: ProjectedToolStatus, now: DateTime.Utc): D
 
 // Copilot advertises URL ids such as `https://agentclientprotocol.com/protocol/session-modes#plan`.
 function isAcpPlanModeId(id: string): boolean {
-  const name = id.slice(id.lastIndexOf("#") + 1);
-  return name === "plan" || name === "architect";
+  const name = id.slice(id.lastIndexOf("#") + 1).toLowerCase();
+  return (
+    name === "plan" ||
+    name === "architect" ||
+    name === "planner" ||
+    name === "kiro_planner" ||
+    name === "read-only" ||
+    name === "readonly"
+  );
 }
 
 function selectPermissionOptionId(
@@ -2039,6 +2047,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const clientPolicyGrants = makeAcpClientPolicyGrants();
         let latestRuntimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy =
           input.runtimePolicy;
+        let launchedInteractionMode = input.runtimePolicy.interactionMode;
         const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
         const activeTurn = yield* Ref.make<ActiveAcpTurn | null>(null);
         // Keyed by the agent's steer id; an injection can arrive before its send returns.
@@ -2573,7 +2582,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         ): AcpAdapterV2RuntimeInput => {
           return {
             cwd: input.runtimePolicy.cwd ?? process.cwd(),
-            runtimePolicy: input.runtimePolicy,
+            runtimePolicy: latestRuntimePolicy,
             mcpServers: mcpContext.servers,
             acpMcpServers: mcpContext.acpServers,
             httpMcpServers: mcpContext.httpServers,
@@ -2820,7 +2829,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               runId: context.input.runId,
               nodeId,
               kind: "proposed_plan",
-              status: "completed",
+              status: "active",
               markdown,
             },
           });
@@ -6833,7 +6842,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             if (writeTextFile !== undefined) {
               yield* targetRuntime.handleWriteTextFile((request) =>
                 clientPolicyContext.pipe(
-                  Effect.flatMap(({ policy }) => writeTextFile(request, policy.cwd)),
+                  Effect.flatMap(({ policy }) =>
+                    policy.interactionMode === "plan"
+                      ? denyClientRequest("fs/write_text_file", "deny")
+                      : writeTextFile(request, policy.cwd),
+                  ),
                 ),
               );
             }
@@ -6887,7 +6900,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               const dispositionFor = (
                 policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
                 request: EffectAcpSchema.RequestPermissionRequest = params,
-              ) => (flavor.permissionDisposition ?? acpPermissionDisposition)(policy, request);
+              ) =>
+                policy.interactionMode === "plan" &&
+                acpPermissionDisposition(policy, request) === "deny"
+                  ? "deny"
+                  : (flavor.permissionDisposition ?? acpPermissionDisposition)(policy, request);
               if (followsAgentWorkState && dispositionFor(latestRuntimePolicy) === "ask") {
                 if (!(yield* awaitRequestTurn(handlerGeneration)))
                   return { outcome: { outcome: "cancelled" } } as const;
@@ -7313,6 +7330,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           commitSessionState: (
             replacement: AcpSessionRuntime.AcpSessionRuntimeStartResult,
           ) => Effect.Effect<void>,
+          resumeSessionId?: string,
         ) {
           const previousScope = runtimeScope;
           const previousGeneration = yield* Ref.get(runtimeCallbackGeneration);
@@ -7359,7 +7377,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   replacementGeneration,
                   replacementAgentRequests,
                   mcpContext,
-                  undefined,
+                  resumeSessionId,
                   handleCandidateTermination,
                 ),
               )
@@ -7795,6 +7813,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           }
           const modeState = yield* runtime.getModeState;
           if (
+            (runtimePolicy.interactionMode !== "plan" || policyMode === undefined) &&
             modeSelection !== undefined &&
             typeof modeSelection.value === "string" &&
             modeState?.availableModes.some((mode) => mode.id === modeSelection.value) === true &&
@@ -7847,6 +7866,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const nativeBuild = nativeBuildConfigurationBySessionId.get(startResult.sessionId);
             if (nativeBuild !== undefined) {
               if (
+                policyMode === undefined &&
+                modeSelection === undefined &&
                 nativeBuild.modeId !== undefined &&
                 effectiveModeState?.currentModeId !== nativeBuild.modeId &&
                 effectiveModeState?.availableModes.some(
@@ -8518,6 +8539,18 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const restartAfterInterrupt = yield* restartRuntimeAfterTeardownIfRequired(
               turnInput.threadId,
             );
+            if (
+              flavor.restartOnInteractionModeChange === true &&
+              launchedInteractionMode !== turnInput.runtimePolicy.interactionMode &&
+              !restartAfterInterrupt
+            ) {
+              yield* startReplacementAcpRuntime(
+                turnInput.threadId,
+                (candidate) => commitReplacementSession(turnInput.threadId, candidate),
+                requestedSessionId,
+              );
+            }
+            launchedInteractionMode = turnInput.runtimePolicy.interactionMode;
             const needsSessionActivation =
               (yield* Ref.get(activeSessionId)) !== requestedSessionId || restartAfterInterrupt;
             if (needsSessionActivation) {

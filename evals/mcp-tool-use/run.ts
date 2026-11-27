@@ -52,6 +52,7 @@ import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { buildCodexAdditionalContext } from "../../apps/server/src/provider/CodexDeveloperInstructions.ts";
 import { makeSideChatContext } from "../../apps/server/src/orchestration-v2/ContextHandoffService.ts";
 import { withInlineContext } from "../../apps/server/src/orchestration-v2/ContextHandoffDelivery.ts";
+import { t3AcpPromptWithInstructions } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { AttachmentToolkit } from "../../apps/server/src/mcp/toolkits/attachment/tools.ts";
 import { DeviceToolkit } from "../../apps/server/src/mcp/toolkits/device/tools.ts";
 import { EnvironmentToolkit } from "../../apps/server/src/mcp/toolkits/environment/tools.ts";
@@ -305,6 +306,7 @@ export const McpToolUseCase = Schema.Struct({
   privacy: Schema.optional(Schema.Literals(["commit-safe", "private"])),
   setup: Schema.Struct({
     role: Schema.Literals(["top", "delegated-child", "native-subagent"]),
+    interactionMode: Schema.optional(Schema.Literals(["default", "plan"])),
     /** Runs only on this harness, for cases whose right answer depends on it. */
     harness: Schema.optional(Schema.Literals(["claude", "codex"])),
     /** The Linked environments beta is on, so T3 lists its link tools. */
@@ -1098,8 +1100,19 @@ export const buildMessages = (sample: Sample) => {
     testCase.promptContext === undefined
       ? testCase.prompt
       : projectComposerContextForProvider({ text: testCase.prompt, ...testCase.promptContext });
-  const prompt =
+  const request =
     sideChatContext === undefined ? userText : withInlineContext(sideChatContext, userText);
+  const prompt =
+    testCase.setup.interactionMode === undefined
+      ? request
+      : t3AcpPromptWithInstructions({
+          prompt: request,
+          state: {
+            interactionMode: testCase.setup.interactionMode,
+            hasT3Mcp: false,
+            hasDeviceTools: false,
+          },
+        });
   const childPrompt = () => taskPrompt({ task: prompt, role: delegateRole });
   if (testCase.prompt !== "")
     push("user", text(role === "delegated-child" ? childPrompt() : prompt));

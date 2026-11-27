@@ -1,5 +1,8 @@
 // No T3 imports inside the string; resolve Pi and typebox from the user's Pi install.
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import {
+  T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+  T3_CODE_PLAN_MODE_INSTRUCTIONS,
+} from "@t3tools/provider-core/server/orchestrationInstructions";
 
 export const PI_T3_MCP_EXTENSION_FILENAME = "pi-t3-mcp-extension.ts";
 
@@ -9,6 +12,7 @@ export const T3_PI_RUNTIME_MODE_ENV = "T3_PI_RUNTIME_MODE";
 export const T3_PI_MCP_EXTENSION_PATH_ENV = "T3_PI_MCP_EXTENSION_PATH";
 export const PI_T3_SERVICE_TIER_COMMAND = "t3-service-tier";
 export const PI_T3_RESPONSE_LANGUAGE_COMMAND = "t3-response-language";
+export const PI_T3_INTERACTION_MODE_COMMAND = "t3-interaction-mode";
 
 // These tools trigger file-change approvals, bypassed by Auto-accept edits.
 export const PI_FILE_CHANGE_TOOLS = ["edit", "write"] as const;
@@ -25,8 +29,10 @@ const TOKEN_ENV = ${JSON.stringify(T3_MCP_BEARER_ENV)};
 const RUNTIME_MODE_ENV = ${JSON.stringify(T3_PI_RUNTIME_MODE_ENV)};
 const EXTENSION_PATH_ENV = ${JSON.stringify(T3_PI_MCP_EXTENSION_PATH_ENV)};
 const ORCHESTRATION_INSTRUCTIONS = ${JSON.stringify(T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim())};
+const PLAN_MODE_INSTRUCTIONS = ${JSON.stringify(T3_CODE_PLAN_MODE_INSTRUCTIONS)};
 const SERVICE_TIER_COMMAND = ${JSON.stringify(PI_T3_SERVICE_TIER_COMMAND)};
 const RESPONSE_LANGUAGE_COMMAND = ${JSON.stringify(PI_T3_RESPONSE_LANGUAGE_COMMAND)};
+const INTERACTION_MODE_COMMAND = ${JSON.stringify(PI_T3_INTERACTION_MODE_COMMAND)};
 const PROTOCOL = "2025-06-18";
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const FILE_CHANGE_TOOLS = new Set(${JSON.stringify(PI_FILE_CHANGE_TOOLS)});
@@ -253,18 +259,26 @@ function createMcpClient(endpoint: string, token: string) {
 }
 
 export default async function t3McpExtension(pi: ExtensionAPI) {
+  const endpoint = env(URL_ENV);
+  const token = env(TOKEN_ENV);
+  let planning = false;
   // RPC has no trust prompt, so Pi skips an untrusted folder's protected resources. Session
   // replacement reruns this factory without project_trust, and T3 drops notices outside a turn,
   // so check each session's first turn. An explicit --no-approve is deliberate and stays quiet.
   let projectTrustChecked = false;
-  pi.on("before_agent_start", (_event, ctx) => {
-    if (projectTrustChecked) return;
-    projectTrustChecked = true;
-    if (ctx.isProjectTrusted() || process.argv.some((arg) => arg === "--no-approve" || arg === "-na")) return;
-    ctx.ui.notify(
-      \`Pi did not load project settings, extensions, skills, prompts, MCP servers or system prompt files for \${ctx.cwd} because the folder is not trusted. To load them, run the configured Pi binary there with the same PI_CODING_AGENT_DIR (if set), trust the folder or its parent with /trust, then start a new thread in that same worktree. To trust every project, add --approve to Pi's launch arguments in T3 Code settings; to keep them off without this notice, add --no-approve.\`,
-      "warning",
-    );
+  pi.on("before_agent_start", (event, ctx) => {
+    if (!projectTrustChecked) {
+      projectTrustChecked = true;
+      if (!ctx.isProjectTrusted() && !process.argv.some((arg) => arg === "--no-approve" || arg === "-na")) {
+        ctx.ui.notify(
+          \`Pi did not load project settings, extensions, skills, prompts, MCP servers or system prompt files for \${ctx.cwd} because the folder is not trusted. To load them, run the configured Pi binary there with the same PI_CODING_AGENT_DIR (if set), trust the folder or its parent with /trust, then start a new thread in that same worktree. To trust every project, add --approve to Pi's launch arguments in T3 Code settings; to keep them off without this notice, add --no-approve.\`,
+          "warning",
+        );
+      }
+    }
+    if (planning && (endpoint === undefined || token === undefined)) {
+      return { systemPrompt: event.systemPrompt + "\\n\\n" + PLAN_MODE_INSTRUCTIONS };
+    }
   });
 
   // Keep skill chips in the request. Pi expands only one leading /skill:
@@ -315,6 +329,13 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     description: "Set the reply language instructions T3 Code adds to the system prompt",
     handler: async (args) => {
       responseLanguage = args.trim();
+    },
+  });
+
+  pi.registerCommand(INTERACTION_MODE_COMMAND, {
+    description: "Set the T3 Code interaction mode",
+    handler: async (args) => {
+      planning = args.trim() === "plan";
     },
   });
 
@@ -373,10 +394,11 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, ctx) => {
     const mode = runtimeMode();
-    if (mode === "full-access") return;
+    if (!planning && mode === "full-access") return;
     if ((event.toolName === "tool_search" ? hasBuiltinToolSearch() : READ_ONLY_TOOLS.has(event.toolName)) || isReadOnlyMcpTool(event.toolName)) {
       return;
     }
+    if (planning) return { block: true, reason: "T3 Code Plan mode only allows read-only tools." };
     if (mode === "auto-accept-edits" && FILE_CHANGE_TOOLS.has(event.toolName)) {
       return;
     }
@@ -390,8 +412,6 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     }
   });
 
-  const endpoint = env(URL_ENV);
-  const token = env(TOKEN_ENV);
   if (endpoint === undefined || token === undefined) {
     pi.on("session_start", async (_event, ctx) => {
       ctx.ui.notify(
@@ -508,9 +528,8 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // Keep guidance in the system prompt so leading slash commands still expand.
   pi.on("before_agent_start", (event, ctx) => {
     reconcileDiscovery(ctx);
-    const instructions = responseLanguage
-      ? ORCHESTRATION_INSTRUCTIONS + "\\n\\n" + responseLanguage
-      : ORCHESTRATION_INSTRUCTIONS;
+    const instructions = [ORCHESTRATION_INSTRUCTIONS, planning ? PLAN_MODE_INSTRUCTIONS : "", responseLanguage]
+      .filter(Boolean).join("\\n\\n");
     // Long threads drift from the system prompt, so the block also follows each prompt. Pi keeps it
     // as a hidden custom message, which T3's user/assistant readback skips.
     const reminder = responseLanguage

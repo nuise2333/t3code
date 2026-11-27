@@ -67,7 +67,8 @@ export const FX_SESSION_META = { fx: { profileMcpServers: true } };
 export function fxSessionModeForPolicy(
   policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
 ): "ask" | "auto" {
-  return policy.runtimeMode === "auto" &&
+  return policy.interactionMode !== "plan" &&
+    policy.runtimeMode === "auto" &&
     policy.approvalPolicy === undefined &&
     policy.sandboxPolicy === undefined
     ? "auto"
