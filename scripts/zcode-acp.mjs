@@ -1,7 +1,7 @@
 // Bridges ACP on stdio to ZCode's private `zcode app-server` protocol (launched by bin/zcode).
 // API key: ZCODE_ACP_API_KEY, ZCODE_ACP_TEMPLATE/BASE_URL/MODELS, else ZCode's provider_config.json.
 // Account login (`~/.zcode-t3/zcode login bigmodel`) runs ZCode's `--prompt` CLI, which owns the
-// sign-in: tools needing approval are denied and T3's MCP servers are not passed.
+// sign-in: tools run unasked or are denied per turn, and T3's MCP servers are not passed.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -242,10 +242,12 @@ function accountSelection(ref, preferredLevel) {
   };
 }
 
+const isCliSessionId = (id) => typeof id === "string" && /^\w[\w-]*$/.test(id);
+
 const accountSessionFile = (sessionId) =>
   NodePath.join(ACCOUNT_SESSIONS, `${encodeURIComponent(sessionId)}.json`);
 
-function saveAccountSession(session, mode = session.settings?.mode?.current) {
+function saveAccountSession(session, mode = session.nextMode ?? session.settings?.mode?.current) {
   const { providerId, modelId, level } = session.account;
   const file = accountSessionFile(session.id);
   const temp = `${file}.${NodeCrypto.randomUUID()}.tmp`;
@@ -279,17 +281,64 @@ function loadAccountSession(sessionId) {
   if (
     !isAccountProvider(saved?.providerId) ||
     typeof saved.modelId !== "string" ||
-    !(saved.cliSessionId === null || /^[\w-]+$/.test(saved.cliSessionId ?? ""))
+    !(saved.cliSessionId === null || isCliSessionId(saved.cliSessionId))
   ) {
     throw new RpcError(-32603, `The saved ZCode account session ${sessionId} is unreadable`);
   }
   return saved;
 }
 
+// The CLI cannot ask per tool, so the thread's access decides once per turn. `execute` is the kind
+// T3 allows on its own only with full access; edit-only and supervised threads ask the user.
+async function accountTurnMode(session) {
+  const current = () => accountMode(session.settings?.mode?.current ?? "plan");
+  const asked = session.modeRequests;
+  if (current() === "plan") return "plan";
+  let stop;
+  const stopped = new Promise((resolve) => {
+    stop = resolve;
+  });
+  session.stopAccount = stop;
+  let allowed = false;
+  try {
+    const result = await Promise.race([
+      stopped,
+      acpRequest("session/request_permission", {
+        sessionId: session.id,
+        toolCall: {
+          toolCallId: `zcode-turn-${NodeCrypto.randomUUID()}`,
+          title: "Let ZCode run every tool in this turn without asking",
+          kind: "execute",
+          status: "pending",
+        },
+        options: [
+          { optionId: "allow", name: "Allow this turn", kind: "allow_once" },
+          { optionId: "deny", name: "Keep denying tools that need approval", kind: "reject_once" },
+        ],
+      }),
+    ]);
+    allowed = result?.outcome?.outcome === "selected" && result.outcome.optionId === "allow";
+  } catch (error) {
+    log("turn permission failed", error.message);
+  } finally {
+    session.stopAccount = null;
+  }
+  // A mode change the user made meanwhile outranks the answer; `build` denies every side effect.
+  let change;
+  do {
+    change = session.configChange;
+    await change;
+  } while (change !== session.configChange);
+  if (current() === "plan") return "plan";
+  return allowed && session.modeRequests === asked ? "yolo" : "build";
+}
+
 async function accountPrompt(session, text) {
   if (Buffer.byteLength(text) > ACCOUNT_MAX_PROMPT_BYTES) {
     throw new RpcError(-32602, "This message is too long for ZCode account login");
   }
+  const mode = await accountTurnMode(session);
+  if (session.cancelRequested) return { stopReason: "cancelled" };
   const { providerId, modelId, level } = session.account;
   // Locked and on disk before the CLI starts: from here on this conversation is the account's.
   saveAccountSession(session);
@@ -329,7 +378,7 @@ async function accountPrompt(session, text) {
     // The CLI runs a leading slash as its own command (`/logout`); a message never is one.
     `--prompt=${text.trimStart().startsWith("/") ? `Message: ${text}` : text}`,
     "--mode",
-    accountMode(session.settings?.mode?.current ?? "plan"),
+    mode,
     "--output-format",
     "stream-json",
     ...(session.cliSessionId ? ["--resume", session.cliSessionId] : []),
@@ -359,7 +408,7 @@ async function accountPrompt(session, text) {
         stderr = (stderr + d).slice(-2000);
       });
       lineReader(child.stdout, (event) => {
-        if (!event.sessionId || saveFailure) return;
+        if (!isCliSessionId(event.sessionId) || saveFailure) return;
         if (!session.cliSessionId) {
           session.cliSessionId = event.sessionId;
           try {
@@ -914,6 +963,8 @@ async function openSession(sessionId, cwd, mcpServers, resume) {
     account: null, // { providerId, modelId, level, levels } while on account login
     cliSessionId: null,
     configChange: Promise.resolve(),
+    modeRequests: 0, // Counted on arrival, so an approval from before any of them is void
+    nextMode: null, // A mode change in flight
     route: null, // "account" or "api" once a message was sent; their histories are separate
   };
   sessions.set(sessionId, session);
@@ -1024,6 +1075,7 @@ async function apiPrompt(session, params) {
 // One change at a time, and a prompt waits for them: a model switch spans several requests.
 function setConfigOption(params) {
   const session = requireSession(params.sessionId);
+  if (params.configId === "mode") session.modeRequests += 1;
   const change = session.configChange.then(() => applyConfigOption(session, params));
   session.configChange = change.catch(() => {});
   return change;
@@ -1081,11 +1133,15 @@ async function applyConfigOption(session, params) {
     const account = session.route === "account";
     const previous = session.settings?.mode?.current;
     if (account) saveAccountSession(session, value);
+    session.nextMode = value;
     try {
       await zcRequest("session/setMode", { sessionId: session.id, mode: value });
+      await refreshSettings(session);
     } catch (error) {
       if (account) saveAccountSession(session, previous);
       throw error;
+    } finally {
+      session.nextMode = null;
     }
   } else {
     throw new RpcError(-32602, `Unknown config option ${params.configId}`);

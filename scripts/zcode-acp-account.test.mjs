@@ -19,7 +19,7 @@ if (args[1] === "app-server") {
     const { id, method, params } = JSON.parse(line);
     if (method === "session/setMode") settings.mode.current = params.mode;
     const reply = () => out({ id, result: method === "session/read" ? { settings } : {} });
-    if (method === "session/setModel") setTimeout(reply, 200);
+    if (method === "session/setModel" || method === "session/setMode") setTimeout(reply, 200);
     else reply();
   });
 } else {
@@ -126,6 +126,9 @@ function start(root, account, log) {
   cleanups.push(() => child.kill("SIGKILL"));
   const pending = new Map();
   const firstUpdate = Promise.withResolvers();
+  const asked = [];
+  let answer = "deny";
+  let onAsk = () => {};
   let nextId = 0;
   let buffer = "";
   child.stdout.on("data", (chunk) => {
@@ -134,7 +137,14 @@ function start(root, account, log) {
     buffer = lines.pop();
     for (const line of lines) {
       const message = JSON.parse(line);
-      if (message.method === "session/update") firstUpdate.resolve();
+      if (message.method === "session/request_permission") {
+        asked.push(message.params);
+        onAsk(message);
+        const optionId = answer;
+        if (optionId !== "wait") {
+          write({ id: message.id, result: { outcome: { outcome: "selected", optionId } } });
+        }
+      } else if (message.method === "session/update") firstUpdate.resolve();
       else pending.get(message.id)?.(message);
     }
   });
@@ -152,6 +162,12 @@ function start(root, account, log) {
     call,
     set,
     firstUpdate: firstUpdate.promise,
+    asked,
+    reply: (id, optionId) => write({ id, result: { outcome: { outcome: "selected", optionId } } }),
+    answerWith: (optionId, listener = () => {}) => {
+      answer = optionId;
+      onAsk = listener;
+    },
     cancel: (sessionId) => write({ method: "session/cancel", params: { sessionId } }),
     create: async () => (await call("session/new", { cwd: root, mcpServers: [] })).result.sessionId,
     load: (sessionId) => call("session/load", { sessionId, cwd: root, mcpServers: [] }),
@@ -209,6 +225,7 @@ describe("ZCode account login", () => {
     const id = await bridge.create();
     await bridge.set(id, "model", ACCOUNT);
     await bridge.set(id, "mode", "yolo");
+    bridge.answerWith("allow");
     await bridge.prompt(id, "one");
     await bridge.set(id, "mode", "plan");
     await bridge.stop();
@@ -244,6 +261,113 @@ describe("ZCode account login", () => {
     expect((await bridge.prompt(id, "one")).error.message).toContain("Could not save");
     expect(env.runs()).toEqual([]);
     expect(await bridge.create()).toBeDefined();
+  });
+
+  it("asks once per turn, runs unasked only when allowed and asks again next turn", async () => {
+    const env = setup();
+    const bridge = env.start();
+    const id = await bridge.create();
+    await bridge.set(id, "model", ACCOUNT);
+    bridge.answerWith("allow");
+    await bridge.prompt(id, "one");
+    bridge.answerWith("deny");
+    await bridge.prompt(id, "two");
+    bridge.answerWith("unknown");
+    await bridge.prompt(id, "three");
+    expect(env.runs().map(modeOf)).toEqual(["yolo", "build", "build"]);
+    expect(bridge.asked.map((request) => request.toolCall.kind)).toEqual(Array(3).fill("execute"));
+    expect(bridge.asked[0].options.map((option) => option.kind)).toEqual([
+      "allow_once",
+      "reject_once",
+    ]);
+  });
+
+  it("denies side effects in every mode when T3 says no", async () => {
+    const env = setup();
+    const bridge = env.start();
+    const id = await bridge.create();
+    await bridge.set(id, "model", ACCOUNT);
+    for (const mode of ["edit", "guarded", "auto", "yolo", "build"]) {
+      await bridge.set(id, "mode", mode);
+      await bridge.prompt(id, mode);
+    }
+    expect(env.runs().map(modeOf)).toEqual(Array(5).fill("build"));
+  });
+
+  it("lets a mode change in flight outrank a late approval, on disk too", async () => {
+    const env = setup();
+    const bridge = env.start();
+    const id = await bridge.create();
+    await bridge.set(id, "model", ACCOUNT);
+    const asked = Promise.withResolvers();
+    bridge.answerWith("wait", asked.resolve);
+    const turn = bridge.prompt(id, "one");
+    const request = await asked.promise;
+    const change = bridge.set(id, "mode", "plan");
+    bridge.reply(request.id, "allow");
+    await Promise.all([turn, change]);
+    expect(env.runs().map(modeOf)).toEqual(["plan"]);
+    const [file] = NodeFS.readdirSync(env.sessions);
+    const saved = JSON.parse(NodeFS.readFileSync(NodePath.join(env.sessions, file), "utf8"));
+    expect(saved.mode).toBe("plan");
+  });
+
+  it("voids an approval when several mode changes queue up around it", async () => {
+    const env = setup();
+    const bridge = env.start();
+    const id = await bridge.create();
+    await bridge.set(id, "model", ACCOUNT);
+    for (const last of ["plan", "build"]) {
+      await bridge.set(id, "mode", "auto");
+      const asked = Promise.withResolvers();
+      bridge.answerWith("wait", asked.resolve);
+      const turn = bridge.prompt(id, "one");
+      const request = await asked.promise;
+      const first = bridge.set(id, "mode", "build");
+      bridge.reply(request.id, "allow");
+      await bridge.call("authenticate", {}); // The bridge has handled the approval by now.
+      await Promise.all([first, bridge.set(id, "mode", last), turn]);
+    }
+    expect(env.runs().map(modeOf)).toEqual(["plan", "build"]);
+  });
+
+  it("saves a mode change made while the first turn runs", async () => {
+    const env = setup();
+    const bridge = env.start();
+    const id = await bridge.create();
+    await bridge.set(id, "model", ACCOUNT);
+    const turn = bridge.prompt(id, "slow");
+    await Promise.all([turn, bridge.set(id, "mode", "plan")]);
+    const [file] = NodeFS.readdirSync(env.sessions);
+    const saved = JSON.parse(NodeFS.readFileSync(NodePath.join(env.sessions, file), "utf8"));
+    expect(saved).toMatchObject({ mode: "plan", cliSessionId: "cli_1" });
+  });
+
+  it("never asks in plan mode and keeps plan chosen while the user decides", async () => {
+    const env = setup();
+    const bridge = env.start();
+    const id = await bridge.create();
+    await bridge.set(id, "model", ACCOUNT);
+    const asked = Promise.withResolvers();
+    bridge.answerWith("wait", asked.resolve);
+    const turn = bridge.prompt(id, "one");
+    const request = await asked.promise;
+    await bridge.set(id, "mode", "plan");
+    bridge.reply(request.id, "allow");
+    await turn;
+    await bridge.prompt(id, "two");
+    expect(bridge.asked.length).toBe(1);
+    expect(env.runs().map(modeOf)).toEqual(["plan", "plan"]);
+  });
+
+  it("cancels while waiting for the answer without starting ZCode", async () => {
+    const env = setup();
+    const bridge = env.start();
+    const id = await bridge.create();
+    await bridge.set(id, "model", ACCOUNT);
+    bridge.answerWith("wait", () => bridge.cancel(id));
+    expect((await bridge.prompt(id, "one")).result.stopReason).toBe("cancelled");
+    expect(env.runs()).toEqual([]);
   });
 
   it("lets a model switch in flight finish before the first message", async () => {
@@ -285,7 +409,7 @@ describe("ZCode account login", () => {
     for (const [name, cliSessionId] of [
       ["empty", ""],
       ["missing", undefined],
-      ["number", {}],
+      ["list", ["cli_1"]],
     ]) {
       NodeFS.writeFileSync(
         NodePath.join(env.sessions, `${name}.json`),
