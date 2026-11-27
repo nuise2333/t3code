@@ -49,6 +49,11 @@ export interface FileSaveConflict {
 }
 type ConflictListener = (conflict: FileSaveConflict | null) => void;
 
+/** A conflict kept outside the page, with the disk revision a resolution is written against. */
+export interface StoredFileSaveConflict extends FileSaveConflict {
+  readonly revision: string;
+}
+
 export interface FileSaveSessionDeps {
   readonly debounceMs: number;
   readonly canPersist: (target: FileSaveTarget) => boolean;
@@ -65,6 +70,11 @@ export interface FileSaveSessionDeps {
   readonly confirm: (target: FileSaveTarget, contents: string, revision?: string) => boolean;
   readonly readUnsaved: (target: FileSaveTarget) => string | null;
   readonly discardUnsaved: (target: FileSaveTarget) => void;
+  /** Keeps unsettled conflicts across reloads, keyed by `fileSaveKey`. */
+  readonly conflictStore: {
+    readonly read: (key: string) => StoredFileSaveConflict | null;
+    readonly write: (key: string, conflict: StoredFileSaveConflict | null) => void;
+  };
 }
 
 interface FileSaveSession {
@@ -94,11 +104,24 @@ export function createFileSaveSessions(deps: FileSaveSessionDeps) {
   const conflictListeners = new Map<string, Set<ConflictListener>>();
   const updateConflict = (session: FileSaveSession, conflict: FileSaveConflict | null) => {
     session.conflict = conflict;
+    deps.conflictStore.write(
+      fileSaveKey(session.target),
+      conflict ? { ...conflict, revision: session.base?.revision ?? "" } : null,
+    );
     for (const listener of conflictListeners.get(fileSaveKey(session.target)) ?? [])
       listener(conflict);
   };
 
   const recover = (session: FileSaveSession) => {
+    // A conflict left unsettled by an earlier page comes back with its draft, still unwritten.
+    const stored = session.conflict ? null : deps.conflictStore.read(fileSaveKey(session.target));
+    if (stored) {
+      session.base = { contents: stored.disk, revision: stored.revision };
+      updateConflict(session, { base: stored.base, disk: stored.disk, local: stored.local });
+      deps.publish(session.target, stored.local, session.base);
+      session.coordinator.change(stored.local);
+      return;
+    }
     if (session.conflict || !deps.canPersist(session.target)) return;
     const unsaved = deps.readUnsaved(session.target);
     if (unsaved !== null) {
@@ -289,6 +312,18 @@ function fileSaveKey({ environmentId, cwd, relativePath }: FileSaveTarget): stri
 }
 
 const isWriteConflict = Schema.is(ProjectWriteFileConflictError);
+const CONFLICT_STORAGE_PREFIX = "t3code:file-save-conflict:";
+const StoredConflictJson = Schema.fromJsonString(
+  Schema.Struct({
+    base: Schema.String,
+    disk: Schema.String,
+    local: Schema.String,
+    revision: Schema.String,
+  }),
+);
+const decodeStoredConflictOption = Schema.decodeOption(StoredConflictJson);
+const decodeStoredConflict = (raw: string): StoredFileSaveConflict | null =>
+  Option.getOrNull(decodeStoredConflictOption(raw));
 const isProjectWriteFileError = Schema.is(ProjectWriteFileError);
 const missingFileNotices = new Set<string>();
 
@@ -352,6 +387,25 @@ const fileSaveSessions = createFileSaveSessions({
     toastManager.add({ type: "warning", title: "Edits not saved", description }),
   confirm: ({ environmentId, cwd, relativePath }, contents, revision) =>
     confirmProjectFileQueryData(environmentId, cwd, relativePath, contents, revision),
+  conflictStore: {
+    read: (key) => {
+      try {
+        const raw = window.localStorage.getItem(CONFLICT_STORAGE_PREFIX + key);
+        return raw === null ? null : decodeStoredConflict(raw);
+      } catch {
+        return null;
+      }
+    },
+    write: (key, conflict) => {
+      try {
+        if (conflict)
+          window.localStorage.setItem(CONFLICT_STORAGE_PREFIX + key, JSON.stringify(conflict));
+        else window.localStorage.removeItem(CONFLICT_STORAGE_PREFIX + key);
+      } catch {
+        // Storage full or blocked: the conflict still lives in this page.
+      }
+    },
+  },
   readUnsaved: ({ environmentId, cwd, relativePath }) =>
     getUnsavedProjectFileQueryData(environmentId, cwd, relativePath)?.contents ?? null,
   discardUnsaved: ({ environmentId, cwd, relativePath }) =>

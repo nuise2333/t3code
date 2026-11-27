@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   createFileSaveSessions,
+  type StoredFileSaveConflict,
   type FileSaveSessionDeps,
   type FileSaveTarget,
 } from "./fileSaveSessions";
@@ -15,7 +16,7 @@ const target: FileSaveTarget = {
   relativePath: "file.txt",
 };
 
-function setup() {
+function setup(stored = new Map<string, StoredFileSaveConflict>()) {
   vi.useFakeTimers();
   const state = {
     writable: true,
@@ -46,6 +47,13 @@ function setup() {
     confirm,
     readUnsaved: () => state.unsaved,
     discardUnsaved,
+    conflictStore: {
+      read: (key) => stored.get(key) ?? null,
+      write: (key, conflict) => {
+        if (conflict) stored.set(key, conflict);
+        else stored.delete(key);
+      },
+    },
   });
   const writes = () => persist.mock.calls.map(([written, contents]) => [written, contents]);
   return {
@@ -58,6 +66,7 @@ function setup() {
     writes,
     reportConflict,
     publish,
+    stored,
     [Symbol.dispose]: () => vi.useRealTimers(),
   };
 }
@@ -374,4 +383,39 @@ it("retains the draft when the server cannot return mergeable text", async () =>
     target,
     "The file changed on disk since it was opened.",
   );
+});
+
+it("keeps an unsettled conflict's draft across a reload and settles it afterwards", async () => {
+  const stored = new Map<string, StoredFileSaveConflict>();
+  {
+    using h = setup(stored);
+    h.sessions.acquire(target, h.onPendingChange);
+    h.persist.mockResolvedValueOnce(diskConflict("disk"));
+    h.sessions.change(target, "local");
+    await vi.runAllTimersAsync();
+    h.sessions.change(target, "local, edited");
+  }
+  // A new page: fresh sessions over the same stored conflicts.
+  using h = setup(stored);
+  const listener = vi.fn();
+  h.sessions.subscribeConflict(target, listener);
+  h.sessions.acquire(target, h.onPendingChange);
+  expect(listener).toHaveBeenLastCalledWith({
+    base: "one\ntwo\nthree\n",
+    local: "local, edited",
+    disk: "disk",
+  });
+  // The editor opens on the draft, and nothing is written until the user picks a version.
+  expect(h.publish).toHaveBeenCalledWith(target, "local, edited", {
+    contents: "disk",
+    revision: "disk",
+  });
+  await vi.runAllTimersAsync();
+  expect(h.persist).not.toHaveBeenCalled();
+  expect(h.sessions.unsavedUnder(target.environmentId, ["/workspace"])).toEqual(["file.txt"]);
+
+  h.sessions.resolveConflict(target, "resolved");
+  await vi.runAllTimersAsync();
+  expect(h.persist.mock.calls).toEqual([[target, "resolved", "disk"]]);
+  expect(stored.size).toBe(0);
 });
