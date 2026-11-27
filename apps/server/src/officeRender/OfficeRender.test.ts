@@ -26,7 +26,7 @@ const makeSource = Effect.fn("OfficeRenderTest.makeSource")(function* (
   return yield* files.realPath(source);
 });
 
-it.effect("coalesces renders and invalidates the disk cache on source size or mtime changes", () =>
+it.effect("coalesces renders and renders again whenever the source is replaced or changed", () =>
   Effect.gen(function* () {
     let calls = 0;
     const renderer = yield* OfficeRender.make({
@@ -42,31 +42,36 @@ it.effect("coalesces renders and invalidates the disk cache on source size or mt
       budget: 6,
     });
     const file = yield* makeSource("sample.docx", "abc");
-    const initialTime = 1_650_000_000;
-    yield* Effect.promise(() => NodeFSP.utimes(file, initialTime, initialTime));
+    const pinnedTime = 1_650_000_000;
+    yield* Effect.promise(() => NodeFSP.utimes(file, pinnedTime, pinnedTime));
     const [first, duplicate] = yield* Effect.all(
       [renderer.renderPdf(file), renderer.renderPdf(file)],
       { concurrency: "unbounded" },
     );
     expect(duplicate).toBe(first);
+    expect(yield* renderer.renderPdf(file)).toBe(first);
     expect(calls).toBe(1);
-    const pinnedTime = 1_700_000_000;
-    yield* Effect.promise(() => NodeFSP.utimes(file, pinnedTime, pinnedTime));
+
+    // Another document moved over the path, with the same size and mtime, is not the cached one.
+    const replacement = `${file}.new`;
+    yield* Effect.promise(() =>
+      NodeFSP.writeFile(replacement, "xyz")
+        .then(() => NodeFSP.utimes(replacement, pinnedTime, pinnedTime))
+        .then(() => NodeFSP.rename(replacement, file)),
+    );
     const second = yield* renderer.renderPdf(file);
     expect(second).not.toBe(first);
+    expect(calls).toBe(2);
+
     yield* TestClock.setTime(2_000_000_000_000);
-    yield* Effect.promise(() => NodeFSP.utimes(second, pinnedTime, pinnedTime));
-    yield* Effect.promise(() => NodeFSP.utimes(file, initialTime, initialTime));
-    expect(yield* renderer.renderPdf(file)).toBe(first);
-    yield* Effect.promise(() =>
-      NodeFSP.writeFile(file, "abcd").then(() => NodeFSP.utimes(file, pinnedTime, pinnedTime)),
-    );
+    yield* Effect.promise(() => NodeFSP.writeFile(file, "abcd"));
     const third = yield* renderer.renderPdf(file);
     expect(third).not.toBe(second);
-    expect(yield* fsExists(second)).toBe(false);
-    expect(yield* fsExists(first)).toBe(true);
     expect(yield* renderer.renderPdf(file)).toBe(third);
     expect(calls).toBe(3);
+    // Three 3-byte PDFs over a 6-byte budget: the least recently used one is gone.
+    expect(yield* fsExists(first)).toBe(false);
+    expect(yield* fsExists(third)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 

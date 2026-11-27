@@ -19,10 +19,9 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
 
-import { decideIncomingContents } from "./fileMarkdownPublish";
+import { contentsOnClose, reconcileIncoming } from "./fileMarkdownPublish";
 import { FileMarkdownPreview, markdownFileBaseDir } from "./FileMarkdownPreview";
 import { changeFileSaveSession, type FileSaveTarget } from "./fileSaveSessions";
-import { mergeThreeWay } from "./markdownConflict";
 import { setProjectFileQueryData } from "./projectFilesQueryState";
 
 // Keystrokes are published after a pause, and at once on blur, page hide and unmount.
@@ -125,6 +124,7 @@ export function FileMarkdownEditor(props: {
     latest: contents,
     dirty: false,
     conflicted: false,
+    conflict: null as { readonly base: string; readonly disk: string } | null,
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
   });
   const saveTarget: FileSaveTarget = { environmentId, cwd, relativePath };
@@ -156,6 +156,7 @@ export function FileMarkdownEditor(props: {
   const settle = () => {
     setConflict(null);
     status.current.conflicted = false;
+    status.current.conflict = null;
   };
 
   const takeIn = (next: string) => {
@@ -167,25 +168,23 @@ export function FileMarkdownEditor(props: {
 
   const reconcile = useEffectEvent((contents: string) => {
     const current = status.current;
-    const decision = decideIncomingContents(contents, current);
-    if (decision === "ignore") return;
-    if (decision === "apply") {
-      takeIn(contents);
+    const outcome = reconcileIncoming(contents, current);
+    if (outcome.kind === "ignore") return;
+    if (outcome.kind === "apply") {
+      takeIn(outcome.text);
       return;
     }
-    // Written elsewhere while keystrokes wait: merge them, or show both when they overlap.
-    const merged = mergeThreeWay(current.published, current.latest, contents);
-    if (merged.conflicts === 0) {
-      current.published = contents;
-      takeIn(merged.merged);
-      current.latest = merged.merged;
-      current.dirty = merged.merged !== contents;
+    if (outcome.kind === "merged") {
+      takeIn(outcome.text);
+      current.published = outcome.published;
+      current.dirty = outcome.dirty;
       if (current.dirty) publish();
       return;
     }
     clearTimeout(current.timer);
     current.conflicted = true;
-    setConflict({ disk: contents, base: current.published });
+    current.conflict = { base: outcome.base, disk: outcome.disk };
+    setConflict(current.conflict);
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- new file contents from the panel (a save echo or a change elsewhere) are reconciled with keystrokes not yet published, which live in a ref outside React
   useLayoutEffect(() => {
@@ -198,6 +197,14 @@ export function FileMarkdownEditor(props: {
     window.addEventListener("pagehide", onPageHide);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
+      // An unsettled conflict is not dropped with the editor: both sides are saved, marked.
+      const current = status.current;
+      if (current.conflict) {
+        current.latest = contentsOnClose(current.latest, current.conflict);
+        current.published = current.conflict.disk;
+        current.dirty = true;
+        current.conflicted = false;
+      }
       publish();
     };
   }, []);
@@ -284,11 +291,11 @@ export function FileMarkdownEditor(props: {
           <Button
             size="xs"
             onClick={() => {
-              const merged = mergeThreeWay(conflict.base, status.current.latest, conflict.disk);
+              const merged = contentsOnClose(status.current.latest, conflict);
               settle();
-              takeIn(merged.merged);
+              takeIn(merged);
               status.current.published = conflict.disk;
-              status.current.latest = merged.merged;
+              status.current.latest = merged;
               status.current.dirty = true;
               publish();
             }}

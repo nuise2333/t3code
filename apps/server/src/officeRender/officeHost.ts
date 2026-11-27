@@ -127,7 +127,17 @@ export async function prepareProfile(profile: string, platform: NodeJS.Platform,
 
 export const cacheName = (filePath: string, file: OpenMediaFile) =>
   NodeCrypto.createHash("sha256")
-    .update(`${filePath}\0${file.info.size}\0${Number(file.info.mtimeNs) / 1e6}`)
+    // A file replaced in place can keep its size and mtime; its inode and ctime still change.
+    .update(
+      [
+        filePath,
+        file.info.dev,
+        file.info.ino,
+        file.info.size,
+        file.info.mtimeNs,
+        file.info.ctimeNs,
+      ].join("\0"),
+    )
     .digest("hex") + ".pdf";
 
 export function runSoffice(binary: string, args: string[]) {
